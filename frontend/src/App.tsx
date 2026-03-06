@@ -318,6 +318,24 @@ const ROOM_CONFIG: Record<RoomType, RoomConfig> = {
   }
 };
 
+const ROOM_NAME_EN: Record<RoomType, string> = {
+  entrance: "Main Spaceport",
+  carbone: "Carbon Refinery",
+  titane: "Titanium Factory",
+  osmium: "Osmium Compactor",
+  adamantium: "Adamantium Synchrotron",
+  magmatite: "Magmatite Collector",
+  neodyme: "Neodymium Extractor",
+  chronium: "Chronium Accelerator",
+  aetherium: "Aetherium Condenser",
+  isotope7: "Isotope-7 Centrifuge",
+  singulite: "Singulite Forge",
+  entrepot: "Orbital Warehouse"
+};
+
+const roomDisplayName = (type: RoomType, language: UILanguage): string =>
+  language === "en" ? ROOM_NAME_EN[type] ?? ROOM_CONFIG[type].name : ROOM_CONFIG[type].name;
+
 const ROOM_RESOURCE_BADGE_IMAGE: Partial<Record<RoomType, string>> = {
   carbone: "/room-images/icone-carbone.png",
   titane: "/room-images/icone-titane.png"
@@ -470,7 +488,7 @@ const HANGAR_UNIT_DEFS: HangarUnitDef[] = [
     id: "titanide",
     category: "ship",
     name: "Titanide",
-    description: "Cuirasse median specialise contre frÃ©gates/corvettes.",
+    description: "Cuirasse median specialise contre fregates/corvettes.",
     buildSeconds: 720,
     cost: { carbone: 60000, titane: 25000, osmium: 10000, adamantium: 1500 },
     force: 85,
@@ -483,7 +501,7 @@ const HANGAR_UNIT_DEFS: HangarUnitDef[] = [
     id: "colosse",
     category: "ship",
     name: "Colosse",
-    description: "Plateforme lourde de percÃ©e, immense endurance.",
+    description: "Plateforme lourde de percee, immense endurance.",
     buildSeconds: 1200,
     cost: { carbone: 120000, titane: 50000, osmium: 20000, adamantium: 3000 },
     force: 160,
@@ -676,6 +694,62 @@ const HANGAR_UNIT_DEFS: HangarUnitDef[] = [
     reload: "18 sec"
   }
 ];
+
+const HANGAR_UNIT_NAME_EN: Record<string, string> = {
+  eclaireur_stellaire: "Stellar Scout",
+  foudroyant: "Thunderbolt",
+  aurore: "Aurora",
+  spectre: "Specter",
+  tempest: "Tempest",
+  titanide: "Titanid",
+  colosse: "Colossus",
+  pegase: "Pegasus",
+  argo: "Argo",
+  arche_spatiale: "Space Ark",
+  projecteur_photonique: "Photon Projector",
+  lame_de_plasma: "Plasma Blade",
+  lanceur_orbitral: "Orbital Launcher",
+  champ_aegis: "Aegis Field",
+  tourelle_rafale: "Rafale Kinetic Turret",
+  batterie_eclat: "Shatter Flak Battery",
+  canon_ion_aiguillon: "Stinger ION Cannon",
+  mine_orbitale_veille: "Sentinel Orbital Mine",
+  canon_rail_longue_vue: "Long-View Rail Cannon",
+  projecteur_emp_silence: "Silence EMP Projector",
+  mur_photonique_prisme: "Prism Photonic Wall",
+  lance_gravitationnel_ancre: "Anchor Gravitational Lance"
+};
+
+const HANGAR_UNIT_DESCRIPTION_EN: Record<string, string> = {
+  eclaireur_stellaire: "Fast reconnaissance, ideal against unescorted transports.",
+  foudroyant: "Agile interceptor, excellent against scouts.",
+  aurore: "Fast strike corvette with long projection range.",
+  spectre: "Versatile assault ship, strong in medium engagements.",
+  tempest: "High-rate offensive frigate for heavy squadrons.",
+  titanide: "Midline armor ship specialized against frigates/corvettes.",
+  colosse: "Heavy breakthrough platform with massive endurance.",
+  pegase: "Light transport for rapid logistics.",
+  argo: "Medium transport for resource convoys.",
+  arche_spatiale: "Heavy cargo with very high capacity.",
+  projecteur_photonique: "High-precision anti-light turret.",
+  lame_de_plasma: "Mid-tier defense against assault squadrons.",
+  lanceur_orbitral: "Heavy orbital defense battery.",
+  champ_aegis: "Passive shield that increases defensive resilience.",
+  tourelle_rafale: "Anti-light escort and anti-swarm platform.",
+  batterie_eclat: "Defense specialized against fast squadrons.",
+  canon_ion_aiguillon: "Versatile platform against medium targets.",
+  mine_orbitale_veille: "High burst impact with slow cadence.",
+  canon_rail_longue_vue: "Long-range platform specialized against heavy units.",
+  projecteur_emp_silence: "Electronic control: slows enemy fleets.",
+  mur_photonique_prisme: "Massive passive anti-raid armor.",
+  lance_gravitationnel_ancre: "Endgame anti-capital defense platform."
+};
+
+const hangarUnitDisplayName = (unitId: string, fallback: string, language: UILanguage): string =>
+  language === "en" ? HANGAR_UNIT_NAME_EN[unitId] ?? fallback : fallback;
+
+const hangarUnitDisplayDescription = (unitId: string, fallback: string, language: UILanguage): string =>
+  language === "en" ? HANGAR_UNIT_DESCRIPTION_EN[unitId] ?? fallback : fallback;
 
 const HANGAR_SHIP_IMAGE_MAP: Record<string, string> = {
   eclaireur_stellaire: "/room-images/Eclaireur-Stellaire.png",
@@ -986,6 +1060,105 @@ const TECHNOLOGY_DEFS: TechnologyDef[] = [
   }
 ];
 
+const TECHNOLOGY_NAME_EN: Record<TechnologyId, string> = {
+  optimisation_extractive: "Extractive Optimization",
+  compression_minerale: "Mineral Compression",
+  raffinement_avance: "Advanced Refinement",
+  physique_quantique_appliquee: "Applied Quantum Physics",
+  automatisation_industrielle: "Industrial Automation",
+  optimisation_logistique: "Logistics Optimization",
+  propulsion_stellaire: "Stellar Propulsion",
+  moteurs_flux_neodyme: "Neodymium Flux Engines",
+  balistique_avancee: "Advanced Ballistics",
+  blindage_composite: "Composite Armor",
+  ciblage_predictif: "Predictive Targeting",
+  renforcement_orbital: "Orbital Reinforcement",
+  architecture_defensive: "Defensive Architecture",
+  amplification_photonique: "Photonic Amplification",
+  stabilisation_plasma: "Plasma Stabilization",
+  balistique_orbitale: "Orbital Ballistics",
+  controle_electromagnetique: "Electromagnetic Control",
+  generateur_aegis: "Aegis Generator",
+  doctrine_escarmouche: "Skirmish Doctrine",
+  doctrine_interception: "Interception Doctrine",
+  doctrine_domination: "Domination Doctrine",
+  architecture_capitale: "Capital Architecture",
+  maitrise_energie_quantique: "Quantum Energy Mastery",
+  stabilisation_singulite: "Singulite Stabilization",
+  commandement_escadre: "Squadron Command",
+  analyse_tactique: "Tactical Analysis",
+  ingenierie_modulaire: "Modular Engineering"
+};
+
+const TECHNOLOGY_DESCRIPTION_EN: Record<TechnologyId, string> = {
+  optimisation_extractive: "+3% Carbon & Titanium production per level",
+  compression_minerale: "+3% Osmium & Adamantium production per level",
+  raffinement_avance: "+4% Magmatite & Neodymium production per level",
+  physique_quantique_appliquee: "+4% Chronium/Aetherium/Isotope-7/Singulite production per level",
+  automatisation_industrielle: "-2% building cost per level",
+  optimisation_logistique: "-2% building construction time per level",
+  propulsion_stellaire: "+4% ship speed per level",
+  moteurs_flux_neodyme: "+2% speed and -2% quantum energy consumption per level",
+  balistique_avancee: "+3% ship force per level",
+  blindage_composite: "+3% ship endurance per level",
+  ciblage_predictif: "Reduces combat variance down to +/-4%",
+  renforcement_orbital: "+4% defense endurance per level",
+  architecture_defensive: "+2% defense endurance per level and prerequisite for advanced defenses",
+  amplification_photonique: "+4% Photon Projector damage per level",
+  stabilisation_plasma: "+5% Plasma Blade damage per level and unlocks Plasma Blade",
+  balistique_orbitale: "+4% Orbital Launcher damage per level and unlocks ballistic platforms",
+  controle_electromagnetique: "+4% EMP effect per level and unlocks Silence EMP Projector",
+  generateur_aegis: "+3% Aegis Field shield capacity per level and unlocks Aegis Field",
+  doctrine_escarmouche: "Unlocks Stellar Scout and Thunderbolt",
+  doctrine_interception: "Unlocks Aurora and Specter",
+  doctrine_domination: "Unlocks Tempest and Titanid",
+  architecture_capitale: "Unlocks Colossus and Space Ark",
+  maitrise_energie_quantique: "+5% Isotope-7 production and -2% fleet consumption per level",
+  stabilisation_singulite: "+5% Singulite production per level",
+  commandement_escadre: "+1 active fleet every 3 levels",
+  analyse_tactique: "+2% overall fleet efficiency per level",
+  ingenierie_modulaire: "+1 module slot every 5 levels"
+};
+
+const TECHNOLOGY_EFFECT_EN: Partial<Record<TechnologyId, string>> = {
+  optimisation_extractive: "+3% CAR/TIT",
+  compression_minerale: "+3% OSM/ADA",
+  raffinement_avance: "+4% MAG/NEO",
+  physique_quantique_appliquee: "+4% CHR/AET/ISO/SIN",
+  automatisation_industrielle: "-2% building cost",
+  optimisation_logistique: "-2% building time",
+  propulsion_stellaire: "+4% fleet speed",
+  moteurs_flux_neodyme: "+2% speed, -2% consumption",
+  balistique_avancee: "+3% fleet force",
+  blindage_composite: "+3% fleet endurance",
+  ciblage_predictif: "-0.3% variance (min +/-4%)",
+  renforcement_orbital: "+4% defense endurance",
+  architecture_defensive: "+2% defense endurance",
+  amplification_photonique: "+4% photon damage",
+  stabilisation_plasma: "+5% plasma damage",
+  balistique_orbitale: "+4% orbital launcher",
+  controle_electromagnetique: "+4% EMP effect",
+  generateur_aegis: "+3% aegis shield",
+  doctrine_escarmouche: "Light fleet unlock",
+  doctrine_interception: "Interceptor unlock",
+  doctrine_domination: "Heavy fleet unlock",
+  architecture_capitale: "Capital ships unlock",
+  maitrise_energie_quantique: "+5% ISO7, -2% consumption",
+  stabilisation_singulite: "+5% Singulite",
+  commandement_escadre: "+1 fleet / 3 levels",
+  analyse_tactique: "+2% efficiency",
+  ingenierie_modulaire: "+1 slot / 5 levels"
+};
+
+const technologyDisplayName = (techId: TechnologyId, fallback: string, language: UILanguage): string =>
+  language === "en" ? TECHNOLOGY_NAME_EN[techId] ?? fallback : fallback;
+
+const technologyDisplayDescription = (techId: TechnologyId, fallback: string, language: UILanguage): string =>
+  language === "en" ? TECHNOLOGY_DESCRIPTION_EN[techId] ?? fallback : fallback;
+
+const technologyDisplayEffect = (techId: TechnologyId, fallback: string | undefined, language: UILanguage): string | undefined =>
+  language === "en" ? (TECHNOLOGY_EFFECT_EN[techId] ?? fallback) : fallback;
+
 const defaultTechnologyLevels = (): Record<TechnologyId, number> => {
   const out = {} as Record<TechnologyId, number>;
   for (const def of TECHNOLOGY_DEFS) out[def.id] = 0;
@@ -1040,9 +1213,9 @@ const maxCraftableFromResources = (amounts: Record<string, number>, unitCost: Re
   return Number.isFinite(max) ? Math.max(0, Math.floor(max)) : 0;
 };
 
-const formatCostLabel = (cost: ResourceCost) =>
+const formatCostLabel = (cost: ResourceCost, language: UILanguage = "fr") =>
   (Object.keys(cost) as ResourceId[])
-    .map((k) => `${(cost[k] ?? 0).toLocaleString()} ${k}`)
+    .map((k) => `${(cost[k] ?? 0).toLocaleString()} ${resourceDisplayName(k, language)}`)
     .join(" + ");
 
 const resourceCostOrder = (cost: ResourceCost): ResourceId[] =>
@@ -1051,18 +1224,20 @@ const resourceCostOrder = (cost: ResourceCost): ResourceId[] =>
 function ResourceCostDisplay({
   cost,
   available,
+  language = "fr",
   compact = false,
   className = ""
 }: {
   cost: ResourceCost;
   available: Record<string, number>;
+  language?: UILanguage;
   compact?: boolean;
   className?: string;
 }) {
   const entries = resourceCostOrder(cost).map((resourceId) => {
     const amount = Math.ceil(Number(cost[resourceId] ?? 0));
     const hasEnough = Math.floor(Number(available[resourceId] ?? 0)) >= amount;
-    const name = RESOURCE_DEFS.find((r) => r.id === resourceId)?.name ?? resourceId;
+    const name = resourceDisplayName(resourceId, language);
     return { resourceId, amount, hasEnough, name };
   });
   if (entries.length === 0) return <span>-</span>;
@@ -1094,6 +1269,40 @@ const technologyCostForLevel = (tech: TechnologyDef, level: number): ResourceCos
 
 const technologyTimeForLevel = (tech: TechnologyDef, level: number): number =>
   Math.max(1, Math.ceil(tech.baseTimeSec * Math.pow(TECH_TIME_MULTIPLIER, Math.max(0, level - 1))));
+
+const SCORE_RESOURCE_WEIGHTS: Record<ResourceId, number> = {
+  carbone: 10,
+  titane: 63,
+  osmium: 203,
+  adamantium: 423,
+  magmatite: 518,
+  neodyme: 563,
+  chronium: 672,
+  aetherium: 774,
+  isotope7: 884,
+  singulite: 1000
+};
+
+const cumulativeTechResourceCost = (baseAmount: number, level: number) => {
+  const lvl = Math.max(0, Math.floor(level));
+  if (lvl <= 0 || baseAmount <= 0) return 0;
+  if (Math.abs(TECH_COST_MULTIPLIER - 1) < 1e-9) return baseAmount * lvl;
+  return baseAmount * ((Math.pow(TECH_COST_MULTIPLIER, lvl) - 1) / (TECH_COST_MULTIPLIER - 1));
+};
+
+const computeResearchInvestmentPoints = (levels: Record<TechnologyId, number>): number => {
+  let total = 0;
+  for (const tech of TECHNOLOGY_DEFS) {
+    const level = Math.max(0, Math.floor(Number(levels[tech.id] ?? 0)));
+    if (level <= 0) continue;
+    for (const key of Object.keys(tech.baseCost) as ResourceId[]) {
+      const baseAmount = Number(tech.baseCost[key] ?? 0);
+      if (!Number.isFinite(baseAmount) || baseAmount <= 0) continue;
+      total += cumulativeTechResourceCost(baseAmount, level) * (SCORE_RESOURCE_WEIGHTS[key] ?? 0);
+    }
+  }
+  return Math.max(0, Math.floor(total));
+};
 
 const computeStorageCapacity = (entrepotLevel: number) =>
   Math.floor(STORAGE_BASE * Math.pow(STORAGE_MULTIPLIER, Math.max(0, entrepotLevel - 1)));
@@ -1240,7 +1449,8 @@ const RESOURCE_TECH_BONUS_SOURCES: Record<ResourceId, Array<{ id: TechnologyId; 
 
 const getUnlockedResourceTechBonuses = (
   resourceId: ResourceId,
-  levels: Record<TechnologyId, number>
+  levels: Record<TechnologyId, number>,
+  language: UILanguage
 ): Array<{ techId: TechnologyId; name: string; level: number; bonusPercent: number }> => {
   const sources = RESOURCE_TECH_BONUS_SOURCES[resourceId] ?? [];
   return sources
@@ -1248,7 +1458,7 @@ const getUnlockedResourceTechBonuses = (
       const level = techLevelValue(levels, src.id);
       return {
         techId: src.id,
-        name: TECHNOLOGY_BY_ID[src.id].name,
+        name: technologyDisplayName(src.id, TECHNOLOGY_BY_ID[src.id].name, language),
         level,
         bonusPercent: level * src.perLevel * 100
       };
@@ -1323,6 +1533,39 @@ const SECTOR_RESOURCES: SectorResource[] = [
 ];
 
 const SECTOR_ENTITIES: SectorEntity[] = [...SECTOR_STATIONS, ...SECTOR_WORLDS, ...SECTOR_RESOURCES];
+
+const SECTOR_ENTITY_NAME_EN: Record<string, string> = {
+  st_1: "Aegis Nexus",
+  st_2: "Crimson Consortium",
+  st_3: "Void Cartel",
+  wd_1: "Eden-9",
+  wd_2: "Khepra Dune",
+  wd_3: "Frimas Delta",
+  rs_1: "Ferrometal Belt",
+  rs_2: "Helium-3 Cloud",
+  rs_3: "Crystal Cluster"
+};
+
+const SECTOR_STATION_OWNER_EN: Record<string, string> = {
+  st_1: "You",
+  st_2: "Rival faction",
+  st_3: "Neutral faction"
+};
+
+const SECTOR_WORLD_MISSIONS_EN: Record<string, string[]> = {
+  wd_1: ["Diplomatic convoy", "Bio-medical extraction"],
+  wd_2: ["Pirate interception", "Cryo smuggling"],
+  wd_3: ["Anomaly scan", "Scientific beacon"]
+};
+
+const sectorEntityDisplayName = (entity: SectorEntity, language: UILanguage): string =>
+  language === "en" ? SECTOR_ENTITY_NAME_EN[entity.id] ?? entity.name : entity.name;
+
+const sectorStationOwnerDisplay = (station: SectorStation, language: UILanguage): string =>
+  language === "en" ? SECTOR_STATION_OWNER_EN[station.id] ?? station.owner : station.owner;
+
+const sectorWorldMissionsDisplay = (world: SectorWorld, language: UILanguage): string[] =>
+  language === "en" ? SECTOR_WORLD_MISSIONS_EN[world.id] ?? world.missions : world.missions;
 
 const PLANET_SPRITE_SHEET = "/room-images/sprite-sheet-planet.png";
 const PLANET_SPRITE_TARGET_SIZE = 72;
@@ -1424,6 +1667,42 @@ const RESOURCE_DEFS: ResourceDef[] = [
   { id: "isotope7", name: "Isotope-7", rarity: 94, machine: "Centrifugeuse a Isotope-7", section: "research" },
   { id: "singulite", name: "Singulite", rarity: 100, machine: "Forge a Singulite", section: "research" }
 ];
+
+const RESOURCE_NAME_EN: Record<ResourceId, string> = {
+  carbone: "Carbon",
+  titane: "Titanium",
+  osmium: "Osmium",
+  adamantium: "Adamantium",
+  magmatite: "Magmatite",
+  neodyme: "Neodymium",
+  chronium: "Chronium",
+  aetherium: "Aetherium",
+  isotope7: "Isotope-7",
+  singulite: "Singulite"
+};
+
+const RESOURCE_MACHINE_EN: Record<ResourceId, string> = {
+  carbone: "Carbon Refinery",
+  titane: "Titanium Factory",
+  osmium: "Osmium Compactor",
+  adamantium: "Adamantium Synchrotron",
+  magmatite: "Magmatite Collector",
+  neodyme: "Neodymium Extractor",
+  chronium: "Chronium Accelerator",
+  aetherium: "Aetherium Condenser",
+  isotope7: "Isotope-7 Centrifuge",
+  singulite: "Singulite Forge"
+};
+
+const resourceDisplayName = (resourceId: ResourceId, language: UILanguage): string => {
+  const fallback = RESOURCE_DEFS.find((r) => r.id === resourceId)?.name ?? resourceId;
+  return language === "en" ? RESOURCE_NAME_EN[resourceId] ?? fallback : fallback;
+};
+
+const resourceMachineDisplay = (resourceId: ResourceId, language: UILanguage): string => {
+  const fallback = RESOURCE_DEFS.find((r) => r.id === resourceId)?.machine ?? resourceId;
+  return language === "en" ? RESOURCE_MACHINE_EN[resourceId] ?? fallback : fallback;
+};
 
 const RESOURCE_MENU_SPRITES: Record<string, { x: number; y: number }> = {
   carbone: { x: 10, y: 10 },
@@ -1913,7 +2192,14 @@ export default function App() {
     if (!silent) setRankingLoading(true);
     setRankingError("");
     try {
-      const rpc = await client.rpc(session, "ranking_get_state", JSON.stringify({ limit: 50 }));
+      const clientProgress = {
+        rooms: rooms.map((room) => ({
+          type: room.type,
+          level: Math.max(0, Math.floor(Number(room.level || 0)))
+        })),
+        researchPoints: computeResearchInvestmentPoints(technologyLevels)
+      };
+      const rpc = await client.rpc(session, "ranking_get_state", JSON.stringify({ limit: 50, clientProgress }));
       const parsed = parseJsonObject((rpc as any)?.payload ?? rpc);
       const nested = parseJsonObject(parsed?.payload);
       const source = Object.keys(nested).length > 0 ? nested : parsed;
@@ -2429,12 +2715,12 @@ export default function App() {
     const language = authLanguage;
 
     if (!email || !password) {
-      setAuthError("Email et mot de passe requis.");
+      setAuthError(l("Email et mot de passe requis.", "Email and password required."));
       return;
     }
 
     if (authMode === "signup" && username.length < 3) {
-      setAuthError("Pseudo minimum: 3 caracteres.");
+      setAuthError(l("Pseudo minimum: 3 caracteres.", "Minimum username length: 3 characters."));
       return;
     }
 
@@ -2462,8 +2748,8 @@ export default function App() {
     } catch {
       setNakamaStatus("offline");
       setAuthError(authMode === "signup"
-        ? "Inscription impossible. Email peut-etre deja utilise."
-        : "Connexion refusee. Verifie email/mot de passe.");
+        ? l("Inscription impossible. Email peut-etre deja utilise.", "Sign-up failed. Email may already be in use.")
+        : l("Connexion refusee. Verifie email/mot de passe.", "Login failed. Check email/password."));
     } finally {
       setAuthLoading(false);
     }
@@ -2760,7 +3046,7 @@ export default function App() {
         key: `build_${type}`,
         mode: "construction",
         roomType: type,
-        name: ROOM_CONFIG[type].name,
+        name: roomDisplayName(type, uiLanguage),
         targetLevel: 1,
         etaSec: buildSecondsForLevel(type, 1, buildingTimeReductionFactor),
         cost
@@ -2778,7 +3064,7 @@ export default function App() {
         mode: "amelioration",
         roomType: room.type,
         roomId: room.id,
-        name: ROOM_CONFIG[room.type].name,
+        name: roomDisplayName(room.type, uiLanguage),
         targetLevel,
         etaSec: buildSecondsForLevel(room.type, targetLevel, buildingTimeReductionFactor),
         cost
@@ -2786,7 +3072,7 @@ export default function App() {
     }
 
     return items.slice(0, 14);
-  }, [buildingCostReductionFactor, buildingTimeReductionFactor, resourceAmounts, rooms]);
+  }, [buildingCostReductionFactor, buildingTimeReductionFactor, resourceAmounts, rooms, uiLanguage]);
 
   const onPlannerLaunch = (item: {
     mode: "construction" | "amelioration";
@@ -3116,11 +3402,12 @@ export default function App() {
             const storageState = getResourceStorageState(r.id, resourceAmounts);
             const isBlocked = storageState.state === "blocked";
             const overflowFromExternal = amount > cap && Number(resourceRates[r.id] ?? 0) > 0;
+            const resourceName = resourceDisplayName(r.id, uiLanguage);
             return (
-              <span key={r.id} className="top-resource-item" title={r.name}>
+              <span key={r.id} className="top-resource-item" title={resourceName}>
                 <span className="top-resource-icon" style={getResourceMenuSpriteStyle(r.id)} />
                 <span className="top-resource-meta">
-                  <small>{r.name}</small>
+                  <small>{resourceName}</small>
                   <span className="top-resource-amount-wrap">
                     <strong className="top-resource-amount" style={{ color: storageState.color }}>
                       {amount.toLocaleString()}
@@ -3133,7 +3420,7 @@ export default function App() {
                     ) : null}
                     {overflowFromExternal ? (
                       <span className="top-resource-overcap-badge" title={l("Arrivage externe: coffre/flotte", "External delivery: chest/fleet")}>
-                        +coffre
+                        {l("+coffre", "+chest")}
                       </span>
                     ) : null}
                   </span>
@@ -3201,7 +3488,7 @@ export default function App() {
         <>
           {renderUnifiedHeader()}
 
-          <SectorMapScreen />
+          <SectorMapScreen language={uiLanguage} />
         </>
       ) : screen === "chat" ? (
         <>
@@ -3358,19 +3645,19 @@ export default function App() {
 
           <main className="game-layout">
             <aside className="left-panel">
-              <h2>Stats Hyperstructure</h2>
-              <StatLine icon={<Users size={16} />} label="Batiments actifs" value={stats.buildings} />
-              <StatLine icon={<Gem size={16} />} label="Ressources debloquees" value={stats.unlocked} />
-              <StatLine icon={<Zap size={16} />} label="Production totale/s" value={Number(stats.totalProduction.toFixed(3))} />
-              <StatLine icon={<Shield size={16} />} label="Capacite entrepot" value={stats.storageCapacity} />
-              <StatLine icon={<RefreshCw size={16} />} label="File construction" value={stats.queueBusy ? 1 : 0} />
+              <h2>{l("Stats Hyperstructure", "Hyperstructure Stats")}</h2>
+              <StatLine icon={<Users size={16} />} label={l("Batiments actifs", "Active buildings")} value={stats.buildings} />
+              <StatLine icon={<Gem size={16} />} label={l("Ressources debloquees", "Unlocked resources")} value={stats.unlocked} />
+              <StatLine icon={<Zap size={16} />} label={l("Production totale/s", "Total production/s")} value={Number(stats.totalProduction.toFixed(3))} />
+              <StatLine icon={<Shield size={16} />} label={l("Capacite entrepot", "Storage capacity")} value={stats.storageCapacity} />
+              <StatLine icon={<RefreshCw size={16} />} label={l("File construction", "Construction queue")} value={stats.queueBusy ? 1 : 0} />
 
               <div className="hint-box">
-                <p><strong>Commandes</strong></p>
-                <p>Drag gauche: deplacer module</p>
-                <p>Molette: zoom</p>
-                <p>Drag droit: deplacer la camera</p>
-                <p>Mobile: activer Pan Mode</p>
+                <p><strong>{l("Commandes", "Controls")}</strong></p>
+                <p>{l("Drag gauche: deplacer module", "Left drag: move module")}</p>
+                <p>{l("Molette: zoom", "Mouse wheel: zoom")}</p>
+                <p>{l("Drag droit: deplacer la camera", "Right drag: move camera")}</p>
+                <p>{l("Mobile: activer Pan Mode", "Mobile: enable Pan Mode")}</p>
               </div>
             </aside>
 
@@ -3401,27 +3688,27 @@ export default function App() {
               {constructionJob ? (
                 <div className="construction-banner">
                   <div className="construction-head">
-                    <strong>Construction en cours</strong>
+                    <strong>{l("Construction en cours", "Construction in progress")}</strong>
                     <div className="construction-head-actions">
-                      <span>{constructionJob.mode === "build" ? "Nouveau batiment" : "Amelioration"}</span>
+                      <span>{constructionJob.mode === "build" ? l("Nouveau batiment", "New building") : l("Amelioration", "Upgrade")}</span>
                       <button
                         type="button"
                         className="construction-cancel-btn"
-                        title="Annuler et rembourser"
+                        title={l("Annuler et rembourser", "Cancel and refund")}
                         onClick={onCancelConstruction}
                       >
                         <X size={14} />
                       </button>
                     </div>
                   </div>
-                  <p className="construction-name">{ROOM_CONFIG[constructionJob.roomType].name}</p>
-                  <p className="construction-subline">Niveau cible: {constructionJob.targetLevel}</p>
+                  <p className="construction-name">{roomDisplayName(constructionJob.roomType, uiLanguage)}</p>
+                  <p className="construction-subline">{l("Niveau cible", "Target level")}: {constructionJob.targetLevel}</p>
                   <p
                     className={`construction-time ${
                       constructionRemainingSeconds <= 60 ? "danger" : constructionRemainingSeconds <= 300 ? "warn" : "ok"
                     }`}
                   >
-                    Temps restant: {formatDuration(constructionRemainingSeconds)}
+                    {l("Temps restant", "Time left")}: {formatDuration(constructionRemainingSeconds)}
                   </p>
                 </div>
               ) : (
@@ -3432,7 +3719,7 @@ export default function App() {
                   }}
                 >
                   <details className="planner-spoiler">
-                    <summary>Planificateur de modules</summary>
+                    <summary>{l("Planificateur de modules", "Module planner")}</summary>
                     <div
                       className="planner-list"
                       onWheel={(e) => {
@@ -3440,21 +3727,21 @@ export default function App() {
                       }}
                     >
                       {plannerItems.length === 0 ? (
-                        <p className="planner-empty">Aucun module disponible pour le moment.</p>
+                        <p className="planner-empty">{l("Aucun module disponible pour le moment.", "No module available at the moment.")}</p>
                       ) : (
                         plannerItems.map((item) => (
                           <article key={item.key} className="planner-item">
                             <header>
                               <strong>{item.name}</strong>
-                              <span>{item.mode === "construction" ? "Construction" : "Amelioration"} N{item.targetLevel}</span>
+                              <span>{item.mode === "construction" ? l("Construction", "Construction") : l("Amelioration", "Upgrade")} N{item.targetLevel}</span>
                             </header>
                             <div className="planner-item-cost">
-                              <ResourceCostDisplay cost={item.cost} available={resourceAmounts} compact />
+                              <ResourceCostDisplay cost={item.cost} available={resourceAmounts} language={uiLanguage} compact />
                             </div>
                             <div className="planner-row">
-                              <small>Temps: {formatDuration(item.etaSec)}</small>
+                              <small>{l("Temps", "Time")}: {formatDuration(item.etaSec)}</small>
                               <button type="button" className="planner-action-btn" onClick={() => onPlannerLaunch(item)}>
-                                {item.mode === "construction" ? "Construire" : "Ameliorer"}
+                                {item.mode === "construction" ? l("Construire", "Build") : l("Ameliorer", "Upgrade")}
                               </button>
                             </div>
                           </article>
@@ -3501,7 +3788,7 @@ export default function App() {
                         >
                           <img
                             src={cfg.image}
-                            alt={cfg.name}
+                            alt={roomDisplayName(room.type, uiLanguage)}
                             className="room-art"
                             onError={(e) => {
                               (e.currentTarget as HTMLImageElement).style.display = "none";
@@ -3509,7 +3796,7 @@ export default function App() {
                           />
                           {room.width > 1 && (
                             <div className="room-meta">
-                              <p className="room-name">{cfg.name}</p>
+                              <p className="room-name">{roomDisplayName(room.type, uiLanguage)}</p>
                               <p className="room-level">Lvl {room.level}</p>
                               {room.type !== "entrance" ? (
                                 <div className="room-action-row">
@@ -3517,7 +3804,7 @@ export default function App() {
                                     <div className="room-inline-icon">
                                       <img
                                         src={roomBadgeImage(room.type)}
-                                        alt={cfg.name}
+                                        alt={roomDisplayName(room.type, uiLanguage)}
                                         onError={(e) => {
                                           (e.currentTarget as HTMLImageElement).src = cfg.image;
                                         }}
@@ -3537,7 +3824,7 @@ export default function App() {
                                       setActiveRoom(room);
                                     }}
                                   >
-                                    Ameliorer
+                                    {l("Ameliorer", "Upgrade")}
                                   </button>
                                 </div>
                               ) : null}
@@ -3549,7 +3836,7 @@ export default function App() {
                                 <i className="room-clock-hand" />
                               </div>
                               <div className="room-construction-text">
-                                <small>Construction</small>
+                                <small>{l("Construction", "Construction")}</small>
                                 <strong>{formatDuration(constructionRemainingSeconds)}</strong>
                               </div>
                             </div>
@@ -3570,18 +3857,18 @@ export default function App() {
                         >
                           <img
                             src={ROOM_CONFIG[constructionJob.roomType].image}
-                          alt={ROOM_CONFIG[constructionJob.roomType].name}
+                          alt={roomDisplayName(constructionJob.roomType, uiLanguage)}
                             className="room-art"
                           />
                         <div className="room-meta">
-                          <p className="room-name">{ROOM_CONFIG[constructionJob.roomType].name}</p>
+                          <p className="room-name">{roomDisplayName(constructionJob.roomType, uiLanguage)}</p>
                         </div>
                         <div className="room-construction-overlay">
                           <div className="room-clock">
                             <i className="room-clock-hand" />
                           </div>
                           <div className="room-construction-text">
-                            <small>Construction</small>
+                            <small>{l("Construction", "Construction")}</small>
                             <strong>{formatDuration(constructionRemainingSeconds)}</strong>
                           </div>
                         </div>
@@ -3601,6 +3888,7 @@ export default function App() {
           </main>
 
           <BuildModal
+            language={uiLanguage}
             buildSlot={buildSlot}
             resourceAmounts={resourceAmounts}
             rooms={rooms}
@@ -3612,6 +3900,7 @@ export default function App() {
             getAvailableSpace={getAvailableSpace}
           />
           <UpgradeModal
+            language={uiLanguage}
             room={activeRoom}
             resourceAmounts={resourceAmounts}
             constructionJob={constructionJob}
@@ -3674,7 +3963,9 @@ function ChestLootModal({
   const rewardRows = Object.entries(summary.rewards)
     .map(([resourceId, amount]) => ({
       resourceId,
-      name: RESOURCE_DEFS.find((res) => res.id === resourceId)?.name ?? resourceId,
+      name: RESOURCE_DEFS.some((res) => res.id === resourceId)
+        ? resourceDisplayName(resourceId as ResourceId, language)
+        : resourceId,
       amount: Math.max(0, Math.floor(amount))
     }))
     .filter((row) => row.amount > 0)
@@ -3777,7 +4068,7 @@ function HomeLanding({
         <div className="home-city-wrap">
           <img
             src="/room-images/accueil.png"
-            alt="Cite volante de l'hyperstructure"
+            alt={l("Cite volante de l'hyperstructure", "Floating city of the hyperstructure")}
             className="home-city-image"
           />
         </div>
@@ -3786,7 +4077,8 @@ function HomeLanding({
   );
 }
 
-function SectorMapScreen() {
+function SectorMapScreen({ language }: { language: UILanguage }) {
+  const l = (fr: string, en: string) => (language === "en" ? en : fr);
   const [zoom, setZoom] = useState(0.78);
   const [pan, setPan] = useState({ x: -4300, y: -4380 });
   const [isDragging, setIsDragging] = useState(false);
@@ -3797,9 +4089,42 @@ function SectorMapScreen() {
   const [actionMode, setActionMode] = useState<"none" | "attack" | "mine" | "mission">("none");
   const [sidebarTab, setSidebarTab] = useState<"navigation" | "quests">("navigation");
   const [dailyQuests, setDailyQuests] = useState([
-    { id: "q1", title: "Collecte Miniere", description: "Amasser 30 000 unites de ressources.", progress: 17800, target: 30000, reward: "450 Credits", claimed: false },
-    { id: "q2", title: "Dock de Chasse", description: "Construire 2 vaisseaux d'escorte.", progress: 1, target: 2, reward: "1 Module rare", claimed: false },
-    { id: "q3", title: "Patrouille Orbitale", description: "Lancer 3 missions tactiques.", progress: 2, target: 3, reward: "300 Credits", claimed: false }
+    {
+      id: "q1",
+      titleFr: "Collecte Miniere",
+      titleEn: "Mining Sweep",
+      descriptionFr: "Amasser 30 000 unites de ressources.",
+      descriptionEn: "Gather 30,000 units of resources.",
+      progress: 17800,
+      target: 30000,
+      rewardFr: "450 Credits",
+      rewardEn: "450 Credits",
+      claimed: false
+    },
+    {
+      id: "q2",
+      titleFr: "Dock de Chasse",
+      titleEn: "Hunter Dock",
+      descriptionFr: "Construire 2 vaisseaux d'escorte.",
+      descriptionEn: "Build 2 escort ships.",
+      progress: 1,
+      target: 2,
+      rewardFr: "1 Module rare",
+      rewardEn: "1 Rare Module",
+      claimed: false
+    },
+    {
+      id: "q3",
+      titleFr: "Patrouille Orbitale",
+      titleEn: "Orbital Patrol",
+      descriptionFr: "Lancer 3 missions tactiques.",
+      descriptionEn: "Launch 3 tactical missions.",
+      progress: 2,
+      target: 3,
+      rewardFr: "300 Credits",
+      rewardEn: "300 Credits",
+      claimed: false
+    }
   ]);
 
   const [filters, setFilters] = useState({ enemies: true, resources: true, missions: true });
@@ -3883,7 +4208,7 @@ function SectorMapScreen() {
     const rect = containerRef.current.getBoundingClientRect();
     const centerX = Math.round((rect.width / 2 - pan.x) / zoom);
     const centerY = Math.round((rect.height / 2 - pan.y) / zoom);
-    const label = `Secteur ${centerX.toString().slice(0, 2)}-${centerY.toString().slice(0, 2)}`;
+    const label = `${l("Secteur", "Sector")} ${centerX.toString().slice(0, 2)}-${centerY.toString().slice(0, 2)}`;
     setMarkers((prev) => [...prev, { name: label, x: centerX, y: centerY }]);
   };
 
@@ -3939,6 +4264,18 @@ function SectorMapScreen() {
     return "sector-resource-cristal";
   };
 
+  const resourceTypeLabel = (type: SectorResource["resourceType"]) => {
+    if (type === "alliage") return l("Alliage", "Alloy");
+    if (type === "helium3") return l("Helium-3", "Helium-3");
+    return l("Cristal", "Crystal");
+  };
+
+  const entityTypeLabel = (type: SectorEntityType) => {
+    if (type === "station") return l("Station", "Station");
+    if (type === "world") return l("Monde", "World");
+    return l("Ressource", "Resource");
+  };
+
   return (
     <main className="sector-shell">
       <section
@@ -3961,9 +4298,9 @@ function SectorMapScreen() {
         >
           <div className="sector-daily-head">
             <Rocket size={14} />
-            <strong>Missions quotidiennes</strong>
+            <strong>{l("Missions quotidiennes", "Daily missions")}</strong>
           </div>
-          <p className="sector-daily-reset">Reset dans 13h 24m</p>
+          <p className="sector-daily-reset">{l("Reset dans 13h 24m", "Reset in 13h 24m")}</p>
           <div className="sector-daily-list">
             {dailyQuests.map((quest) => {
               const ratio = Math.min(100, Math.round((quest.progress / quest.target) * 100));
@@ -3971,8 +4308,8 @@ function SectorMapScreen() {
               return (
                 <article key={`daily_overlay_${quest.id}`} className="sector-daily-item">
                   <header>
-                    <strong>{quest.title}</strong>
-                    <span>{quest.reward}</span>
+                    <strong>{l(quest.titleFr, quest.titleEn)}</strong>
+                    <span>{l(quest.rewardFr, quest.rewardEn)}</span>
                   </header>
                   <div className="sector-daily-progress">
                     <div style={{ width: `${ratio}%` }} />
@@ -3980,7 +4317,7 @@ function SectorMapScreen() {
                   <footer>
                     <small>{quest.progress.toLocaleString()} / {quest.target.toLocaleString()}</small>
                     <button type="button" disabled={!complete || quest.claimed} onClick={() => claimQuest(quest.id)}>
-                      {quest.claimed ? "Recupere" : complete ? "Recuperer" : "En cours"}
+                      {quest.claimed ? l("Recupere", "Claimed") : complete ? l("Recuperer", "Claim") : l("En cours", "In progress")}
                     </button>
                   </footer>
                 </article>
@@ -4068,7 +4405,7 @@ function SectorMapScreen() {
                 ) : null}
 
                 <span className="sector-label">
-                  <strong>{entity.name}</strong>
+                  <strong>{sectorEntityDisplayName(entity, language)}</strong>
                   <small>[{entity.x}, {entity.y}]</small>
                 </span>
               </button>
@@ -4084,37 +4421,37 @@ function SectorMapScreen() {
             className={sidebarTab === "navigation" ? "active" : ""}
             onClick={() => setSidebarTab("navigation")}
           >
-            <Navigation size={14} /> Navigation
+            <Navigation size={14} /> {l("Navigation", "Navigation")}
           </button>
           <button
             type="button"
             className={sidebarTab === "quests" ? "active" : ""}
             onClick={() => setSidebarTab("quests")}
           >
-            <Rocket size={14} /> Quete
+            <Rocket size={14} /> {l("Quete", "Quest")}
           </button>
         </div>
 
         {sidebarTab === "navigation" ? (
           <>
             <div className="sector-panel">
-              <h3><Filter size={15} /> Filtres cartographiques</h3>
+              <h3><Filter size={15} /> {l("Filtres cartographiques", "Map filters")}</h3>
               <label>
                 <input type="checkbox" checked={filters.enemies} onChange={(e) => setFilters((prev) => ({ ...prev, enemies: e.target.checked }))} />
-                Stations rivales
+                {l("Stations rivales", "Rival stations")}
               </label>
               <label>
                 <input type="checkbox" checked={filters.resources} onChange={(e) => setFilters((prev) => ({ ...prev, resources: e.target.checked }))} />
-                Champs de ressources
+                {l("Champs de ressources", "Resource fields")}
               </label>
               <label>
                 <input type="checkbox" checked={filters.missions} onChange={(e) => setFilters((prev) => ({ ...prev, missions: e.target.checked }))} />
-                Mondes de mission
+                {l("Mondes de mission", "Mission worlds")}
               </label>
             </div>
 
             <div className="sector-panel">
-              <h3><Navigation size={15} /> Navigation</h3>
+              <h3><Navigation size={15} /> {l("Navigation", "Navigation")}</h3>
               <form onSubmit={onNavSubmit} className="sector-nav-form">
                 <input type="number" placeholder="X" value={navX} onChange={(e) => setNavX(e.target.value)} />
                 <input type="number" placeholder="Y" value={navY} onChange={(e) => setNavY(e.target.value)} />
@@ -4124,15 +4461,15 @@ function SectorMapScreen() {
 
             <div className="sector-panel grow">
               <div className="sector-markers-head">
-                <h3><MapPin size={15} /> Balises</h3>
+                <h3><MapPin size={15} /> {l("Balises", "Bookmarks")}</h3>
                 <span>{markers.length}/5</span>
               </div>
               <button type="button" className="sector-save-marker" onClick={addMarker} disabled={markers.length >= 5}>
-                <Plus size={14} /> Sauver la vue courante
+                <Plus size={14} /> {l("Sauver la vue courante", "Save current view")}
               </button>
 
               <div className="sector-marker-list">
-                {markers.length === 0 ? <p className="sector-empty">Aucune balise enregistree.</p> : null}
+                {markers.length === 0 ? <p className="sector-empty">{l("Aucune balise enregistree.", "No bookmark saved.")}</p> : null}
                 {markers.map((marker, idx) => (
                   <div key={`${marker.name}_${idx}`} className="sector-marker-item">
                     <button type="button" onClick={() => navigateTo(marker.x, marker.y)}>
@@ -4147,8 +4484,8 @@ function SectorMapScreen() {
           </>
         ) : (
           <div className="sector-panel grow quest-panel">
-            <h3><Rocket size={15} /> Quetes quotidiennes</h3>
-            <p className="quest-reset">Renouvellement dans 13h 24m</p>
+            <h3><Rocket size={15} /> {l("Quetes quotidiennes", "Daily quests")}</h3>
+            <p className="quest-reset">{l("Renouvellement dans 13h 24m", "Refresh in 13h 24m")}</p>
             <div className="quest-list">
               {dailyQuests.map((quest) => {
                 const ratio = Math.min(100, Math.round((quest.progress / quest.target) * 100));
@@ -4156,17 +4493,17 @@ function SectorMapScreen() {
                 return (
                   <article key={quest.id} className="quest-card">
                     <header>
-                      <strong>{quest.title}</strong>
-                      <span>{quest.reward}</span>
+                      <strong>{l(quest.titleFr, quest.titleEn)}</strong>
+                      <span>{l(quest.rewardFr, quest.rewardEn)}</span>
                     </header>
-                    <p>{quest.description}</p>
+                    <p>{l(quest.descriptionFr, quest.descriptionEn)}</p>
                     <div className="quest-progress">
                       <div style={{ width: `${ratio}%` }} />
                     </div>
                     <div className="quest-foot">
                       <small>{quest.progress.toLocaleString()} / {quest.target.toLocaleString()}</small>
                       <button type="button" disabled={!complete || quest.claimed} onClick={() => claimQuest(quest.id)}>
-                        {quest.claimed ? "Recupere" : complete ? "Recuperer" : "En cours"}
+                        {quest.claimed ? l("Recupere", "Claimed") : complete ? l("Recuperer", "Claim") : l("En cours", "In progress")}
                       </button>
                     </div>
                   </article>
@@ -4181,50 +4518,55 @@ function SectorMapScreen() {
             <>
               <div className="sector-detail-head">
                 <div>
-                  <h4>{selectedEntity.name}</h4>
-                  <p>{selectedEntity.type}</p>
+                  <h4>{sectorEntityDisplayName(selectedEntity, language)}</h4>
+                  <p>
+                    {entityTypeLabel(selectedEntity.type)}
+                    {selectedEntity.type === "station"
+                      ? ` • ${l("Proprietaire", "Owner")}: ${sectorStationOwnerDisplay(selectedEntity, language)}`
+                      : ""}
+                  </p>
                 </div>
                 <button type="button" onClick={() => { setSelectedEntity(null); setActionMode("none"); }}><X size={18} /></button>
               </div>
 
               {selectedEntity.type === "station" ? (
                 <div className="sector-detail-list">
-                  <div><span><Swords size={14} /> Puissance</span><strong>{selectedEntity.power}</strong></div>
-                  <div><span><Shield size={14} /> Defense</span><strong>{selectedEntity.defense}</strong></div>
+                  <div><span><Swords size={14} /> {l("Puissance", "Power")}</span><strong>{selectedEntity.power}</strong></div>
+                  <div><span><Shield size={14} /> {l("Defense", "Defense")}</span><strong>{selectedEntity.defense}</strong></div>
 
                   {selectedEntity.isPlayer ? (
                     <div className="sector-actions">
-                      <p>Selectionnez une action puis une cible</p>
+                      <p>{l("Selectionnez une action puis une cible", "Select an action, then a target")}</p>
                       <div>
-                        <button type="button" className={actionMode === "attack" ? "active attack" : ""} onClick={() => setActionMode("attack")}><Crosshair size={14} /> Attaque</button>
-                        <button type="button" className={actionMode === "mine" ? "active mine" : ""} onClick={() => setActionMode("mine")}><Gem size={14} /> Collecte</button>
-                        <button type="button" className={actionMode === "mission" ? "active mission" : ""} onClick={() => setActionMode("mission")}><Rocket size={14} /> Mission</button>
+                        <button type="button" className={actionMode === "attack" ? "active attack" : ""} onClick={() => setActionMode("attack")}><Crosshair size={14} /> {l("Attaque", "Attack")}</button>
+                        <button type="button" className={actionMode === "mine" ? "active mine" : ""} onClick={() => setActionMode("mine")}><Gem size={14} /> {l("Collecte", "Gather")}</button>
+                        <button type="button" className={actionMode === "mission" ? "active mission" : ""} onClick={() => setActionMode("mission")}><Rocket size={14} /> {l("Mission", "Mission")}</button>
                       </div>
                     </div>
                   ) : (
-                    <button type="button" className="sector-war-btn"><Crosshair size={14} /> Declarer l'hostilite</button>
+                    <button type="button" className="sector-war-btn"><Crosshair size={14} /> {l("Declarer l'hostilite", "Declare hostility")}</button>
                   )}
                 </div>
               ) : null}
 
               {selectedEntity.type === "world" ? (
                 <div className="sector-detail-list">
-                  <p className="sector-list-title">Missions disponibles</p>
+                  <p className="sector-list-title">{l("Missions disponibles", "Available missions")}</p>
                   <ul>
-                    {selectedEntity.missions.map((m) => <li key={m}>{m}</li>)}
+                    {sectorWorldMissionsDisplay(selectedEntity, language).map((m) => <li key={m}>{m}</li>)}
                   </ul>
                 </div>
               ) : null}
 
               {selectedEntity.type === "resource" ? (
                 <div className="sector-detail-list">
-                  <div><span>Type</span><strong>{selectedEntity.resourceType}</strong></div>
-                  <div><span>Rendement estime</span><strong>{selectedEntity.amount.toLocaleString()}</strong></div>
+                  <div><span>{l("Type", "Type")}</span><strong>{resourceTypeLabel(selectedEntity.resourceType)}</strong></div>
+                  <div><span>{l("Rendement estime", "Estimated yield")}</span><strong>{selectedEntity.amount.toLocaleString()}</strong></div>
                 </div>
               ) : null}
             </>
           ) : (
-            <p className="sector-empty details-empty">Selectionnez une entite pour afficher ses details tactiques.</p>
+            <p className="sector-empty details-empty">{l("Selectionnez une entite pour afficher ses details tactiques.", "Select an entity to display tactical details.")}</p>
           )}
         </div>
       </aside>
@@ -4270,6 +4612,8 @@ function HangarScreen({
   onUseBoost: (itemId: string, quantity?: number, targetOverride?: "auto" | "building" | "hangar" | "research_local", queueId?: string) => void;
 }) {
   const l = (fr: string, en: string) => (language === "en" ? en : fr);
+  const unitName = (def: HangarUnitDef) => hangarUnitDisplayName(def.id, def.name, language);
+  const unitDescription = (def: HangarUnitDef) => hangarUnitDisplayDescription(def.id, def.description, language);
   const [tab, setTab] = useState<HangarCategory>("ship");
   const [quantityByUnit, setQuantityByUnit] = useState<Record<string, string>>({});
   const [boostItemId, setBoostItemId] = useState("");
@@ -4278,12 +4622,12 @@ function HangarScreen({
     () =>
       RESOURCE_DEFS.reduce(
         (acc, def) => {
-          acc[def.id] = def.name;
+          acc[def.id] = resourceDisplayName(def.id, language);
           return acc;
         },
         {} as Record<string, string>
       ),
-    []
+    [language]
   );
 
   const defs = useMemo(
@@ -4316,9 +4660,9 @@ function HangarScreen({
         .sort((a, b) => {
           if (b.def.force !== a.def.force) return b.def.force - a.def.force;
           if (b.def.endurance !== a.def.endurance) return b.def.endurance - a.def.endurance;
-          return a.def.name.localeCompare(b.def.name);
+          return unitName(a.def).localeCompare(unitName(b.def));
         }),
-    [builtUnitRows]
+    [builtUnitRows, language]
   );
   const builtDefenses = useMemo(
     () =>
@@ -4327,9 +4671,9 @@ function HangarScreen({
         .sort((a, b) => {
           if (b.def.force !== a.def.force) return b.def.force - a.def.force;
           if (b.def.endurance !== a.def.endurance) return b.def.endurance - a.def.endurance;
-          return a.def.name.localeCompare(b.def.name);
+          return unitName(a.def).localeCompare(unitName(b.def));
         }),
-    [builtUnitRows]
+    [builtUnitRows, language]
   );
   const boostItems = useMemo(
     () =>
@@ -4440,14 +4784,14 @@ function HangarScreen({
             return (
               <article key={def.id} className="hangar-card">
                 <div className="hangar-card-head">
-                  <strong>{def.name}</strong>
+                  <strong>{unitName(def)}</strong>
                   <span>{def.category === "ship" ? l("Vaisseau", "Ship") : l("Defense", "Defense")}</span>
                 </div>
                 {!unlocked ? <p className="hangar-sync-note">{unlockHint}</p> : null}
                 <div className="hangar-visual">
                   <img
                     src={unitImagePath || "/room-images/vaisseau.png"}
-                    alt={def.name}
+                    alt={unitName(def)}
                     className="hangar-ship-image"
                     onError={(e) => {
                       const img = e.currentTarget as HTMLImageElement;
@@ -4461,7 +4805,7 @@ function HangarScreen({
                   <span>{l("Disponibles", "Owned")}: <b>{Math.floor(produced).toLocaleString()}</b></span>
                   <span>{l("Fabricable", "Buildable")}: <b>{maxBuildable.toLocaleString()}</b></span>
                 </div>
-                <p>{def.description}</p>
+                <p>{unitDescription(def)}</p>
                 <div className="hangar-card-foot">
                   <small className="hangar-cost-title">{l("Cout", "Cost")}</small>
                   <div className="hangar-cost-list">
@@ -4543,7 +4887,7 @@ function HangarScreen({
                 return (
                   <article key={item.id} className={`hangar-queue-item ${index === 0 ? "active" : ""}`}>
                     <header>
-                      <strong>{def.name}</strong>
+                      <strong>{unitName(def)}</strong>
                       <span className="hangar-queue-head-right">
                         <b>x{item.quantity}</b>
                         {index === 0 ? (
@@ -4566,7 +4910,7 @@ function HangarScreen({
                       <small className="hangar-time-remaining">
                         {waiting ? l("En attente", "Queued") : l("Temps restant", "Time left")}: {formatDuration(remaining)}
                       </small>
-                      <small>{formatCostLabel(item.batchCost)}</small>
+                      <small>{formatCostLabel(item.batchCost, language)}</small>
                     </footer>
                   </article>
                 );
@@ -4625,7 +4969,7 @@ function HangarScreen({
             <div className="hangar-stock-list">
               {builtShips.map(({ def, qty }) => (
                 <div key={`stock_${def.id}`} className="hangar-stock-item">
-                  <span>{def.name}</span>
+                  <span>{unitName(def)}</span>
                   <strong>{qty.toLocaleString()}</strong>
                 </div>
               ))}
@@ -4641,7 +4985,7 @@ function HangarScreen({
             <div className="hangar-stock-list">
               {builtDefenses.map(({ def, qty }) => (
                 <div key={`stock_${def.id}`} className="hangar-stock-item">
-                  <span>{def.name}</span>
+                  <span>{unitName(def)}</span>
                   <strong>{qty.toLocaleString()}</strong>
                 </div>
               ))}
@@ -5686,8 +6030,8 @@ function AllianceScreen({
   ]);
 
   const plannedAttacks = [
-    { id: "atk1", target: "Forteresse Sigma-19", impactAt: nowMs + 34 * 60 * 1000, joined: 5, window: "Â±5 min" },
-    { id: "atk2", target: "Relais de guerre K-412", impactAt: nowMs + 3 * 60 * 60 * 1000, joined: 3, window: "Â±5 min" }
+    { id: "atk1", target: "Forteresse Sigma-19", impactAt: nowMs + 34 * 60 * 1000, joined: 5, window: "±5 min" },
+    { id: "atk2", target: "Relais de guerre K-412", impactAt: nowMs + 3 * 60 * 60 * 1000, joined: 3, window: "±5 min" }
   ];
 
   const stationedReinforcements = [
@@ -6238,7 +6582,7 @@ function TechnologyScreen({
         {researchJob && activeTech ? (
           <div className="tech-active-job">
             <strong>{l("Recherche en cours", "Research in progress")}</strong>
-            <span>{activeTech.name} - {l("Niveau cible", "Target level")} {researchJob.targetLevel}</span>
+            <span>{technologyDisplayName(activeTech.id, activeTech.name, language)} - {l("Niveau cible", "Target level")} {researchJob.targetLevel}</span>
             <em>{l("Temps restant", "Time left")}: {formatDuration(researchRemainingSeconds)}</em>
             {boostItems.length > 0 ? (
               <div className="tech-boost-row">
@@ -6271,7 +6615,7 @@ function TechnologyScreen({
                       : undefined
                   }
                 >
-                  {boostLoading ? l("Application...", "Applying...") : l("AccelÃ©rer", "Boost")}
+                  {boostLoading ? l("Application...", "Applying...") : l("Accelerer", "Boost")}
                 </button>
               </div>
             ) : (
@@ -6305,17 +6649,19 @@ function TechnologyScreen({
                 const canPay = canAffordCost(resourceAmounts, nextCost);
                 const isCurrent = researchJob?.technologyId === def.id;
                 const requirementsLabel = (def.requires ?? [])
-                  .map((req) => `${TECHNOLOGY_BY_ID[req.id].name} Lv.${req.level}`)
+                  .map((req) => `${technologyDisplayName(req.id, TECHNOLOGY_BY_ID[req.id].name, language)} Lv.${req.level}`)
                   .join(" + ");
                 const disabled = atMax || !reqMet || !canPay || Boolean(researchJob);
                 return (
                   <article key={def.id} className={`tech-card ${isCurrent ? "active" : ""}`}>
                     <div className="tech-card-head">
-                      <strong>{def.name}</strong>
+                      <strong>{technologyDisplayName(def.id, def.name, language)}</strong>
                       <span>Lv.{currentLevel}{def.maxLevel ? `/${def.maxLevel}` : ""}</span>
                     </div>
-                    <p className="tech-desc">{def.description}</p>
-                    {def.effectPerLevel ? <p className="tech-effect">{def.effectPerLevel}</p> : null}
+                    <p className="tech-desc">{technologyDisplayDescription(def.id, def.description, language)}</p>
+                    {technologyDisplayEffect(def.id, def.effectPerLevel, language) ? (
+                      <p className="tech-effect">{technologyDisplayEffect(def.id, def.effectPerLevel, language)}</p>
+                    ) : null}
                     {!reqMet && requirementsLabel ? (
                       <p className="tech-req">{l("Requis", "Requires")}: {requirementsLabel}</p>
                     ) : null}
@@ -6323,7 +6669,7 @@ function TechnologyScreen({
                       <>
                         <div className="tech-cost">
                           <span className="tech-cost-label">{l("Cout niv. suivant", "Next level cost")}:</span>
-                          <ResourceCostDisplay cost={nextCost} available={resourceAmounts} compact />
+                          <ResourceCostDisplay cost={nextCost} available={resourceAmounts} language={language} compact />
                         </div>
                         <p className="tech-time">{l("Temps niv. suivant", "Next level time")}: {formatDuration(nextTime)}</p>
                       </>
@@ -6361,6 +6707,7 @@ function TechnologyScreen({
 
 function WikiScreen({ language }: { language: UILanguage }) {
   const l = (fr: string, en: string) => (language === "en" ? en : fr);
+  const [tutorialTrack, setTutorialTrack] = useState<"start" | "hour1" | "pitfalls">("start");
   const [buildingPhase, setBuildingPhase] = useState<"early" | "mid" | "late">("early");
   const [militaryPhase, setMilitaryPhase] = useState<"light" | "mid" | "heavy">("light");
   const [techPhase, setTechPhase] = useState<"base" | "advanced" | "endgame">("base");
@@ -6374,72 +6721,251 @@ function WikiScreen({ language }: { language: UILanguage }) {
         const baseProdSec = RESOURCE_BASE_PRODUCTION[res.id as ResourceId] ?? 0;
         return {
           ...res,
+          name: resourceDisplayName(res.id, language),
+          machine: resourceMachineDisplay(res.id, language),
           roomType,
           baseCost,
           baseTimeSec,
           baseProdSec
         };
       }),
-    []
+    [language]
   );
 
-  const ships = useMemo(() => HANGAR_UNIT_DEFS.filter((unit) => unit.category === "ship"), []);
-  const defenses = useMemo(() => HANGAR_UNIT_DEFS.filter((unit) => unit.category === "defense"), []);
-  const techRows = useMemo(() => TECHNOLOGY_DEFS, []);
+  const ships = useMemo(
+    () =>
+      HANGAR_UNIT_DEFS
+        .filter((unit) => unit.category === "ship")
+        .map((unit) => ({ ...unit, name: hangarUnitDisplayName(unit.id, unit.name, language) })),
+    [language]
+  );
+  const defenses = useMemo(
+    () =>
+      HANGAR_UNIT_DEFS
+        .filter((unit) => unit.category === "defense")
+        .map((unit) => ({ ...unit, name: hangarUnitDisplayName(unit.id, unit.name, language) })),
+    [language]
+  );
+  const techRows = useMemo(
+    () =>
+      TECHNOLOGY_DEFS.map((tech) => ({
+        ...tech,
+        name: technologyDisplayName(tech.id, tech.name, language),
+        description: technologyDisplayDescription(tech.id, tech.description, language),
+        effectPerLevel: technologyDisplayEffect(tech.id, tech.effectPerLevel, language)
+      })),
+    [language]
+  );
 
   const formatWikiCost = (cost: ResourceCost) => {
     const keys = Object.keys(cost) as ResourceId[];
     if (keys.length === 0) return "-";
-    return keys.map((key) => `${(cost[key] ?? 0).toLocaleString()} ${key}`).join(" + ");
+    return keys.map((key) => `${(cost[key] ?? 0).toLocaleString()} ${resourceDisplayName(key, language)}`).join(" + ");
   };
 
   const tabDescription =
     buildingPhase === "early"
       ? l(
-          "Phase early: priorite sur Carbone, Titane, Entrepot et cadence de construction.",
-          "Early phase: focus on Carbon, Titanium, Storage and construction cadence."
+          "Phase initiale: priorite sur Carbone, Titane, Entrepot et cadence de construction.",
+          "Early phase: prioritize Carbon, Titanium, Warehouse capacity, and build cadence."
         )
       : buildingPhase === "mid"
         ? l(
-            "Phase mid: expansion Osmium/Adamantium et stabilisation de la reserve.",
-            "Mid phase: Osmium/Adamantium expansion and reserve stabilization."
+            "Phase intermediaire: expansion Osmium/Adamantium et stabilisation des reserves.",
+            "Mid phase: expand Osmium/Adamantium and stabilize reserves."
           )
         : l(
-            "Phase late: ressources de recherche et optimisation forte via technologies.",
-            "Late phase: research resources and heavy optimization via technologies."
+            "Phase avancee: ressources de recherche et optimisation intensive via technologies.",
+            "Late phase: scale research resources and optimize aggressively through technology."
           );
 
   const militaryDescription =
     militaryPhase === "light"
       ? l(
-          "Combat leger: reconnaissance, pression rapide, interception logistique.",
-          "Light combat: reconnaissance, rapid pressure, logistics interception."
+          "Combat leger: reconnaissance, pression rapide et interception logistique.",
+          "Light combat: scouting, rapid pressure, and logistics interception."
         )
       : militaryPhase === "mid"
         ? l(
-            "Combat moyen: flottes polyvalentes et defenses de maintien.",
-            "Mid combat: versatile fleets and sustain defenses."
+            "Combat moyen: flottes polyvalentes et defenses de maintien orbital.",
+            "Mid combat: versatile fleets with sustained orbital defense."
           )
         : l(
-            "Combat lourd: attrition longue, percÃ©e capitale, verrouillage orbital.",
-            "Heavy combat: long attrition, capital breakthrough, orbital lockdown."
+            "Combat lourd: attrition longue, percee capitale et verrouillage orbital.",
+            "Heavy combat: long attrition, capital breakthrough, and orbital lockdown."
           );
 
   const techDescription =
     techPhase === "base"
       ? l(
-          "Technologies de base: acceleration economique et debocages initiaux.",
+          "Technologies de base: acceleration economique et debloquages initiaux.",
           "Base technologies: economic acceleration and initial unlocks."
         )
       : techPhase === "advanced"
         ? l(
             "Technologies avancees: puissance militaire, defense et efficience energetique.",
-            "Advanced technologies: military power, defense and energy efficiency."
+            "Advanced technologies: military strength, defense scaling, and energy efficiency."
           )
         : l(
-            "Technologies endgame: commandement, modules et optimisation de haut niveau.",
-            "Endgame technologies: command, modules and high-level optimization."
-          );
+            "Technologies endgame: commandement, modules et optimisation strategique de haut niveau.",
+          "Endgame technologies: command systems, modules, and high-level strategic optimization."
+        );
+
+  const tutorialCards = tutorialTrack === "start"
+    ? [
+        {
+          id: "t_start_1",
+          title: l("1. Stabiliser l'economie", "1. Stabilize economy"),
+          text: l(
+            "Montez Raffinerie de Carbone et Fabrique de Titane rapidement, puis posez un Entrepot pour eviter le blocage de production.",
+            "Level up Carbon Refinery and Titanium Factory quickly, then build a Warehouse to avoid production cap lock."
+          )
+        },
+        {
+          id: "t_start_2",
+          title: l("2. Garder la file active", "2. Keep queue active"),
+          text: l(
+            "Ne laissez jamais la file batiment vide. Meme une amelioration mineure vaut mieux qu'une file inactive.",
+            "Never leave the building queue idle. Even a minor upgrade is better than an empty queue."
+          )
+        },
+        {
+          id: "t_start_3",
+          title: l("3. Debloquer la chaine", "3. Unlock the chain"),
+          text: l(
+            "Visez Osmium puis Adamantium. Ces ressources ouvrent le mid game militaire et les technologies cle.",
+            "Rush Osmium then Adamantium. These resources unlock military mid game and key technologies."
+          )
+        }
+      ]
+    : tutorialTrack === "hour1"
+      ? [
+          {
+            id: "t_h1_1",
+            title: l("Minute 0-15", "Minute 0-15"),
+            text: l(
+              "Optimisez Carbone/Titane, lancez vos premieres ameliorations et gardez le zoom sur le quadrillage pour enchaîner.",
+              "Optimize Carbon/Titanium, start first upgrades, and stay focused on the grid to chain actions."
+            )
+          },
+          {
+            id: "t_h1_2",
+            title: l("Minute 15-35", "Minute 15-35"),
+            text: l(
+              "Posez Entrepot, preparez Osmium, puis surveillez la barre de ressources en haut pour eviter les caps.",
+              "Build Warehouse, prepare Osmium, and monitor top resource bar to avoid hitting caps."
+            )
+          },
+          {
+            id: "t_h1_3",
+            title: l("Minute 35-60", "Minute 35-60"),
+            text: l(
+              "Lancez la premiere techno eco, ouvrez le Hangar, et preparez une composition legere pour la carte.",
+              "Start first eco tech, open Hangar, and prepare a light composition for map operations."
+            )
+          }
+        ]
+      : [
+          {
+            id: "t_pit_1",
+            title: l("Erreur: stock plein", "Mistake: storage full"),
+            text: l(
+              "Si la ressource atteint le cap, la production stoppe. Montez Entrepot avant d'enchainer des boosts.",
+              "If a resource reaches cap, production stops. Upgrade Warehouse before chaining boosts."
+            )
+          },
+          {
+            id: "t_pit_2",
+            title: l("Erreur: tech sans eco", "Mistake: tech before economy"),
+            text: l(
+              "Monter des technos trop tot ralentit tout. Priorisez production et file batiment active.",
+              "Rushing tech too early slows everything down. Prioritize production and active building queue."
+            )
+          },
+          {
+            id: "t_pit_3",
+            title: l("Erreur: flotte non specialisee", "Mistake: unspecialized fleet"),
+            text: l(
+              "Mixez reconnaissance, attaque et transport selon objectif. Une flotte unique est facile a contrer.",
+              "Mix scouting, attack, and transport by objective. A single-type fleet is easy to counter."
+            )
+          }
+        ];
+
+  const tutorialChecklist = tutorialTrack === "start"
+    ? [
+        l("Ameliorer Carbone et Titane au moins niveau 3.", "Upgrade Carbon and Titanium to at least level 3."),
+        l("Construire Entrepot Orbital niveau 1.", "Build Orbital Warehouse level 1."),
+        l("Lancer une recherche economique.", "Start one economic research."),
+        l("Ne jamais laisser la file batiment vide.", "Never leave the building queue idle.")
+      ]
+    : tutorialTrack === "hour1"
+      ? [
+          l("Verifier la carte et poser 1 balise utile.", "Check the map and save 1 useful bookmark."),
+          l("Produire au moins 1 vaisseau de reco et 1 defense.", "Produce at least 1 scout ship and 1 defense."),
+          l("Utiliser un accelerateur sur la bonne file.", "Use one accelerator on the right queue."),
+          l("Verifier le ratio production/capacite.", "Check production/capacity ratio.")
+        ]
+      : [
+          l("Eviter de depenser tous les coffres a cap plein.", "Avoid opening all chests while capped."),
+          l("Ne pas ignorer les prerequis de doctrine.", "Do not ignore doctrine prerequisites."),
+          l("Ne pas surinvestir militaire sans logistique.", "Do not overinvest in military without logistics."),
+          l("Toujours verifier le cout du niveau suivant.", "Always check next-level cost before launch.")
+        ];
+
+  const tutorialRoadmap = [
+    {
+      phase: l("Session 1", "Session 1"),
+      objective: l("Stabiliser l'economie de base", "Stabilize base economy"),
+      actions: l(
+        "Carbone/Titane niveaux 3+, Entrepot niveau 1, file batiment active.",
+        "Carbon/Titanium level 3+, Warehouse level 1, active building queue."
+      ),
+      checkpoint: l("Aucun blocage de cap pendant 20 min.", "No storage-cap lock for 20 min.")
+    },
+    {
+      phase: l("Session 2", "Session 2"),
+      objective: l("Passer en mode expansion", "Move into expansion mode"),
+      actions: l(
+        "Debloquer Osmium + Adamantium, lancer 1 techno eco et 1 defense.",
+        "Unlock Osmium + Adamantium, start 1 economy tech and 1 defense."
+      ),
+      checkpoint: l("Production multi-ressources stable.", "Stable multi-resource production.")
+    },
+    {
+      phase: l("Session 3", "Session 3"),
+      objective: l("Entrer dans le mid game", "Enter mid game"),
+      actions: l(
+        "Ouvrir Hangar en continu, doctrines de base, premieres operations carte.",
+        "Run Hangar continuously, unlock base doctrines, launch first map operations."
+      ),
+      checkpoint: l("Flotte legere + defenses actives.", "Light fleet + active defenses.")
+    }
+  ];
+
+  const tutorialFaq = [
+    {
+      q: l("Quand utiliser les accelerateurs ?", "When should I use accelerators?"),
+      a: l(
+        "Utilisez-les quand votre file est deja rentable (Osmium/Adamantium, techno cle, unite critique). Evitez de les depenser sur des niveaux faibles.",
+        "Use them when your queue is already high value (Osmium/Adamantium, key tech, critical unit). Avoid spending them on low-value levels."
+      )
+    },
+    {
+      q: l("Pourquoi ma production s'arrete ?", "Why did my production stop?"),
+      a: l(
+        "Votre entrepot est plein. La production est clamp cote serveur. Montez l'Entrepot Orbital ou depensez des ressources.",
+        "Your warehouse is full. Production is server-side clamped. Upgrade Orbital Warehouse or spend resources."
+      )
+    },
+    {
+      q: l("Comment progresser plus vite sans me bloquer ?", "How do I progress faster without stalling?"),
+      a: l(
+        "Gardez les 3 files actives (batiment, hangar, recherche), evitez les caps, et priorisez les prerequis qui debloquent les paliers suivants.",
+        "Keep all 3 queues active (building, hangar, research), avoid caps, and prioritize prerequisites that unlock the next milestones."
+      )
+    }
+  ];
 
   return (
     <main className="wiki-shell">
@@ -6470,15 +6996,104 @@ function WikiScreen({ language }: { language: UILanguage }) {
       <nav className="wiki-toc" aria-label={l("Sommaire Wiki", "Wiki table of contents")}>
         <h3>{l("Sommaire", "Contents")}</h3>
         <div className="wiki-toc-links">
-          <a href="#wiki-batiments">{l("1. Les Batiments", "1. Buildings")}</a>
-          <a href="#wiki-vaisseaux">{l("2. Vaisseaux & Defenses", "2. Ships & Defenses")}</a>
-          <a href="#wiki-technologies">{l("3. Les Technologies", "3. Technologies")}</a>
+          <a href="#wiki-tutoriel">{l("1. Tutoriel de progression", "1. Progression tutorial")}</a>
+          <a href="#wiki-batiments">{l("2. Les Batiments", "2. Buildings")}</a>
+          <a href="#wiki-vaisseaux">{l("3. Vaisseaux & Defenses", "3. Ships & Defenses")}</a>
+          <a href="#wiki-technologies">{l("4. Les Technologies", "4. Technologies")}</a>
         </div>
       </nav>
 
+      <section id="wiki-tutoriel" className="wiki-section">
+        <header className="wiki-section-head">
+          <h3>{l("1. Tutoriel de progression", "1. Progression tutorial")}</h3>
+          <p>
+            {l(
+              "Parcours guide pour debutant: quoi faire, dans quel ordre, et comment eviter les erreurs qui ralentissent la progression.",
+              "Guided beginner path: what to do, in which order, and how to avoid mistakes that slow progression."
+            )}
+          </p>
+        </header>
+
+        <div className="wiki-note">
+          <strong>{l("Mode actif", "Active mode")}</strong>
+          <span>
+            {tutorialTrack === "start"
+              ? l("Demarrage global", "Global kickoff")
+              : tutorialTrack === "hour1"
+                ? l("Plan 60 minutes", "60-minute plan")
+                : l("Erreurs frequentes", "Common pitfalls")}
+          </span>
+        </div>
+
+        <div className="wiki-tabs">
+          <button className={tutorialTrack === "start" ? "active" : ""} onClick={() => setTutorialTrack("start")}>
+            {l("Demarrage", "Start")}
+          </button>
+          <button className={tutorialTrack === "hour1" ? "active" : ""} onClick={() => setTutorialTrack("hour1")}>
+            {l("Premiere heure", "First hour")}
+          </button>
+          <button className={tutorialTrack === "pitfalls" ? "active" : ""} onClick={() => setTutorialTrack("pitfalls")}>
+            {l("A eviter", "Avoid")}
+          </button>
+        </div>
+
+        <div className="wiki-info-grid wiki-tutorial-grid">
+          {tutorialCards.map((card) => (
+            <article key={card.id} className="wiki-info-card">
+              <strong>{card.title}</strong>
+              <span>{card.text}</span>
+            </article>
+          ))}
+        </div>
+
+        <article className="wiki-checklist">
+          <h4>{l("Checklist immediate", "Immediate checklist")}</h4>
+          <ul>
+            {tutorialChecklist.map((item) => (
+              <li key={item}>{item}</li>
+            ))}
+          </ul>
+        </article>
+
+        <div className="wiki-table-wrap">
+          <table className="wiki-table">
+            <thead>
+              <tr>
+                <th>{l("Etape", "Stage")}</th>
+                <th>{l("Objectif", "Objective")}</th>
+                <th>{l("Actions cles", "Key actions")}</th>
+                <th>{l("Validation", "Checkpoint")}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {tutorialRoadmap.map((row) => (
+                <tr key={row.phase}>
+                  <td>{row.phase}</td>
+                  <td>{row.objective}</td>
+                  <td>{row.actions}</td>
+                  <td>{row.checkpoint}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        <details className="wiki-spoiler">
+          <summary>{l("FAQ de progression", "Progression FAQ")}</summary>
+          <div className="wiki-faq-list">
+            {tutorialFaq.map((row) => (
+              <article key={row.q} className="wiki-faq-item">
+                <strong>{row.q}</strong>
+                <span>{row.a}</span>
+              </article>
+            ))}
+          </div>
+        </details>
+      </section>
+
       <section id="wiki-batiments" className="wiki-section">
         <header className="wiki-section-head">
-          <h3>{l("1. Les Batiments", "1. Buildings")}</h3>
+          <h3>{l("2. Les Batiments", "2. Buildings")}</h3>
           <p>{l("La couche economique structure tout le gameplay: production, couts, temps, stockage.", "The economic layer structures all gameplay: production, costs, time and storage.")}</p>
         </header>
 
@@ -6512,11 +7127,18 @@ Storage(n) = Storage_base x 1.6^(n - 1)`}
         <details className="wiki-spoiler">
           <summary>{l("Scaling avance et logique serveur", "Advanced scaling and server logic")}</summary>
           <pre>
-{`- Calcul en float cote serveur
+{l(
+`- Calcul en float cote serveur
 - Delta offline = floor(server_now - last_update)
 - Clamp a la capacite entrepot pour la production
 - Arrivages externes (coffres/flottes) autorises au-dessus du cap
-- Affichage client arrondi`}
+- Affichage client arrondi`,
+`- Server-side float calculations
+- Offline delta = floor(server_now - last_update)
+- Production clamped to warehouse capacity
+- External deliveries (chests/fleets) can exceed cap
+- Rounded values on client display`
+)}
           </pre>
         </details>
 
@@ -6526,7 +7148,7 @@ Storage(n) = Storage_base x 1.6^(n - 1)`}
             <thead>
               <tr>
                 <th>{l("Ressource", "Resource")}</th>
-                <th>{l("RaretÃ©", "Rarity")}</th>
+                <th>{l("Rarete", "Rarity")}</th>
                 <th>{l("Batiment", "Building")}</th>
                 <th>{l("Prod. base/s", "Base prod/s")}</th>
                 <th>{l("Cout base", "Base cost")}</th>
@@ -6556,7 +7178,7 @@ Storage(n) = Storage_base x 1.6^(n - 1)`}
             <thead>
               <tr>
                 <th>{l("Ressource", "Resource")}</th>
-                <th>{l("RaretÃ©", "Rarity")}</th>
+                <th>{l("Rarete", "Rarity")}</th>
                 <th>{l("Batiment", "Building")}</th>
                 <th>{l("Prod. base/s", "Base prod/s")}</th>
                 <th>{l("Cout base", "Base cost")}</th>
@@ -6583,7 +7205,7 @@ Storage(n) = Storage_base x 1.6^(n - 1)`}
 
       <section id="wiki-vaisseaux" className="wiki-section">
         <header className="wiki-section-head">
-          <h3>{l("2. Vaisseaux & Defenses", "2. Ships & Defenses")}</h3>
+          <h3>{l("3. Vaisseaux & Defenses", "3. Ships & Defenses")}</h3>
           <p>{l("Le systeme militaire combine puissance brute, endurance, vitesse, capacite et energie quantique.", "The military system combines raw power, endurance, speed, capacity and quantum energy.")}</p>
         </header>
 
@@ -6607,11 +7229,18 @@ Storage(n) = Storage_base x 1.6^(n - 1)`}
         <details className="wiki-spoiler">
           <summary>{l("Formules de combat simplifiees", "Simplified combat formulas")}</summary>
           <pre>
-{`1) Tri des unites par vitesse
+{l(
+`1) Tri des unites par vitesse
 2) Tir: degats = force x random(0.9 -> 1.1) - endurance_cible
 3) Clamp degats >= 0
 4) Application simultanee des cycles
-5) Consommation d'energie quantique selon distance et composition`}
+5) Consommation d'energie quantique selon distance et composition`,
+`1) Sort units by speed
+2) Shot: damage = force x random(0.9 -> 1.1) - target_endurance
+3) Clamp damage >= 0
+4) Apply cycles simultaneously
+5) Consume quantum energy based on distance and fleet composition`
+)}
           </pre>
         </details>
 
@@ -6676,7 +7305,7 @@ Storage(n) = Storage_base x 1.6^(n - 1)`}
 
       <section id="wiki-technologies" className="wiki-section">
         <header className="wiki-section-head">
-          <h3>{l("3. Les Technologies", "3. Technologies")}</h3>
+          <h3>{l("4. Les Technologies", "4. Technologies")}</h3>
           <p>{l("Progression scientifique a croissance exponentielle: economie, combat, defense, commandement et energie.", "Exponential scientific progression: economy, combat, defense, command and energy.")}</p>
         </header>
 
@@ -6700,9 +7329,14 @@ Storage(n) = Storage_base x 1.6^(n - 1)`}
         <details className="wiki-spoiler">
           <summary>{l("Formules de recherche", "Research formulas")}</summary>
           <pre>
-{`TechCost(n) = TechCost_base x 1.6^(n - 1)
+{l(
+`TechCost(n) = TechCost_base x 1.6^(n - 1)
 TechTime(n) = TechTime_base x 1.5^(n - 1)
-Les bonus se cumulent multiplicativement`}
+Les bonus se cumulent multiplicativement`,
+`TechCost(n) = TechCost_base x 1.6^(n - 1)
+TechTime(n) = TechTime_base x 1.5^(n - 1)
+Bonuses stack multiplicatively`
+)}
           </pre>
         </details>
 
@@ -6800,14 +7434,14 @@ function ResourceScreen({
         <div className="resource-grid">
           {sectioned.construction.map((res) => {
             const unlocked = unlockedIds.includes(res.id);
-            const techBonuses = getUnlockedResourceTechBonuses(res.id as ResourceId, technologyLevels);
+            const techBonuses = getUnlockedResourceTechBonuses(res.id as ResourceId, technologyLevels, language);
             return (
               <article key={res.id} className="resource-card">
                 <header>
-                  <strong>{res.name}</strong>
+                  <strong>{resourceDisplayName(res.id as ResourceId, language)}</strong>
                   <span>R{res.rarity}</span>
                 </header>
-                <p>{res.machine}</p>
+                <p>{resourceMachineDisplay(res.id as ResourceId, language)}</p>
                 {unlocked ? (
                   <>
                     <div className="resource-values">
@@ -6847,14 +7481,14 @@ function ResourceScreen({
         <div className="resource-grid">
           {sectioned.research.map((res) => {
             const unlocked = unlockedIds.includes(res.id);
-            const techBonuses = getUnlockedResourceTechBonuses(res.id as ResourceId, technologyLevels);
+            const techBonuses = getUnlockedResourceTechBonuses(res.id as ResourceId, technologyLevels, language);
             return (
               <article key={res.id} className="resource-card">
                 <header>
-                  <strong>{res.name}</strong>
+                  <strong>{resourceDisplayName(res.id as ResourceId, language)}</strong>
                   <span>R{res.rarity}</span>
                 </header>
-                <p>{res.machine}</p>
+                <p>{resourceMachineDisplay(res.id as ResourceId, language)}</p>
                 {unlocked ? (
                   <>
                     <div className="resource-values">
@@ -7733,7 +8367,7 @@ function InboxScreen({
               <div className="inbox-attachments">
                 <h4>{l("Pieces jointes", "Attachments")}</h4>
                 {selectedMessage.attachments.resources && Object.keys(selectedMessage.attachments.resources).length > 0 ? (
-                  <ResourceCostDisplay cost={selectedMessage.attachments.resources as ResourceCost} available={{}} compact />
+                  <ResourceCostDisplay cost={selectedMessage.attachments.resources as ResourceCost} available={{}} language={language} compact />
                 ) : null}
                 {Array.isArray(selectedMessage.attachments.items) && selectedMessage.attachments.items.length > 0 ? (
                   <ul>
@@ -8608,6 +9242,7 @@ function StatLine({ icon, label, value }: { icon: JSX.Element; label: string; va
 }
 
 function BuildModal({
+  language,
   buildSlot,
   resourceAmounts,
   rooms,
@@ -8618,6 +9253,7 @@ function BuildModal({
   onClose,
   getAvailableSpace
 }: {
+  language: UILanguage;
   buildSlot: { x: number; y: number } | null;
   resourceAmounts: Record<string, number>;
   rooms: Room[];
@@ -8628,6 +9264,7 @@ function BuildModal({
   onClose: () => void;
   getAvailableSpace: (x: number, y: number) => { minX: number; maxX: number; width: number };
 }) {
+  const l = (fr: string, en: string) => (language === "en" ? en : fr);
   if (!buildSlot) return null;
 
   const free = getAvailableSpace(buildSlot.x, buildSlot.y);
@@ -8636,7 +9273,7 @@ function BuildModal({
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal-card" onClick={(e) => e.stopPropagation()}>
         <div className="modal-head">
-          <h3>Construire un module</h3>
+          <h3>{l("Construire un module", "Build a module")}</h3>
           <button onClick={onClose}><X size={16} /></button>
         </div>
 
@@ -8652,16 +9289,16 @@ function BuildModal({
             return (
               <button key={type} className={`build-item ${disabled ? "disabled" : ""}`} disabled={disabled} onClick={() => onBuild(type)}>
                 <span className={`dot ${cfg.color}`}>{cfg.icon}</span>
-                <span className="title">{cfg.name}</span>
-                <span>Largeur {cfg.width}</span>
+                <span className="title">{roomDisplayName(type, language)}</span>
+                <span>{l("Largeur", "Width")} {cfg.width}</span>
                 <div className="build-item-cost">
-                  <ResourceCostDisplay cost={cost} available={resourceAmounts} compact />
+                  <ResourceCostDisplay cost={cost} available={resourceAmounts} language={language} compact />
                 </div>
-                <span>Temps {formatDuration(buildSecondsForLevel(type, 1, buildingTimeReductionFactor))}</span>
-                {!fits && <em>Espace horizontal insuffisant</em>}
-                {alreadyBuilt && <em>Deja construit</em>}
-                {!affordable && <em>Ressources insuffisantes</em>}
-                {constructionJob ? <em>File de construction occupee</em> : null}
+                <span>{l("Temps", "Time")} {formatDuration(buildSecondsForLevel(type, 1, buildingTimeReductionFactor))}</span>
+                {!fits && <em>{l("Espace horizontal insuffisant", "Not enough horizontal space")}</em>}
+                {alreadyBuilt && <em>{l("Deja construit", "Already built")}</em>}
+                {!affordable && <em>{l("Ressources insuffisantes", "Not enough resources")}</em>}
+                {constructionJob ? <em>{l("File de construction occupee", "Construction queue busy")}</em> : null}
               </button>
             );
           })}
@@ -8672,6 +9309,7 @@ function BuildModal({
 }
 
 function UpgradeModal({
+  language,
   room,
   resourceAmounts,
   constructionJob,
@@ -8687,6 +9325,7 @@ function UpgradeModal({
   onUpgrade,
   onUseBoost
 }: {
+  language: UILanguage;
   room: Room | null;
   resourceAmounts: Record<string, number>;
   constructionJob: ConstructionJob | null;
@@ -8702,6 +9341,7 @@ function UpgradeModal({
   onUpgrade: (room: Room) => void;
   onUseBoost: (itemId: string, quantity?: number) => void;
 }) {
+  const l = (fr: string, en: string) => (language === "en" ? en : fr);
   const [boostOpen, setBoostOpen] = useState(false);
   const [boostItemId, setBoostItemId] = useState("");
   const [boostQuantityInput, setBoostQuantityInput] = useState("1");
@@ -8772,40 +9412,40 @@ function UpgradeModal({
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal-card small upgrade-modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-head">
-          <h3>{cfg.name}</h3>
+          <h3>{roomDisplayName(room.type, language)}</h3>
           <button onClick={onClose}><X size={16} /></button>
         </div>
 
         <div className="upgrade-body">
           <div className="upgrade-level-line">
-            <span>Niveau {room.level} / {cfg.maxLevel}</span>
-            <em>{constructionJob ? "File occupee" : "Pret"}</em>
+            <span>{l("Niveau", "Level")} {room.level} / {cfg.maxLevel}</span>
+            <em>{constructionJob ? l("File occupee", "Queue busy") : l("Pret", "Ready")}</em>
           </div>
           <p className="upgrade-stat-main">
-            {isResource ? "Production/sec" : room.type === "entrepot" ? "Capacite stockage" : "Structure"}:
+            {isResource ? l("Production/sec", "Production/sec") : room.type === "entrepot" ? l("Capacite stockage", "Storage capacity") : l("Structure", "Structure")}:
             <strong>{isResource ? current.toFixed(3) : Math.floor(current).toLocaleString()}</strong>
             {!atMax ? <span>{"-> "}{isResource ? next.toFixed(3) : Math.floor(next).toLocaleString()}</span> : null}
           </p>
           {!atMax && isResource ? (
             <p className="upgrade-next-gain">
-              Gain niveau suivant: <strong>+{deltaNext.toFixed(3)}/s</strong> <span>(+{(deltaNext * 3600).toFixed(1)}/h)</span>
+              {l("Gain niveau suivant", "Next level gain")}: <strong>+{deltaNext.toFixed(3)}/s</strong> <span>(+{(deltaNext * 3600).toFixed(1)}/h)</span>
             </p>
           ) : null}
           {!atMax ? (
             <div className="upgrade-cost-line">
-              <span className="upgrade-cost-label">Cout:</span>
-              <ResourceCostDisplay cost={nextCost} available={resourceAmounts} compact />
+              <span className="upgrade-cost-label">{l("Cout", "Cost")}:</span>
+              <ResourceCostDisplay cost={nextCost} available={resourceAmounts} language={language} compact />
             </div>
           ) : null}
-          <p className="upgrade-time-line">Temps prochain niveau: {formatDuration(buildSecondsForLevel(room.type, room.level + 1, buildingTimeReductionFactor))}</p>
+          <p className="upgrade-time-line">{l("Temps prochain niveau", "Next level time")}: {formatDuration(buildSecondsForLevel(room.type, room.level + 1, buildingTimeReductionFactor))}</p>
 
           {isResource ? (
             <details className="upgrade-spoiler">
-              <summary>Projection production (n-1 a n+5)</summary>
+              <summary>{l("Projection production (n-1 a n+5)", "Production projection (n-1 to n+5)")}</summary>
               <div className="upgrade-projection-grid">
-                <div className="head">Niveau</div>
+                <div className="head">{l("Niveau", "Level")}</div>
                 <div className="head">/sec</div>
-                <div className="head">/heure</div>
+                <div className="head">{l("/heure", "/hour")}</div>
                 {projectionLevels.map((lvl) => {
                   const valueSec = computeProductionPerSecond(cfg.resourceId!, lvl, productionBonusesByResource[cfg.resourceId!] ?? 0);
                   const valueHour = valueSec * 3600;
@@ -8827,7 +9467,7 @@ function UpgradeModal({
           <div className="upgrade-actions upgrade-only">
             <button className="ok" disabled={atMax || !canPay} onClick={() => onUpgrade(room)}>
               <ArrowUpCircle size={16} />
-              {atMax ? "NIVEAU MAX" : "Ameliorer le module"}
+              {atMax ? l("NIVEAU MAX", "MAX LEVEL") : l("Ameliorer le module", "Upgrade module")}
             </button>
           </div>
         ) : null}
@@ -8840,7 +9480,7 @@ function UpgradeModal({
               onClick={() => setBoostOpen((prev) => !prev)}
             >
               <Hourglass size={16} />
-              {inventoryLoading ? "Chargement..." : boostOpen ? "Fermer acceleration" : "Acceleration"}
+              {inventoryLoading ? l("Chargement...", "Loading...") : boostOpen ? l("Fermer acceleration", "Close acceleration") : l("Acceleration", "Acceleration")}
             </button>
           </div>
         ) : null}
@@ -8860,7 +9500,7 @@ function UpgradeModal({
                     <img src={TIME_BOOST_ITEM_IMAGE} alt={item.name} />
                     <div className="upgrade-boost-item-meta">
                       <strong>{formatBoostDurationLabel(item.durationSeconds ?? 0)}</strong>
-                      <span>{item.quantity.toLocaleString()} dispo</span>
+                      <span>{item.quantity.toLocaleString()} {l("dispo", "available")}</span>
                     </div>
                   </button>
                 );
@@ -8869,7 +9509,7 @@ function UpgradeModal({
 
             {selectedBoost ? (
               <div className="upgrade-boost-controls">
-                <label htmlFor="boost-quantity">Quantite</label>
+                <label htmlFor="boost-quantity">{l("Quantite", "Quantity")}</label>
                 <input
                   id="boost-quantity"
                   type="number"
@@ -8879,10 +9519,10 @@ function UpgradeModal({
                   onChange={(e) => setBoostQuantityInput(e.target.value)}
                 />
                 <p className="upgrade-boost-preview">
-                  Reduction: <strong>-{formatDuration(totalBoostSeconds)}</strong>
+                  {l("Reduction", "Reduction")}: <strong>-{formatDuration(totalBoostSeconds)}</strong>
                   <span>
                     {constructionJob
-                      ? ` | Restant ${formatDuration(constructionRemainingSeconds)} -> ${formatDuration(remainingAfterBoost)}`
+                      ? ` | ${l("Restant", "Remaining")} ${formatDuration(constructionRemainingSeconds)} -> ${formatDuration(remainingAfterBoost)}`
                       : ""}
                   </span>
                 </p>
@@ -8896,11 +9536,11 @@ function UpgradeModal({
                   }}
                 >
                   {boostLoading
-                    ? "Activation..."
-                    : `Lancer x${effectiveBoostQuantity} (${formatBoostDurationLabel(selectedBoost.durationSeconds ?? 0)})`}
+                    ? l("Activation...", "Activating...")
+                    : `${l("Lancer", "Launch")} x${effectiveBoostQuantity} (${formatBoostDurationLabel(selectedBoost.durationSeconds ?? 0)})`}
                 </button>
                 {requestedBoostQuantity > selectedBoost.quantity ? (
-                  <p className="upgrade-boost-note">Quantite ajustee au stock disponible ({selectedBoost.quantity}).</p>
+                  <p className="upgrade-boost-note">{l("Quantite ajustee au stock disponible", "Quantity adjusted to available stock")} ({selectedBoost.quantity}).</p>
                 ) : null}
               </div>
             ) : null}
