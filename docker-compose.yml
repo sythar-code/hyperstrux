@@ -1,0 +1,84 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - ./backend/postgres/data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -p 5432 -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - backend
+
+  nakama-migrate:
+    image: heroiclabs/nakama:3.22.0
+    depends_on:
+      postgres:
+        condition: service_healthy
+    entrypoint:
+      - "/bin/sh"
+      - "-ec"
+      - >
+        /nakama/nakama migrate up
+        --database.address ${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+    restart: "no"
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - backend
+
+  nakama:
+    image: heroiclabs/nakama:3.22.0
+    depends_on:
+      nakama-migrate:
+        condition: service_completed_successfully
+    entrypoint:
+      - "/bin/sh"
+      - "-ec"
+      - >
+        exec /nakama/nakama
+        --name hsg-nakama
+        --database.address ${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+        --logger.level INFO
+        --console.username ${NAKAMA_CONSOLE_USERNAME}
+        --console.password ${NAKAMA_CONSOLE_PASSWORD}
+        --console.signing_key ${NAKAMA_CONSOLE_SIGNING_KEY}
+        --socket.server_key ${NAKAMA_SERVER_KEY}
+        --session.encryption_key ${NAKAMA_SESSION_ENCRYPTION_KEY}
+        --session.refresh_encryption_key ${NAKAMA_REFRESH_ENCRYPTION_KEY}
+        --runtime.http_key ${NAKAMA_RUNTIME_HTTP_KEY}
+        --runtime.js_entrypoint hyperstructure_economy.js
+        --session.token_expiry_sec 7200
+    restart: unless-stopped
+    ports:
+      - "${NAKAMA_BIND_ADDR:-127.0.0.1}:${NAKAMA_HTTP_PORT}:7350"
+    volumes:
+      - ./backend/nakama/data:/nakama/data
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - backend
+
+networks:
+  backend:
+    driver: bridge

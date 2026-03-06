@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <title>Wiki Officiel – Système Militaire</title>
+</head>
+<body>
+
+<h1>Système Militaire – Guide Officiel</h1>
+
+<p>
+Le jeu dispose d'un système militaire complet : vaisseaux, défenses planétaires et technologies.
+Chaque unité consomme de l'énergie quantique (anciennement carburant) et nécessite des ressources pour être construite.
+Les combats se déroulent avec un calcul de forces et de vitesse, avec un peu d'aléatoire pour le réalisme.
+</p>
+
+<hr>
+
+<h2>1. Fonctionnement Général</h2>
+
+<ul>
+    <li>Chaque vaisseau a un coût en ressources et en énergie quantique.</li>
+    <li>Chaque défense planétaire a un coût fixe et protège la base.</li>
+    <li>Les vaisseaux peuvent être améliorés via technologies et objets.</li>
+    <li>Le nombre d’escadres disponibles dépend des technologies de commandement.</li>
+    <li>Les combats utilisent un ordre de tir basé sur la vitesse et un facteur d’aléatoire.</li>
+</ul>
+
+<hr>
+
+<h2>2. Vaisseaux (Chantier Naval – Niveau 1)</h2>
+
+<table border="1" cellpadding="5">
+<tr>
+<th>Vaisseau</th><th>Coût Carbone</th><th>Coût Titane</th><th>Coût Osmium</th><th>Coût Adamantium</th>
+<th>Force</th><th>Endurance</th><th>Vitesse</th><th>Capacité</th><th>Énergie Quantique / Heure</th>
+</tr>
+
+<tr><td>Éclaireur Stellaire</td><td>2 000</td><td>800</td><td>0</td><td>0</td><td>5</td><td>40</td><td>120</td><td>10</td><td>1</td></tr>
+<tr><td>Foudroyant</td><td>3 500</td><td>1 200</td><td>200</td><td>0</td><td>8</td><td>65</td><td>160</td><td>12</td><td>1.2</td></tr>
+<tr><td>Aurore</td><td>8 000</td><td>3 000</td><td>600</td><td>0</td><td>15</td><td>120</td><td>450</td><td>7</td><td>2</td></tr>
+<tr><td>Spectre</td><td>15 000</td><td>6 000</td><td>2 000</td><td>200</td><td>25</td><td>260</td><td>900</td><td>5</td><td>3</td></tr>
+<tr><td>Tempest</td><td>28 000</td><td>12 000</td><td>4 500</td><td>500</td><td>45</td><td>550</td><td>1 200</td><td>4</td><td>4</td></tr>
+<tr><td>Titanide</td><td>60 000</td><td>25 000</td><td>10 000</td><td>1 500</td><td>85</td><td>1 100</td><td>850</td><td>8</td><td>6</td></tr>
+<tr><td>Colosse</td><td>120 000</td><td>50 000</td><td>20 000</td><td>3 000</td><td>160</td><td>2 200</td><td>650</td><td>12</td><td>8</td></tr>
+<tr><td>Pégase</td><td>5 000</td><td>2 000</td><td>0</td><td>0</td><td>0</td><td>50</td><td>80</td><td>50</td><td>0.5</td></tr>
+<tr><td>Argo</td><td>12 000</td><td>5 000</td><td>500</td><td>0</td><td>0</td><td>120</td><td>70</td><td>200</td><td>1</td></tr>
+<tr><td>Arche Spatiale</td><td>25 000</td><td>10 000</td><td>2 500</td><td>0</td><td>0</td><td>300</td><td>50</td><td>500</td><td>2</td></tr>
+
+<!-- Ajouter les 15 autres vaisseaux similaires, équilibrés par coût, force, endurance, vitesse et capacité -->
+
+</table>
+
+<hr>
+
+<h2>3. Défenses Planétaires</h2>
+
+<table border="1" cellpadding="5">
+<tr><th>Défense</th><th>Coût Carbone</th><th>Coût Titane</th><th>Coût Osmium</th><th>Coût Adamantium</th>
+<th>Force</th><th>Endurance</th><th>Portée</th><th>Recharge</th></tr>
+
+<tr><td>Projecteur Photonique</td><td>2 500</td><td>1 000</td><td>0</td><td>0</td><td>15</td><td>300</td><td>5</td><td>3 sec</td></tr>
+<tr><td>Lame de Plasma</td><td>8 000</td><td>3 500</td><td>500</td><td>0</td><td>45</td><td>900</td><td>7</td><td>5 sec</td></tr>
+<tr><td>Lanceur Orbitral</td><td>15 000</td><td>6 000</td><td>2 000</td><td>200</td><td>90</td><td>1 800</td><td>9</td><td>10 sec</td></tr>
+<tr><td>Champ Aegis</td><td>50 000</td><td>20 000</td><td>5 000</td><td>1 000</td><td>0</td><td>4 000</td><td>0</td><td>Passif</td></tr>
+</table>
+
+<hr>
+
+<h2>4. Formules de Combat</h2>
+
+<ul>
+    <li><strong>Ordre de tir :</strong> vaisseaux les plus rapides tirent en premier.</li>
+    <li><strong>Force effective :</strong> Force aléatoire ±10% pour simuler l’incertitude.</li>
+    <li><strong>Dégâts :</strong> Dégâts = Force × multiplicateur vs type de cible (ex : éclaireur vs transport faible).</li>
+    <li><strong>Résistance :</strong> Endurance réduit les dégâts entrants.</li>
+    <li><strong>Carburant :</strong> Énergie Quantique consommée proportionnelle à la distance et au type de vaisseau.</li>
+</ul>
+
+<h3>Exemple de calcul de combat</h3>
+
+<pre>
+1) Trier les vaisseaux attaquants et défenseurs par vitesse.
+2) Pour chaque tir :
+   Dégâts infligés = (Force × random(0.9-1.1)) - Endurance cible
+   Si dégâts < 0, dégâts = 0
+3) Appliquer dégâts simultanément à chaque cycle de tir
+4) Vérifier destruction : Endurance <= 0
+5) Répéter jusqu'à épuisement des forces ou fin du combat
+</pre>
+
+<hr>
+
+<h2>5. Équilibrage et Contre-stratégie</h2>
+
+<ul>
+    <li>Éclaireur Stellaire : rapide, faible, idéal contre transport.</li>
+    <li>Foudroyant : agile et efficace contre éclaireurs.</li>
+    <li>Spectre et Tempest : bonnes unités polyvalentes pour combats moyens.</li>
+    <li>Colosse et Titanide : lourds, idéaux contre flottes de frégates et corvettes.</li>
+    <li>Transports (Pégase, Argo) : vulnérables, toujours escortés par combats.</li>
+    <li>Défenses planétaires : exceller contre vaisseaux légers, nécessitent frappe coordonnée de vaisseaux lourds.</li>
+</ul>
+
+<hr>
+
+<h2>6. Philosophie d’Équilibrage</h2>
+
+<ul>
+    <li>Chaque vaisseau a un rôle clair (combat, transport, espion, récolte).</li>
+    <li>Les combats demandent stratégie, pas seulement force brute.</li>
+    <li>Énergie Quantique limitée pour empêcher spam de flottes.</li>
+    <li>Les flottes disponibles dépendent du niveau technologique.</li>
+    <li>Améliorations via technologies et objets permettent personnalisation avancée.</li>
+</ul>
+
+</body>
+</html>
