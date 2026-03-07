@@ -4585,7 +4585,7 @@ function SectorMapScreen({
   const [mapActionError, setMapActionError] = useState("");
   const [mapActionBusy, setMapActionBusy] = useState(false);
   const [fleetDraft, setFleetDraft] = useState<Record<string, string>>({
-    argo: "1",
+    argo: "0",
     pegase: "0",
     arche_spatiale: "0"
   });
@@ -4814,6 +4814,33 @@ function SectorMapScreen({
     return Object.keys(fromServer).length > 0 ? { ...fallback, ...fromServer } : fallback;
   }, [hangarInventory, mapHarvestInventory]);
 
+  useEffect(() => {
+    setFleetDraft((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      for (const unitId of Object.keys(next)) {
+        const available = Math.max(0, Math.floor(Number(harvestAvailability[unitId] ?? 0)));
+        const current = Math.max(0, Math.floor(Number(next[unitId] ?? 0)));
+        const clamped = Math.max(0, Math.min(available, current));
+        if (clamped !== current || String(clamped) !== next[unitId]) {
+          next[unitId] = String(clamped);
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [harvestAvailability]);
+
+  const hasValidHarvestFleetSelection = useMemo(() => {
+    for (const unitId of Object.keys(fleetDraft)) {
+      const available = Math.max(0, Math.floor(Number(harvestAvailability[unitId] ?? 0)));
+      const requested = Math.max(0, Math.floor(Number(fleetDraft[unitId] ?? 0)));
+      const usable = Math.min(available, requested);
+      if (usable > 0) return true;
+    }
+    return false;
+  }, [fleetDraft, harvestAvailability]);
+
   const selfPlanetCoords = useMemo(() => {
     const selfPlanet = sectorPlayerPlanets.find((planet) => planet.isSelf);
     if (selfPlanet) return { x: selfPlanet.x, y: selfPlanet.y };
@@ -4883,7 +4910,10 @@ function SectorMapScreen({
     if (!selectedFieldEntity) return null;
     const rows = Object.keys(fleetDraft).map((unitId) => ({
       unitId,
-      quantity: Math.max(0, Math.floor(Number(fleetDraft[unitId] ?? 0)))
+      quantity: Math.min(
+        Math.max(0, Math.floor(Number(harvestAvailability[unitId] ?? 0))),
+        Math.max(0, Math.floor(Number(fleetDraft[unitId] ?? 0)))
+      )
     }));
     return estimateMapHarvestPlan(
       rows,
@@ -4892,7 +4922,7 @@ function SectorMapScreen({
       selectedFieldEntity.y,
       Math.max(1, selectedFieldEntity.remainingExtractionWork ?? selectedFieldEntity.totalExtractionWork ?? 3600)
     );
-  }, [currentUserId, fleetDraft, selectedFieldEntity]);
+  }, [currentUserId, fleetDraft, harvestAvailability, selectedFieldEntity]);
 
   const mapExpeditionVisual = useMemo(() => {
     if (!mapExpedition) return null;
@@ -5371,11 +5401,19 @@ function SectorMapScreen({
     const fleetPayload = Object.keys(fleetDraft)
       .map((unitId) => ({
         unitId,
-        quantity: Math.max(0, Math.floor(Number(fleetDraft[unitId] ?? 0)))
+        quantity: Math.min(
+          Math.max(0, Math.floor(Number(harvestAvailability[unitId] ?? 0))),
+          Math.max(0, Math.floor(Number(fleetDraft[unitId] ?? 0)))
+        )
       }))
       .filter((row) => row.quantity > 0);
     if (fleetPayload.length <= 0) {
-      setMapActionError(l("Choisissez au moins un vaisseau de collecte.", "Choose at least one harvesting ship."));
+      setMapActionError(
+        l(
+          "Aucun vaisseau de collecte disponible dans votre stock serveur.",
+          "No harvesting ship is currently available in your server stock."
+        )
+      );
       return;
     }
     try {
@@ -6053,7 +6091,7 @@ function SectorMapScreen({
                             onClick={() => void launchHarvestOnField(selectedEntity.fieldId!)}
                             disabled={
                               mapActionBusy ||
-                              Object.keys(fleetDraft).every((unitId) => Math.floor(Number(fleetDraft[unitId] ?? 0)) <= 0)
+                              !hasValidHarvestFleetSelection
                             }
                           >
                             {mapActionBusy ? l("Lancement...", "Launching...") : l("Lancer l'exploitation", "Start harvesting")}
@@ -6149,7 +6187,7 @@ function SectorMapScreen({
                         onClick={() => void launchHarvestOnField(fieldPopupEntity.fieldId!)}
                         disabled={
                           mapActionBusy ||
-                          Object.keys(fleetDraft).every((unitId) => Math.floor(Number(fleetDraft[unitId] ?? 0)) <= 0)
+                          !hasValidHarvestFleetSelection
                         }
                       >
                         {mapActionBusy ? l("Lancement...", "Launching...") : l("Lancer l'exploitation", "Start harvesting")}
