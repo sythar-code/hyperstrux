@@ -1493,8 +1493,21 @@ interface SectorWorld extends SectorBaseEntity {
 
 interface SectorResource extends SectorBaseEntity {
   type: "resource";
-  resourceType: "alliage" | "helium3" | "cristal";
-  amount: number;
+  resourceType?: "alliage" | "helium3" | "cristal";
+  amount?: number;
+  fieldId?: string;
+  rarityTier?: "COMMON" | "UNCOMMON" | "RARE" | "EPIC" | "LEGENDARY" | "MYTHIC";
+  qualityTier?: "POOR" | "STANDARD" | "RICH" | "EXCEPTIONAL";
+  resources?: Array<{ resourceId: ResourceId; totalAmount: number; remainingAmount: number }>;
+  hiddenDetails?: boolean;
+  isOccupied?: boolean;
+  occupiedByPlayerId?: string;
+  occupiedByUsername?: string;
+  occupyingFleetId?: string;
+  totalExtractionWork?: number;
+  remainingExtractionWork?: number;
+  spawnedAt?: number;
+  expiresAt?: number;
 }
 
 interface SectorFleet {
@@ -1511,6 +1524,51 @@ interface SectorFleet {
 }
 
 type SectorEntity = SectorStation | SectorWorld | SectorResource;
+type SectorMapPlayer = { userId: string; username: string; x: number; y: number; worldType: SectorWorld["worldType"]; isSelf: boolean };
+type MapFieldServerDto = {
+  id: string;
+  x: number;
+  y: number;
+  rarityTier: SectorResource["rarityTier"];
+  qualityTier: SectorResource["qualityTier"];
+  resources: Array<{ resourceId: string; totalAmount: number; remainingAmount: number }>;
+  totalExtractionWork: number;
+  remainingExtractionWork: number;
+  spawnedAt: number;
+  expiresAt: number;
+  occupiedByPlayerId: string;
+  occupiedByUsername: string;
+  occupyingFleetId: string;
+  isOccupied: boolean;
+  isVisible: boolean;
+  hiddenDetails: boolean;
+};
+type MapExpeditionDto = {
+  id: string;
+  fieldId: string;
+  status: "travel_to_field" | "extracting" | "returning";
+  departureAt: number;
+  arrivalAt: number;
+  extractionStartAt: number;
+  extractionEndAt: number;
+  returnStartAt: number;
+  returnEndAt: number;
+  travelSeconds: number;
+  extractionSeconds: number;
+  totalHarvestSpeed: number;
+  totalTransportCapacity: number;
+  fleet: Array<{ unitId: string; quantity: number }>;
+  snapshotResources: Partial<Record<ResourceId, number>>;
+  collectedResources: Partial<Record<ResourceId, number>>;
+  serverNowTs: number;
+};
+type MapHarvestShipRow = {
+  unitId: string;
+  quantity: number;
+  harvestSpeed: number;
+  harvestCapacity: number;
+  mapSpeed: number;
+};
 
 const SECTOR_MAP_SIZE = 10000;
 
@@ -1526,11 +1584,7 @@ const SECTOR_WORLDS: SectorWorld[] = [
   { id: "wd_3", x: 5450, y: 2980, name: "Frimas Delta", type: "world", worldType: "ice", missions: ["Scan anomalie", "Balise scientifique"] }
 ];
 
-const SECTOR_RESOURCES: SectorResource[] = [
-  { id: "rs_1", x: 4630, y: 5360, name: "Ceinture Ferrometallique", type: "resource", resourceType: "alliage", amount: 52000 },
-  { id: "rs_2", x: 6290, y: 6170, name: "Nuage Helium-3", type: "resource", resourceType: "helium3", amount: 27000 },
-  { id: "rs_3", x: 3720, y: 3560, name: "Cluster de Cristaux", type: "resource", resourceType: "cristal", amount: 11000 }
-];
+const SECTOR_RESOURCES: SectorResource[] = [];
 
 const SECTOR_ENTITIES: SectorEntity[] = [...SECTOR_STATIONS, ...SECTOR_WORLDS, ...SECTOR_RESOURCES];
 
@@ -1567,6 +1621,57 @@ const sectorStationOwnerDisplay = (station: SectorStation, language: UILanguage)
 const sectorWorldMissionsDisplay = (world: SectorWorld, language: UILanguage): string[] =>
   language === "en" ? SECTOR_WORLD_MISSIONS_EN[world.id] ?? world.missions : world.missions;
 
+const MAP_FIELD_RARITY_LABEL_FR: Record<string, string> = {
+  COMMON: "Commun",
+  UNCOMMON: "Inhabituel",
+  RARE: "Rare",
+  EPIC: "Epique",
+  LEGENDARY: "Legendaire",
+  MYTHIC: "Mythique"
+};
+
+const MAP_FIELD_RARITY_LABEL_EN: Record<string, string> = {
+  COMMON: "Common",
+  UNCOMMON: "Uncommon",
+  RARE: "Rare",
+  EPIC: "Epic",
+  LEGENDARY: "Legendary",
+  MYTHIC: "Mythic"
+};
+
+const MAP_FIELD_QUALITY_LABEL_FR: Record<string, string> = {
+  POOR: "Pauvre",
+  STANDARD: "Standard",
+  RICH: "Riche",
+  EXCEPTIONAL: "Exceptionnel"
+};
+
+const MAP_FIELD_QUALITY_LABEL_EN: Record<string, string> = {
+  POOR: "Poor",
+  STANDARD: "Standard",
+  RICH: "Rich",
+  EXCEPTIONAL: "Exceptional"
+};
+
+const MAP_HARVEST_UNIT_STATS: Record<string, { harvestSpeed: number; harvestCapacity: number; mapSpeed: number }> = {
+  pegase: { harvestSpeed: 120, harvestCapacity: 50, mapSpeed: 160 },
+  argo: { harvestSpeed: 320, harvestCapacity: 200, mapSpeed: 140 },
+  arche_spatiale: { harvestSpeed: 700, harvestCapacity: 500, mapSpeed: 110 },
+  eclaireur_stellaire: { harvestSpeed: 10, harvestCapacity: 10, mapSpeed: 300 },
+  foudroyant: { harvestSpeed: 5, harvestCapacity: 12, mapSpeed: 350 },
+  aurore: { harvestSpeed: 8, harvestCapacity: 7, mapSpeed: 420 },
+  spectre: { harvestSpeed: 12, harvestCapacity: 5, mapSpeed: 470 },
+  tempest: { harvestSpeed: 15, harvestCapacity: 4, mapSpeed: 500 },
+  titanide: { harvestSpeed: 18, harvestCapacity: 8, mapSpeed: 360 },
+  colosse: { harvestSpeed: 20, harvestCapacity: 12, mapSpeed: 300 }
+};
+
+const MAP_TRAVEL_TIME_FACTOR = 42;
+const MAP_MIN_TRAVEL_SECONDS = 120;
+const MAP_MAX_TRAVEL_SECONDS = 1200;
+const MAP_MIN_EXTRACTION_SECONDS = 3600;
+const MAP_MAX_EXTRACTION_SECONDS = 7200;
+
 const PLANET_SPRITE_SHEET = "/room-images/sprite-sheet-planet.png";
 const PLANET_SPRITE_TARGET_SIZE = 72;
 const PLANET_SPRITE_SHEET_WIDTH = 1024;
@@ -1577,6 +1682,266 @@ const PLANET_SPRITE_FRAMES: Record<SectorWorld["worldType"], { x: number; y: num
   desert: { x: 239, y: 242, size: 172 },
   ice: { x: 425, y: 242, size: 172 },
   forge: { x: 612, y: 240, size: 172 }
+};
+
+const PLAYER_PLANET_WORLD_TYPES: SectorWorld["worldType"][] = ["gaia", "desert", "ice", "forge"];
+const MAP_PLAYER_BLOCKED_PREFIXES = ["probe-", "builder", "loadtest", "stress", "bot-", "autotest", "perf-"];
+
+const hashString32 = (input: string): number => {
+  let hash = 2166136261;
+  for (let i = 0; i < input.length; i += 1) {
+    hash ^= input.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+};
+
+const isMapVisibleUsername = (username: string): boolean => {
+  const normalized = String(username || "").trim().toLowerCase();
+  if (!normalized) return false;
+  for (const prefix of MAP_PLAYER_BLOCKED_PREFIXES) {
+    if (normalized.startsWith(prefix)) return false;
+  }
+  return true;
+};
+
+const mapPlayerToPlanetCoordinates = (userId: string): { x: number; y: number } => {
+  const seed = String(userId || "");
+  const padding = 360;
+  const range = Math.max(1, SECTOR_MAP_SIZE - padding * 2);
+  let x = padding + (hashString32(`${seed}|x`) % range);
+  let y = padding + (hashString32(`${seed}|y`) % range);
+  if (Math.abs(x - 5000) < 420 && Math.abs(y - 5000) < 420) {
+    x = Math.min(SECTOR_MAP_SIZE - padding, x + 520);
+    y = Math.min(SECTOR_MAP_SIZE - padding, y + 300);
+  }
+  return { x, y };
+};
+
+const mapPlayerToSectorPlanet = (
+  player: { userId: string; username: string },
+  currentUserId: string
+): SectorMapPlayer => {
+  const padding = 360;
+  const range = Math.max(1, SECTOR_MAP_SIZE - padding * 2);
+  const hashX = hashString32(`${player.userId}|x`);
+  const hashY = hashString32(`${player.userId}|y`);
+  const hashType = hashString32(`${player.userId}|w`);
+  let x = padding + (hashX % range);
+  let y = padding + (hashY % range);
+  const isSelf = player.userId === currentUserId;
+
+  if (isSelf) {
+    // Keep the local player always visible near the starting camera.
+    x = 5000;
+    y = 5600;
+  }
+
+  // Keep the center area readable around the main station.
+  if (Math.abs(x - 5000) < 420 && Math.abs(y - 5000) < 420) {
+    x = Math.min(SECTOR_MAP_SIZE - padding, x + 520);
+    y = Math.min(SECTOR_MAP_SIZE - padding, y + 300);
+  }
+
+  return {
+    userId: player.userId,
+    username: player.username,
+    x,
+    y,
+    worldType: PLAYER_PLANET_WORLD_TYPES[hashType % PLAYER_PLANET_WORLD_TYPES.length],
+    isSelf: isSelf
+  };
+};
+
+const computeSectorPlayerPlanets = (
+  players: Array<{ userId: string; username: string }>,
+  currentUserId: string
+): SectorMapPlayer[] => {
+  const minDistance = 90;
+  const minDistanceSq = minDistance * minDistance;
+  const cellSize = minDistance;
+  const padding = 360;
+  const maxCoordinate = SECTOR_MAP_SIZE - padding;
+  const clampCoord = (value: number) => Math.max(padding, Math.min(maxCoordinate, value));
+
+  const grid = new Map<string, Array<{ x: number; y: number }>>();
+  const placeable = (x: number, y: number) => {
+    const cx = Math.floor(x / cellSize);
+    const cy = Math.floor(y / cellSize);
+    for (let gx = cx - 1; gx <= cx + 1; gx += 1) {
+      for (let gy = cy - 1; gy <= cy + 1; gy += 1) {
+        const bucket = grid.get(`${gx}:${gy}`);
+        if (!bucket) continue;
+        for (const point of bucket) {
+          const dx = point.x - x;
+          const dy = point.y - y;
+          if (dx * dx + dy * dy < minDistanceSq) return false;
+        }
+      }
+    }
+    return true;
+  };
+  const registerPoint = (x: number, y: number) => {
+    const cx = Math.floor(x / cellSize);
+    const cy = Math.floor(y / cellSize);
+    const key = `${cx}:${cy}`;
+    const bucket = grid.get(key);
+    if (bucket) bucket.push({ x, y });
+    else grid.set(key, [{ x, y }]);
+  };
+
+  const uniquePlayers: Array<{ userId: string; username: string }> = [];
+  const seen = new Set<string>();
+  for (const player of players) {
+    const userId = String(player.userId || "").trim();
+    if (!userId || seen.has(userId)) continue;
+    const username = String(player.username || "").trim() || userId.slice(0, 8);
+    if (!isMapVisibleUsername(username)) continue;
+    seen.add(userId);
+    uniquePlayers.push({ userId, username });
+  }
+
+  uniquePlayers.sort((a, b) => {
+    if (a.userId === currentUserId) return -1;
+    if (b.userId === currentUserId) return 1;
+    return a.userId.localeCompare(b.userId);
+  });
+
+  const output: SectorMapPlayer[] = [];
+  for (const player of uniquePlayers) {
+    const base = mapPlayerToSectorPlanet(player, currentUserId);
+    const seedAngle = (hashString32(`${player.userId}|angle`) / 4294967295) * Math.PI * 2;
+    let bestX = clampCoord(base.x);
+    let bestY = clampCoord(base.y);
+    let found = false;
+
+    for (let ring = 0; ring <= 36 && !found; ring += 1) {
+      const radius = ring * 48;
+      const samples = ring === 0 ? 1 : Math.min(40, 10 + ring * 2);
+      for (let sample = 0; sample < samples; sample += 1) {
+        const angle = seedAngle + (sample / samples) * Math.PI * 2;
+        const candidateX = clampCoord(bestX + Math.cos(angle) * radius);
+        const candidateY = clampCoord(bestY + Math.sin(angle) * radius);
+        if (!placeable(candidateX, candidateY)) continue;
+        bestX = candidateX;
+        bestY = candidateY;
+        found = true;
+        break;
+      }
+    }
+
+    registerPoint(bestX, bestY);
+    output.push({
+      ...base,
+      x: Math.round(bestX),
+      y: Math.round(bestY)
+    });
+  }
+
+  return output;
+};
+
+const mapFieldRarityDisplay = (tier: string | undefined, language: UILanguage): string => {
+  const key = String(tier || "COMMON").toUpperCase();
+  return language === "en"
+    ? MAP_FIELD_RARITY_LABEL_EN[key] ?? MAP_FIELD_RARITY_LABEL_EN.COMMON
+    : MAP_FIELD_RARITY_LABEL_FR[key] ?? MAP_FIELD_RARITY_LABEL_FR.COMMON;
+};
+
+const mapFieldQualityDisplay = (tier: string | undefined, language: UILanguage): string => {
+  const key = String(tier || "STANDARD").toUpperCase();
+  return language === "en"
+    ? MAP_FIELD_QUALITY_LABEL_EN[key] ?? MAP_FIELD_QUALITY_LABEL_EN.STANDARD
+    : MAP_FIELD_QUALITY_LABEL_FR[key] ?? MAP_FIELD_QUALITY_LABEL_FR.STANDARD;
+};
+
+const inferMapResourceType = (resourceId: string | undefined): SectorResource["resourceType"] => {
+  const rid = String(resourceId || "").trim() as ResourceId;
+  const tier = (RESOURCE_DEFS.find((r) => r.id === rid)?.rarity ?? 10);
+  if (tier <= 30) return "alliage";
+  if (tier <= 75) return "helium3";
+  return "cristal";
+};
+
+const mapFieldDisplayName = (fieldId: string, language: UILanguage) =>
+  language === "en"
+    ? `Resource Field ${fieldId.slice(-4).toUpperCase()}`
+    : `Champ de ressources ${fieldId.slice(-4).toUpperCase()}`;
+
+const mapFieldToSectorEntity = (field: MapFieldServerDto, language: UILanguage): SectorResource => {
+  const firstResource = field.resources && field.resources.length > 0 ? field.resources[0].resourceId : "carbone";
+  const remaining = (field.resources || []).reduce((sum, row) => sum + Math.max(0, Math.floor(Number(row.remainingAmount || 0))), 0);
+  return {
+    id: `rf_${field.id}`,
+    fieldId: field.id,
+    x: Math.floor(Number(field.x || 0)),
+    y: Math.floor(Number(field.y || 0)),
+    name: mapFieldDisplayName(field.id, language),
+    type: "resource",
+    resourceType: inferMapResourceType(firstResource),
+    amount: remaining,
+    rarityTier: field.rarityTier,
+    qualityTier: field.qualityTier,
+    resources: (field.resources || [])
+      .filter((row) => typeof row.resourceId === "string")
+      .map((row) => ({
+        resourceId: row.resourceId as ResourceId,
+        totalAmount: Math.max(0, Math.floor(Number(row.totalAmount || 0))),
+        remainingAmount: Math.max(0, Math.floor(Number(row.remainingAmount || 0)))
+      })),
+    hiddenDetails: Boolean(field.hiddenDetails),
+    isOccupied: Boolean(field.isOccupied),
+    occupiedByPlayerId: String(field.occupiedByPlayerId || ""),
+    occupiedByUsername: String(field.occupiedByUsername || ""),
+    occupyingFleetId: String(field.occupyingFleetId || ""),
+    totalExtractionWork: Math.max(0, Math.floor(Number(field.totalExtractionWork || 0))),
+    remainingExtractionWork: Math.max(0, Math.floor(Number(field.remainingExtractionWork || 0))),
+    spawnedAt: Math.max(0, Math.floor(Number(field.spawnedAt || 0))),
+    expiresAt: Math.max(0, Math.floor(Number(field.expiresAt || 0)))
+  };
+};
+
+const estimateMapHarvestPlan = (
+  fleetRows: Array<{ unitId: string; quantity: number }>,
+  userId: string,
+  fieldX: number,
+  fieldY: number,
+  fieldWork: number
+) => {
+  let totalHarvestSpeed = 0;
+  let totalCapacity = 0;
+  let weightedMapSpeed = 0;
+  let totalShips = 0;
+  for (const row of fleetRows) {
+    const stats = MAP_HARVEST_UNIT_STATS[row.unitId];
+    if (!stats) continue;
+    const qty = Math.max(0, Math.floor(Number(row.quantity || 0)));
+    if (qty <= 0) continue;
+    totalHarvestSpeed += stats.harvestSpeed * qty;
+    totalCapacity += stats.harvestCapacity * qty;
+    weightedMapSpeed += stats.mapSpeed * qty;
+    totalShips += qty;
+  }
+  const effectiveSpeed = totalShips > 0 ? weightedMapSpeed / totalShips : 0;
+  const origin = mapPlayerToPlanetCoordinates(userId || "guest");
+  const dx = fieldX - origin.x;
+  const dy = fieldY - origin.y;
+  const distance = Math.sqrt(dx * dx + dy * dy);
+  const travelSeconds = effectiveSpeed > 0
+    ? Math.max(MAP_MIN_TRAVEL_SECONDS, Math.min(MAP_MAX_TRAVEL_SECONDS, Math.floor((distance / effectiveSpeed) * MAP_TRAVEL_TIME_FACTOR)))
+    : 0;
+  const extractionSeconds = totalHarvestSpeed > 0
+    ? Math.max(
+        MAP_MIN_EXTRACTION_SECONDS,
+        Math.min(MAP_MAX_EXTRACTION_SECONDS, Math.floor(Math.max(1, fieldWork) / totalHarvestSpeed))
+      )
+    : 0;
+  return {
+    totalHarvestSpeed,
+    totalCapacity,
+    travelSeconds,
+    extractionSeconds
+  };
 };
 
 const getPlanetSpriteStyle = (worldType: SectorWorld["worldType"]): CSSProperties => {
@@ -1641,6 +2006,14 @@ type InboxMessage = {
   hasAttachments: boolean;
   attachments: InboxAttachment;
   combatReport?: Record<string, any> | null;
+  meta?: {
+    kind?: string;
+    dayKey?: string;
+    noonTs?: number;
+    streakDay?: number;
+    rewardGenerated?: boolean;
+    openedAt?: number;
+  } | null;
 };
 
 type InboxUnreadCounts = {
@@ -1803,6 +2176,15 @@ const normalizeInventoryRpcItems = (rpcResponse: any): InventoryViewItem[] => {
     .filter((it: InventoryViewItem) => it.quantity > 0);
 };
 
+const extractInventoryMapDropNotifications = (rpcResponse: any): number => {
+  const parsed = parseJsonObject(rpcResponse?.payload ?? rpcResponse);
+  const nested = parseJsonObject(parsed?.payload);
+  const source = Object.keys(nested).length > 0 ? nested : parsed;
+  const raw = Number(source?.mapDropNotifications ?? 0);
+  if (!Number.isFinite(raw)) return 0;
+  return Math.max(0, Math.floor(raw));
+};
+
 const normalizeHangarRpcSnapshot = (rpcResponse: any): HangarRpcSnapshot | null => {
   const parsed = parseJsonObject(rpcResponse?.payload ?? rpcResponse);
   const nested = parseJsonObject(parsed?.payload);
@@ -1956,6 +2338,7 @@ export default function App() {
   const [inventoryError, setInventoryError] = useState("");
   const [inventoryActionLoadingId, setInventoryActionLoadingId] = useState("");
   const [inventoryLastSyncAt, setInventoryLastSyncAt] = useState<number | null>(null);
+  const [inventoryMenuBadgeCount, setInventoryMenuBadgeCount] = useState(0);
   const [chestLootSummary, setChestLootSummary] = useState<ChestLootSummary | null>(null);
   const [hangarQueue, setHangarQueue] = useState<HangarQueueItem[]>([]);
   const [hangarInventory, setHangarInventory] = useState<Record<string, number>>({});
@@ -2091,7 +2474,7 @@ export default function App() {
     }
   };
 
-  const loadInventory = async () => {
+  const loadInventory = async (ackMapDropNotifications = false) => {
     if (!session) {
       setInventoryItems([]);
       setInventoryError("");
@@ -2101,9 +2484,14 @@ export default function App() {
     setInventoryLoading(true);
     setInventoryError("");
     try {
-      const rpc = await client.rpc(session, "getinventory", "{}");
+      const rpc = await client.rpc(
+        session,
+        "getinventory",
+        JSON.stringify({ ackMapDropNotifications: Boolean(ackMapDropNotifications) })
+      );
       const sanitized = normalizeInventoryRpcItems(rpc as any);
       setInventoryItems(sanitized);
+      setInventoryMenuBadgeCount(extractInventoryMapDropNotifications(rpc as any));
       setInventoryLastSyncAt(Date.now());
 
       if (import.meta.env.DEV) {
@@ -2122,6 +2510,26 @@ export default function App() {
       }
     } finally {
       setInventoryLoading(false);
+    }
+  };
+
+  const refreshInventoryMenuBadge = async (silent = true) => {
+    if (!session) {
+      setInventoryMenuBadgeCount(0);
+      return;
+    }
+    try {
+      const rpc = await client.rpc(session, "getinventorymeta", "{}");
+      setInventoryMenuBadgeCount(extractInventoryMapDropNotifications(rpc as any));
+    } catch (err) {
+      if (isUnauthorizedError(err)) {
+        invalidateSession();
+        return;
+      }
+      if (!silent && import.meta.env.DEV) {
+        // eslint-disable-next-line no-console
+        console.error("inventory menu badge load error", err);
+      }
     }
   };
 
@@ -2469,7 +2877,7 @@ export default function App() {
   useEffect(() => {
     if (!session) return;
     if (screen !== "inventory" && screen !== "hangar" && screen !== "technology") return;
-    void loadInventory();
+    void loadInventory(screen === "inventory");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [screen, session]);
 
@@ -2521,6 +2929,19 @@ export default function App() {
     void refreshInboxUnread(true);
     const interval = setInterval(() => {
       void refreshInboxUnread(true);
+    }, 15000);
+    return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session]);
+
+  useEffect(() => {
+    if (!session) {
+      setInventoryMenuBadgeCount(0);
+      return;
+    }
+    void refreshInventoryMenuBadge(true);
+    const interval = setInterval(() => {
+      void refreshInventoryMenuBadge(true);
     }, 15000);
     return () => clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -3340,7 +3761,10 @@ export default function App() {
       <button className="ghost-btn" onClick={() => setScreen("alliance")}><Shield size={15} /> {l("Alliance", "Alliance")}</button>
       <button className="ghost-btn" onClick={() => setScreen("ranking")}><ArrowUpCircle size={15} /> {l("Classement", "Ranking")}</button>
       <button className="ghost-btn" onClick={() => setScreen("wiki")}><BookOpen size={15} /> {l("Wiki", "Wiki")}</button>
-      <button className="ghost-btn" onClick={() => setScreen("inventory")}><Package size={15} /> {l("Inventaire", "Inventory")}</button>
+      <button className="ghost-btn inbox-btn" onClick={() => setScreen("inventory")}>
+        <Package size={15} /> {l("Inventaire", "Inventory")}
+        {inventoryMenuBadgeCount > 0 ? <span className="menu-badge">{inventoryMenuBadgeCount > 99 ? "99+" : inventoryMenuBadgeCount}</span> : null}
+      </button>
       <button className="ghost-btn inbox-btn" onClick={() => setScreen("inbox")}>
         <Mail size={15} /> {l("Inbox", "Inbox")}
         {inboxUnreadCount > 0 ? <span className="menu-badge">{inboxUnreadCount > 99 ? "99+" : inboxUnreadCount}</span> : null}
@@ -3488,7 +3912,13 @@ export default function App() {
         <>
           {renderUnifiedHeader()}
 
-          <SectorMapScreen language={uiLanguage} />
+          <SectorMapScreen
+            language={uiLanguage}
+            client={client}
+            session={session}
+            currentUserId={session?.user_id ?? ""}
+            hangarInventory={hangarInventory}
+          />
         </>
       ) : screen === "chat" ? (
         <>
@@ -3575,7 +4005,7 @@ export default function App() {
             hasActiveQueue={Boolean(constructionJob)}
             actionLoadingId={inventoryActionLoadingId}
             onUseItem={onUseInventoryItem}
-            onRefresh={() => void loadInventory()}
+            onRefresh={() => void loadInventory(true)}
           />
         </>
       ) : screen === "inbox" ? (
@@ -4077,10 +4507,23 @@ function HomeLanding({
   );
 }
 
-function SectorMapScreen({ language }: { language: UILanguage }) {
+function SectorMapScreen({
+  language,
+  client,
+  session,
+  currentUserId,
+  hangarInventory
+}: {
+  language: UILanguage;
+  client: Client;
+  session: Session | null;
+  currentUserId: string;
+  hangarInventory: Record<string, number>;
+}) {
   const l = (fr: string, en: string) => (language === "en" ? en : fr);
-  const [zoom, setZoom] = useState(0.78);
-  const [pan, setPan] = useState({ x: -4300, y: -4380 });
+  const initialMapZoom = 1.06;
+  const [zoom, setZoom] = useState(initialMapZoom);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
   const [isDragging, setIsDragging] = useState(false);
   const [lastMouse, setLastMouse] = useState({ x: 0, y: 0 });
 
@@ -4131,8 +4574,567 @@ function SectorMapScreen({ language }: { language: UILanguage }) {
   const [navX, setNavX] = useState("");
   const [navY, setNavY] = useState("");
   const [markers, setMarkers] = useState<Array<{ name: string; x: number; y: number }>>([]);
+  const [mapPlayers, setMapPlayers] = useState<Array<{ userId: string; username: string }>>([]);
+  const [mapFields, setMapFields] = useState<MapFieldServerDto[]>([]);
+  const [mapExpedition, setMapExpedition] = useState<MapExpeditionDto | null>(null);
+  const [mapReports, setMapReports] = useState<
+    Array<{ id: string; fieldId: string; at: number; resources: Partial<Record<ResourceId, number>>; items?: Array<{ itemId: string; quantity: number }> }>
+  >([]);
+  const [mapHarvestInventory, setMapHarvestInventory] = useState<MapHarvestShipRow[]>([]);
+  const [mapLoadError, setMapLoadError] = useState("");
+  const [mapActionError, setMapActionError] = useState("");
+  const [mapActionBusy, setMapActionBusy] = useState(false);
+  const [fleetDraft, setFleetDraft] = useState<Record<string, string>>({
+    argo: "1",
+    pegase: "0",
+    arche_spatiale: "0"
+  });
+  const [fieldPopupId, setFieldPopupId] = useState<string | null>(null);
+  const [mapNowMs, setMapNowMs] = useState(() => Date.now());
+  const [mapServerSync, setMapServerSync] = useState<{ serverMs: number; localMs: number } | null>(null);
+  const [viewportSize, setViewportSize] = useState({ width: 0, height: 0 });
 
   const containerRef = useRef<HTMLDivElement>(null);
+  const didCenterOnHomeRef = useRef(false);
+
+  useEffect(() => {
+    if (!session) {
+      setMapPlayers([]);
+      return;
+    }
+    let cancelled = false;
+    const loadPlayers = async () => {
+      try {
+        const rpc = await client.rpc(session, "rpc_map_players", JSON.stringify({ limit: 5000 }));
+        const parsed = parseJsonObject((rpc as any)?.payload ?? rpc);
+        const nested = parseJsonObject(parsed?.payload);
+        const source = Object.keys(nested).length > 0 ? nested : parsed;
+        const rowsRaw = Array.isArray(source?.players) ? source.players : [];
+        const rows = rowsRaw
+          .map((row: any) => ({
+            userId: String(row?.userId || "").trim(),
+            username: String(row?.username || "").trim()
+          }))
+          .filter((row: { userId: string; username: string }) => row.userId.length > 0)
+          .map((row: { userId: string; username: string }) => ({
+            ...row,
+            username: row.username || row.userId.slice(0, 8)
+          }));
+        if (!cancelled) setMapPlayers(rows);
+      } catch (err) {
+        if (import.meta.env.DEV) {
+          // eslint-disable-next-line no-console
+          console.error("map players load error", err);
+        }
+      }
+    };
+    void loadPlayers();
+    const interval = setInterval(() => void loadPlayers(), 45000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [client, session]);
+
+  useEffect(() => {
+    if (!session) {
+      setMapFields([]);
+      setMapExpedition(null);
+      setMapReports([]);
+      setMapHarvestInventory([]);
+      setMapLoadError("");
+      return;
+    }
+    let cancelled = false;
+    const loadMapState = async () => {
+      try {
+        const rpc = await client.rpc(session, "rpc_map_fields_state", "{}");
+        const parsed = parseJsonObject((rpc as any)?.payload ?? rpc);
+        const nested = parseJsonObject(parsed?.payload);
+        const source = Object.keys(nested).length > 0 ? nested : parsed;
+        const fieldsRaw = Array.isArray(source?.fields) ? source.fields : [];
+        const expeditionRaw = parseJsonObject(source?.expedition);
+        const reportsRaw = Array.isArray(source?.reports) ? source.reports : [];
+        const harvestRaw = Array.isArray(source?.harvestInventory) ? source.harvestInventory : [];
+
+        const nextFields: MapFieldServerDto[] = fieldsRaw
+          .map((row: any) => ({
+            id: String(row?.id || "").trim(),
+            x: Math.floor(Number(row?.x ?? 0)),
+            y: Math.floor(Number(row?.y ?? 0)),
+            rarityTier: String(row?.rarityTier || "COMMON").toUpperCase() as MapFieldServerDto["rarityTier"],
+            qualityTier: String(row?.qualityTier || "STANDARD").toUpperCase() as MapFieldServerDto["qualityTier"],
+            resources: Array.isArray(row?.resources)
+              ? row.resources
+                  .map((res: any) => ({
+                    resourceId: String(res?.resourceId || "").trim(),
+                    totalAmount: Math.max(0, Math.floor(Number(res?.totalAmount ?? 0))),
+                    remainingAmount: Math.max(0, Math.floor(Number(res?.remainingAmount ?? 0)))
+                  }))
+                  .filter((res: any) => res.resourceId.length > 0)
+              : [],
+            totalExtractionWork: Math.max(0, Math.floor(Number(row?.totalExtractionWork ?? 0))),
+            remainingExtractionWork: Math.max(0, Math.floor(Number(row?.remainingExtractionWork ?? 0))),
+            spawnedAt: Math.max(0, Math.floor(Number(row?.spawnedAt ?? 0))),
+            expiresAt: Math.max(0, Math.floor(Number(row?.expiresAt ?? 0))),
+            occupiedByPlayerId: String(row?.occupiedByPlayerId || ""),
+            occupiedByUsername: String(row?.occupiedByUsername || ""),
+            occupyingFleetId: String(row?.occupyingFleetId || ""),
+            isOccupied: Boolean(row?.isOccupied),
+            isVisible: row?.isVisible !== false,
+            hiddenDetails: Boolean(row?.hiddenDetails)
+          }))
+          .filter((row: MapFieldServerDto) => row.id.length > 0);
+
+        const nextExpedition: MapExpeditionDto | null =
+          expeditionRaw && typeof expeditionRaw === "object" && String(expeditionRaw.id || "").trim().length > 0
+            ? {
+                id: String(expeditionRaw.id || ""),
+                fieldId: String(expeditionRaw.fieldId || ""),
+                status: (String(expeditionRaw.status || "travel_to_field") as MapExpeditionDto["status"]),
+                departureAt: Math.max(0, Math.floor(Number(expeditionRaw.departureAt ?? 0))),
+                arrivalAt: Math.max(0, Math.floor(Number(expeditionRaw.arrivalAt ?? 0))),
+                extractionStartAt: Math.max(0, Math.floor(Number(expeditionRaw.extractionStartAt ?? 0))),
+                extractionEndAt: Math.max(0, Math.floor(Number(expeditionRaw.extractionEndAt ?? 0))),
+                returnStartAt: Math.max(0, Math.floor(Number(expeditionRaw.returnStartAt ?? 0))),
+                returnEndAt: Math.max(0, Math.floor(Number(expeditionRaw.returnEndAt ?? 0))),
+                travelSeconds: Math.max(0, Math.floor(Number(expeditionRaw.travelSeconds ?? 0))),
+                extractionSeconds: Math.max(0, Math.floor(Number(expeditionRaw.extractionSeconds ?? 0))),
+                totalHarvestSpeed: Math.max(0, Math.floor(Number(expeditionRaw.totalHarvestSpeed ?? 0))),
+                totalTransportCapacity: Math.max(0, Math.floor(Number(expeditionRaw.totalTransportCapacity ?? 0))),
+                fleet: Array.isArray(expeditionRaw.fleet)
+                  ? expeditionRaw.fleet
+                      .map((row: any) => ({
+                        unitId: String(row?.unitId || "").trim(),
+                        quantity: Math.max(0, Math.floor(Number(row?.quantity ?? 0)))
+                      }))
+                      .filter((row: any) => row.unitId.length > 0 && row.quantity > 0)
+                  : [],
+                snapshotResources: (expeditionRaw.snapshotResources && typeof expeditionRaw.snapshotResources === "object"
+                  ? expeditionRaw.snapshotResources
+                  : {}) as Partial<Record<ResourceId, number>>,
+                collectedResources: (expeditionRaw.collectedResources && typeof expeditionRaw.collectedResources === "object"
+                  ? expeditionRaw.collectedResources
+                  : {}) as Partial<Record<ResourceId, number>>,
+                serverNowTs: Math.max(0, Math.floor(Number(expeditionRaw.serverNowTs ?? Math.floor(Date.now() / 1000))))
+              }
+            : null;
+
+        const nextReports = reportsRaw
+          .map((row: any) => ({
+            id: String(row?.id || "").trim(),
+            fieldId: String(row?.fieldId || "").trim(),
+            at: Math.max(0, Math.floor(Number(row?.at ?? 0))),
+            resources: (row?.resources && typeof row.resources === "object" ? row.resources : {}) as Partial<Record<ResourceId, number>>,
+            items: Array.isArray(row?.items)
+              ? row.items
+                  .map((item: any) => ({
+                    itemId: String(item?.itemId || "").trim(),
+                    quantity: Math.max(0, Math.floor(Number(item?.quantity ?? 0)))
+                  }))
+                  .filter((item: any) => item.itemId.length > 0 && item.quantity > 0)
+              : []
+          }))
+          .filter((row: any) => row.id.length > 0);
+
+        const nextHarvestInventory: MapHarvestShipRow[] = harvestRaw
+          .map((row: any) => ({
+            unitId: String(row?.unitId || "").trim(),
+            quantity: Math.max(0, Math.floor(Number(row?.quantity ?? 0))),
+            harvestSpeed: Math.max(0, Math.floor(Number(row?.harvestSpeed ?? 0))),
+            harvestCapacity: Math.max(0, Math.floor(Number(row?.harvestCapacity ?? 0))),
+            mapSpeed: Math.max(0, Math.floor(Number(row?.mapSpeed ?? 0)))
+          }))
+          .filter((row: MapHarvestShipRow) => row.unitId.length > 0 && row.quantity > 0);
+
+        if (!cancelled) {
+          setMapFields(nextFields);
+          setMapExpedition(nextExpedition);
+          setMapReports(nextReports);
+          setMapHarvestInventory(nextHarvestInventory);
+          setMapLoadError("");
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setMapLoadError(l("Impossible de charger les champs de ressources.", "Unable to load resource fields."));
+        }
+        if (import.meta.env.DEV) {
+          // eslint-disable-next-line no-console
+          console.error("map fields load error", err);
+        }
+      }
+    };
+
+    void loadMapState();
+    const interval = setInterval(() => void loadMapState(), 12000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [client, session, language]);
+
+  useEffect(() => {
+    const tick = setInterval(() => setMapNowMs(Date.now()), 1000);
+    return () => clearInterval(tick);
+  }, []);
+
+  useEffect(() => {
+    if (!mapExpedition) {
+      setMapServerSync(null);
+      return;
+    }
+    setMapServerSync({
+      serverMs: Math.max(0, Math.floor(Number(mapExpedition.serverNowTs || 0))) * 1000,
+      localMs: Date.now()
+    });
+  }, [mapExpedition?.fieldId, mapExpedition?.id, mapExpedition?.serverNowTs, mapExpedition?.status]);
+
+  const sectorPlayerPlanets = useMemo(
+    () => computeSectorPlayerPlanets(mapPlayers, currentUserId),
+    [currentUserId, mapPlayers]
+  );
+
+  const mapResourceEntities = useMemo(
+    () => mapFields.filter((field) => field.isVisible !== false).map((field) => mapFieldToSectorEntity(field, language)),
+    [language, mapFields]
+  );
+
+  const sectorEntities = useMemo(
+    () => [...SECTOR_STATIONS, ...SECTOR_WORLDS, ...mapResourceEntities] as SectorEntity[],
+    [mapResourceEntities]
+  );
+
+  const harvestAvailability = useMemo(() => {
+    const fromServer: Record<string, number> = {};
+    for (const row of mapHarvestInventory) fromServer[row.unitId] = Math.max(0, Math.floor(Number(row.quantity || 0)));
+    const fallback: Record<string, number> = {};
+    for (const key of Object.keys(MAP_HARVEST_UNIT_STATS)) {
+      fallback[key] = Math.max(0, Math.floor(Number(hangarInventory[key] ?? 0)));
+    }
+    return Object.keys(fromServer).length > 0 ? { ...fallback, ...fromServer } : fallback;
+  }, [hangarInventory, mapHarvestInventory]);
+
+  const selfPlanetCoords = useMemo(() => {
+    const selfPlanet = sectorPlayerPlanets.find((planet) => planet.isSelf);
+    if (selfPlanet) return { x: selfPlanet.x, y: selfPlanet.y };
+    const currentId = String(currentUserId || "guest");
+    const fallback = mapPlayerToSectorPlanet({ userId: currentId, username: currentId.slice(0, 8) }, currentId);
+    return { x: fallback.x, y: fallback.y };
+  }, [currentUserId, sectorPlayerPlanets]);
+
+  useEffect(() => {
+    const node = containerRef.current;
+    if (!node) return;
+    const syncSize = () => setViewportSize({ width: node.clientWidth, height: node.clientHeight });
+    syncSize();
+    const onResize = () => syncSize();
+    window.addEventListener("resize", onResize);
+    let observer: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== "undefined") {
+      observer = new ResizeObserver(syncSize);
+      observer.observe(node);
+    }
+    return () => {
+      window.removeEventListener("resize", onResize);
+      observer?.disconnect();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (didCenterOnHomeRef.current) return;
+    let cancelled = false;
+    let frameId = 0;
+    const centerHome = () => {
+      if (cancelled || didCenterOnHomeRef.current) return;
+      const rect = containerRef.current?.getBoundingClientRect();
+      if (!rect || rect.width < 40 || rect.height < 40) {
+        frameId = window.requestAnimationFrame(centerHome);
+        return;
+      }
+      const nextZoom = initialMapZoom;
+      setZoom(nextZoom);
+      setPan({
+        x: rect.width / 2 - selfPlanetCoords.x * nextZoom,
+        y: rect.height / 2 - selfPlanetCoords.y * nextZoom
+      });
+      didCenterOnHomeRef.current = true;
+    };
+    frameId = window.requestAnimationFrame(centerHome);
+    return () => {
+      cancelled = true;
+      if (frameId) window.cancelAnimationFrame(frameId);
+    };
+  }, [initialMapZoom, selfPlanetCoords.x, selfPlanetCoords.y]);
+
+  const mapNowTs = useMemo(() => {
+    if (!mapServerSync) return Math.floor(mapNowMs / 1000);
+    return Math.floor((mapServerSync.serverMs + (mapNowMs - mapServerSync.localMs)) / 1000);
+  }, [mapNowMs, mapServerSync]);
+
+  const fieldPopupEntity = useMemo(() => {
+    if (!fieldPopupId) return null;
+    const row = mapResourceEntities.find((entity) => entity.id === fieldPopupId);
+    return row ?? null;
+  }, [fieldPopupId, mapResourceEntities]);
+
+  const selectedFieldEntity = fieldPopupEntity;
+
+  const selectedFieldPlan = useMemo(() => {
+    if (!selectedFieldEntity) return null;
+    const rows = Object.keys(fleetDraft).map((unitId) => ({
+      unitId,
+      quantity: Math.max(0, Math.floor(Number(fleetDraft[unitId] ?? 0)))
+    }));
+    return estimateMapHarvestPlan(
+      rows,
+      currentUserId || "guest",
+      selectedFieldEntity.x,
+      selectedFieldEntity.y,
+      Math.max(1, selectedFieldEntity.remainingExtractionWork ?? selectedFieldEntity.totalExtractionWork ?? 3600)
+    );
+  }, [currentUserId, fleetDraft, selectedFieldEntity]);
+
+  const mapExpeditionVisual = useMemo(() => {
+    if (!mapExpedition) return null;
+    const field = mapFields.find((row) => row.id === mapExpedition.fieldId);
+    if (!field) return null;
+    const home = selfPlanetCoords;
+    const fieldPoint = { x: field.x, y: field.y };
+    if (mapExpedition.status === "extracting") {
+      return {
+        status: mapExpedition.status,
+        startX: home.x,
+        startY: home.y,
+        targetX: fieldPoint.x,
+        targetY: fieldPoint.y,
+        currentX: fieldPoint.x,
+        currentY: fieldPoint.y,
+        progress: 1,
+        etaTs: mapExpedition.extractionEndAt
+      };
+    }
+    const returning = mapExpedition.status === "returning";
+    const start = returning ? fieldPoint : home;
+    const target = returning ? home : fieldPoint;
+    const startAt = returning ? mapExpedition.returnStartAt : mapExpedition.departureAt;
+    const endAt = returning ? mapExpedition.returnEndAt : mapExpedition.arrivalAt;
+    const total = Math.max(1, endAt - startAt);
+    const progress = Math.max(0, Math.min(1, (mapNowTs - startAt) / total));
+    return {
+      status: mapExpedition.status,
+      startX: start.x,
+      startY: start.y,
+      targetX: target.x,
+      targetY: target.y,
+      currentX: start.x + (target.x - start.x) * progress,
+      currentY: start.y + (target.y - start.y) * progress,
+      progress,
+      etaTs: endAt
+    };
+  }, [mapExpedition, mapFields, mapNowTs, selfPlanetCoords]);
+
+  const mapExpeditionShipAngle = useMemo(() => {
+    if (!mapExpeditionVisual) return 0;
+    const dx = mapExpeditionVisual.targetX - mapExpeditionVisual.startX;
+    const dy = mapExpeditionVisual.targetY - mapExpeditionVisual.startY;
+    return Math.atan2(dy, dx) * (180 / Math.PI) + 90;
+  }, [mapExpeditionVisual]);
+
+  const entityLabelById = useMemo(() => {
+    const output: Record<string, string> = {};
+    for (const entity of sectorEntities) output[entity.id] = sectorEntityDisplayName(entity, language);
+    return output;
+  }, [language, sectorEntities]);
+
+  const inFlightRows = useMemo(() => {
+    const rows: Array<{
+      id: string;
+      title: string;
+      route: string;
+      detail: string;
+      progress: number;
+      remainingSeconds?: number;
+      etaTs?: number;
+      canRecall?: boolean;
+    }> = fleets
+      .map((fleet) => {
+        const missionLabel = fleet.missionType === "attack"
+          ? (language === "en" ? "Combat fleet" : "Flotte de combat")
+          : fleet.missionType === "mine"
+            ? (language === "en" ? "Gathering fleet" : "Flotte de collecte")
+            : (language === "en" ? "Mission fleet" : "Flotte de mission");
+        const sourceName = entityLabelById[fleet.sourceId] ?? fleet.sourceId;
+        const targetName = entityLabelById[fleet.targetId] ?? fleet.targetId;
+        return {
+          id: fleet.id,
+          title: missionLabel,
+          route: `${sourceName} → ${targetName}`,
+          detail: `${Math.max(0, Math.min(100, Math.round(fleet.progress * 100)))}%`,
+          progress: Math.max(0, Math.min(1, fleet.progress))
+        };
+      })
+      .filter((row) => row.progress < 1);
+
+    if (mapExpedition && mapExpeditionVisual) {
+      const field = mapFields.find((row) => row.id === mapExpedition.fieldId);
+      const fieldName = field ? mapFieldDisplayName(field.id, language) : mapFieldDisplayName(mapExpedition.fieldId, language);
+      const statusLabel = mapExpedition.status === "extracting"
+        ? (language === "en" ? "Harvesting fleet" : "Flotte en extraction")
+        : mapExpedition.status === "returning"
+          ? (language === "en" ? "Returning fleet" : "Flotte en retour")
+          : (language === "en" ? "Traveling fleet" : "Flotte en trajet");
+      const route = mapExpedition.status === "extracting"
+        ? `${fieldName} • ${language === "en" ? "Harvesting in progress" : "Exploitation en cours"}`
+        : mapExpedition.status === "returning"
+          ? `${fieldName} → ${language === "en" ? "Your planet" : "Votre planète"}`
+          : `${language === "en" ? "Your planet" : "Votre planète"} → ${fieldName}`;
+      const isExtracting = mapExpedition.status === "extracting";
+      const etaTs = isExtracting ? mapExpedition.extractionEndAt : mapExpeditionVisual.etaTs;
+      const progress = isExtracting
+        ? (() => {
+            const total = Math.max(1, mapExpedition.extractionEndAt - mapExpedition.extractionStartAt);
+            return Math.max(0, Math.min(1, (mapNowTs - mapExpedition.extractionStartAt) / total));
+          })()
+        : Math.max(0, Math.min(1, mapExpeditionVisual.progress));
+      rows.unshift({
+        id: `expedition_${mapExpedition.id}`,
+        title: statusLabel,
+        route,
+        detail: `${language === "en" ? "ETA" : "Arrivée"} ${new Date(etaTs * 1000).toLocaleTimeString()}`,
+        progress,
+        remainingSeconds: Math.max(0, etaTs - mapNowTs),
+        etaTs,
+        canRecall: mapExpedition.status !== "returning"
+      });
+    }
+    return rows;
+  }, [entityLabelById, fleets, language, mapExpedition, mapExpeditionVisual, mapFields, mapNowTs]);
+
+  const mapLiveCollectedRows = useMemo(() => {
+    if (!mapExpedition || mapExpedition.status !== "extracting") return [] as Array<{ resourceId: ResourceId; amount: number }>;
+    const validResourceIds = new Set<ResourceId>(RESOURCE_DEFS.map((def) => def.id as ResourceId));
+
+    const normalizeResourceId = (raw: unknown): ResourceId | null => {
+      const value = String(raw || "").trim().toLowerCase();
+      if (!value || !validResourceIds.has(value as ResourceId)) return null;
+      return value as ResourceId;
+    };
+    const toInt = (raw: unknown) => Math.max(0, Math.floor(Number(raw ?? 0)));
+
+    const field = mapFields.find((row) => row.id === mapExpedition.fieldId);
+    const fieldSnapshot: Partial<Record<ResourceId, number>> = {};
+    if (field && Array.isArray(field.resources)) {
+      for (const row of field.resources) {
+        const rid = normalizeResourceId(row.resourceId);
+        if (!rid) continue;
+        fieldSnapshot[rid] = toInt(row.totalAmount);
+      }
+    }
+
+    const expeditionSnapshot = mapExpedition.snapshotResources && typeof mapExpedition.snapshotResources === "object"
+      ? mapExpedition.snapshotResources
+      : {};
+
+    const serverCollected = mapExpedition.collectedResources && typeof mapExpedition.collectedResources === "object"
+      ? mapExpedition.collectedResources
+      : {};
+
+    const mergedSnapshot: Partial<Record<ResourceId, number>> = {};
+    for (const [ridRaw, amountRaw] of Object.entries(fieldSnapshot)) {
+      const rid = normalizeResourceId(ridRaw);
+      if (!rid) continue;
+      mergedSnapshot[rid] = toInt(amountRaw);
+    }
+    for (const [ridRaw, amountRaw] of Object.entries(expeditionSnapshot)) {
+      const rid = normalizeResourceId(ridRaw);
+      if (!rid) continue;
+      mergedSnapshot[rid] = toInt(amountRaw);
+    }
+
+    const liveCollected: Partial<Record<ResourceId, number>> = {};
+    for (const [ridRaw, amountRaw] of Object.entries(serverCollected)) {
+      const rid = normalizeResourceId(ridRaw);
+      if (!rid) continue;
+      liveCollected[rid] = toInt(amountRaw);
+    }
+
+    const hasServerProgress = Object.values(liveCollected).some((value) => toInt(value) > 0);
+    if (!hasServerProgress) {
+      const startAt = Math.max(0, Math.floor(Number(mapExpedition.extractionStartAt || 0)));
+      const endAt = Math.max(0, Math.floor(Number(mapExpedition.extractionEndAt || 0)));
+      const duration = Math.max(1, endAt - startAt);
+      const elapsed = Math.max(0, Math.min(duration, mapNowTs - startAt));
+      const ratio = duration > 0 ? elapsed / duration : 0;
+      const potential: Partial<Record<ResourceId, number>> = {};
+      let totalPotential = 0;
+      for (const [ridRaw, amountRaw] of Object.entries(mergedSnapshot)) {
+        const rid = normalizeResourceId(ridRaw);
+        if (!rid) continue;
+        const amount = Math.max(0, Math.floor(toInt(amountRaw) * ratio));
+        potential[rid] = amount;
+        totalPotential += amount;
+      }
+      const cargoCapacity = Math.max(0, Math.floor(Number(mapExpedition.totalTransportCapacity || 0)));
+      const scale = cargoCapacity > 0 && totalPotential > cargoCapacity ? cargoCapacity / totalPotential : 1;
+      for (const [ridRaw, amountRaw] of Object.entries(potential)) {
+        const rid = normalizeResourceId(ridRaw);
+        if (!rid) continue;
+        liveCollected[rid] = Math.max(0, Math.floor(toInt(amountRaw) * scale));
+      }
+    }
+
+    const orderedIds: ResourceId[] = [];
+    const seen = new Set<ResourceId>();
+    const addId = (raw: unknown) => {
+      const rid = normalizeResourceId(raw);
+      if (!rid || seen.has(rid)) return;
+      seen.add(rid);
+      orderedIds.push(rid);
+    };
+
+    if (field && Array.isArray(field.resources)) {
+      for (const row of field.resources) addId(row.resourceId);
+    }
+    for (const rid of Object.keys(mergedSnapshot)) addId(rid);
+    for (const rid of Object.keys(liveCollected)) addId(rid);
+    if (orderedIds.length <= 0) {
+      for (const rid of Object.keys(serverCollected)) addId(rid);
+    }
+
+    const rows: Array<{ resourceId: ResourceId; amount: number }> = orderedIds.map((resourceId) => ({
+      resourceId,
+      amount: toInt(liveCollected[resourceId] ?? 0)
+    }));
+    return rows;
+  }, [mapExpedition, mapFields, mapNowTs]);
+
+  const mapExtractionOverlay = useMemo(() => {
+    if (!mapExpedition || mapExpedition.status !== "extracting") return null;
+    const field = mapFields.find((row) => row.id === mapExpedition.fieldId);
+    if (!field) return null;
+    return { x: field.x, y: field.y };
+  }, [mapExpedition, mapFields]);
+
+  useEffect(() => {
+    if (!selectedEntity) return;
+    const exists = sectorEntities.some((entity) => entity.id === selectedEntity.id);
+    if (!exists) setSelectedEntity(null);
+  }, [sectorEntities, selectedEntity]);
+
+  useEffect(() => {
+    if (!fieldPopupId) return;
+    const exists = mapResourceEntities.some((entity) => entity.id === fieldPopupId);
+    if (!exists) setFieldPopupId(null);
+  }, [fieldPopupId, mapResourceEntities]);
+
+  useEffect(() => {
+    if (!fieldPopupId) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setFieldPopupId(null);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [fieldPopupId]);
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -4235,6 +5237,15 @@ function SectorMapScreen({ language }: { language: UILanguage }) {
 
   const handleEntityClick = (entity: SectorEntity) => {
     if (actionMode !== "none" && selectedEntity?.id === "st_1") {
+      if (actionMode === "mine" && entity.type === "resource" && entity.fieldId) {
+        const canLaunch = !mapActionBusy && !mapExpedition;
+        if (canLaunch) {
+          void launchHarvestOnField(entity.fieldId);
+        }
+        setActionMode("none");
+        setSelectedEntity(null);
+        return;
+      }
       const color = actionMode === "attack" ? "#ff5f6c" : actionMode === "mine" ? "#ffc95f" : "#6bb8ff";
       const newFleet: SectorFleet = {
         id: `flt_${Date.now()}`,
@@ -4254,8 +5265,158 @@ function SectorMapScreen({ language }: { language: UILanguage }) {
       return;
     }
 
+    if (entity.type === "resource") {
+      setFieldPopupId(entity.id);
+      setSelectedEntity(null);
+      setActionMode("none");
+      return;
+    }
+
     setSelectedEntity(entity);
+    setFieldPopupId(null);
     setActionMode("none");
+  };
+
+  const applyMapPayload = (source: Record<string, any>) => {
+    const rowsRaw = Array.isArray(source?.fields) ? source.fields : [];
+    const nextFields: MapFieldServerDto[] = rowsRaw
+      .map((row: any) => ({
+        id: String(row?.id || "").trim(),
+        x: Math.floor(Number(row?.x ?? 0)),
+        y: Math.floor(Number(row?.y ?? 0)),
+        rarityTier: String(row?.rarityTier || "COMMON").toUpperCase() as MapFieldServerDto["rarityTier"],
+        qualityTier: String(row?.qualityTier || "STANDARD").toUpperCase() as MapFieldServerDto["qualityTier"],
+        resources: Array.isArray(row?.resources)
+          ? row.resources
+              .map((res: any) => ({
+                resourceId: String(res?.resourceId || "").trim(),
+                totalAmount: Math.max(0, Math.floor(Number(res?.totalAmount ?? 0))),
+                remainingAmount: Math.max(0, Math.floor(Number(res?.remainingAmount ?? 0)))
+              }))
+              .filter((res: any) => res.resourceId.length > 0)
+          : [],
+        totalExtractionWork: Math.max(0, Math.floor(Number(row?.totalExtractionWork ?? 0))),
+        remainingExtractionWork: Math.max(0, Math.floor(Number(row?.remainingExtractionWork ?? 0))),
+        spawnedAt: Math.max(0, Math.floor(Number(row?.spawnedAt ?? 0))),
+        expiresAt: Math.max(0, Math.floor(Number(row?.expiresAt ?? 0))),
+        occupiedByPlayerId: String(row?.occupiedByPlayerId || ""),
+        occupiedByUsername: String(row?.occupiedByUsername || ""),
+        occupyingFleetId: String(row?.occupyingFleetId || ""),
+        isOccupied: Boolean(row?.isOccupied),
+        isVisible: row?.isVisible !== false,
+        hiddenDetails: Boolean(row?.hiddenDetails)
+      }))
+      .filter((row: MapFieldServerDto) => row.id.length > 0);
+    setMapFields(nextFields);
+
+    const expeditionRaw = parseJsonObject(source?.expedition);
+    if (Object.keys(expeditionRaw).length > 0 && String(expeditionRaw.id || "").trim().length > 0) {
+      setMapExpedition({
+        id: String(expeditionRaw.id || ""),
+        fieldId: String(expeditionRaw.fieldId || ""),
+        status: (String(expeditionRaw.status || "travel_to_field") as MapExpeditionDto["status"]),
+        departureAt: Math.max(0, Math.floor(Number(expeditionRaw.departureAt ?? 0))),
+        arrivalAt: Math.max(0, Math.floor(Number(expeditionRaw.arrivalAt ?? 0))),
+        extractionStartAt: Math.max(0, Math.floor(Number(expeditionRaw.extractionStartAt ?? 0))),
+        extractionEndAt: Math.max(0, Math.floor(Number(expeditionRaw.extractionEndAt ?? 0))),
+        returnStartAt: Math.max(0, Math.floor(Number(expeditionRaw.returnStartAt ?? 0))),
+        returnEndAt: Math.max(0, Math.floor(Number(expeditionRaw.returnEndAt ?? 0))),
+        travelSeconds: Math.max(0, Math.floor(Number(expeditionRaw.travelSeconds ?? 0))),
+        extractionSeconds: Math.max(0, Math.floor(Number(expeditionRaw.extractionSeconds ?? 0))),
+        totalHarvestSpeed: Math.max(0, Math.floor(Number(expeditionRaw.totalHarvestSpeed ?? 0))),
+        totalTransportCapacity: Math.max(0, Math.floor(Number(expeditionRaw.totalTransportCapacity ?? 0))),
+        fleet: Array.isArray(expeditionRaw.fleet)
+          ? expeditionRaw.fleet
+              .map((row: any) => ({
+                unitId: String(row?.unitId || "").trim(),
+                quantity: Math.max(0, Math.floor(Number(row?.quantity ?? 0)))
+              }))
+              .filter((row: any) => row.unitId.length > 0 && row.quantity > 0)
+          : [],
+        snapshotResources: (expeditionRaw.snapshotResources && typeof expeditionRaw.snapshotResources === "object"
+          ? expeditionRaw.snapshotResources
+          : {}) as Partial<Record<ResourceId, number>>,
+        collectedResources: (expeditionRaw.collectedResources && typeof expeditionRaw.collectedResources === "object"
+          ? expeditionRaw.collectedResources
+          : {}) as Partial<Record<ResourceId, number>>,
+        serverNowTs: Math.max(0, Math.floor(Number(expeditionRaw.serverNowTs ?? Math.floor(Date.now() / 1000))))
+      });
+    } else if (source?.expedition === null) {
+      setMapExpedition(null);
+    }
+
+    if (Array.isArray(source?.reports)) {
+      const nextReports = source.reports
+        .map((row: any) => ({
+          id: String(row?.id || "").trim(),
+          fieldId: String(row?.fieldId || "").trim(),
+          at: Math.max(0, Math.floor(Number(row?.at ?? 0))),
+          resources: (row?.resources && typeof row.resources === "object" ? row.resources : {}) as Partial<Record<ResourceId, number>>,
+          items: Array.isArray(row?.items)
+            ? row.items
+                .map((item: any) => ({
+                  itemId: String(item?.itemId || "").trim(),
+                  quantity: Math.max(0, Math.floor(Number(item?.quantity ?? 0)))
+                }))
+                .filter((item: any) => item.itemId.length > 0 && item.quantity > 0)
+            : []
+        }))
+        .filter((row: any) => row.id.length > 0);
+      setMapReports(nextReports);
+    }
+  };
+
+  const launchHarvestOnField = async (fieldId: string) => {
+    if (!session) return;
+    const fleetPayload = Object.keys(fleetDraft)
+      .map((unitId) => ({
+        unitId,
+        quantity: Math.max(0, Math.floor(Number(fleetDraft[unitId] ?? 0)))
+      }))
+      .filter((row) => row.quantity > 0);
+    if (fleetPayload.length <= 0) {
+      setMapActionError(l("Choisissez au moins un vaisseau de collecte.", "Choose at least one harvesting ship."));
+      return;
+    }
+    try {
+      setMapActionBusy(true);
+      setMapActionError("");
+      const rpc = await client.rpc(session, "rpc_map_fields_start", JSON.stringify({ fieldId, fleet: fleetPayload }));
+      const parsed = parseJsonObject((rpc as any)?.payload ?? rpc);
+      const nested = parseJsonObject(parsed?.payload);
+      const source = Object.keys(nested).length > 0 ? nested : parsed;
+      applyMapPayload(source);
+    } catch (err) {
+      setMapActionError(l("Lancement de collecte impossible.", "Unable to launch harvesting."));
+      if (import.meta.env.DEV) {
+        // eslint-disable-next-line no-console
+        console.error("map harvest start error", err);
+      }
+    } finally {
+      setMapActionBusy(false);
+      setActionMode("none");
+    }
+  };
+
+  const recallHarvestFleet = async () => {
+    if (!session) return;
+    try {
+      setMapActionBusy(true);
+      setMapActionError("");
+      const rpc = await client.rpc(session, "rpc_map_fields_recall", "{}");
+      const parsed = parseJsonObject((rpc as any)?.payload ?? rpc);
+      const nested = parseJsonObject(parsed?.payload);
+      const source = Object.keys(nested).length > 0 ? nested : parsed;
+      applyMapPayload(source);
+    } catch (err) {
+      setMapActionError(l("Rappel impossible pour le moment.", "Unable to recall fleet right now."));
+      if (import.meta.env.DEV) {
+        // eslint-disable-next-line no-console
+        console.error("map harvest recall error", err);
+      }
+    } finally {
+      setMapActionBusy(false);
+    }
   };
 
   const resourceClass = (type: SectorResource["resourceType"]) => {
@@ -4265,6 +5426,7 @@ function SectorMapScreen({ language }: { language: UILanguage }) {
   };
 
   const resourceTypeLabel = (type: SectorResource["resourceType"]) => {
+    if (!type) return l("Multi-ressources", "Multi-resource");
     if (type === "alliage") return l("Alliage", "Alloy");
     if (type === "helium3") return l("Helium-3", "Helium-3");
     return l("Cristal", "Crystal");
@@ -4275,6 +5437,43 @@ function SectorMapScreen({ language }: { language: UILanguage }) {
     if (type === "world") return l("Monde", "World");
     return l("Ressource", "Resource");
   };
+
+  const formatFlightCountdown = (seconds: number) => {
+    const safe = Math.max(0, Math.floor(Number(seconds || 0)));
+    const hours = Math.floor(safe / 3600);
+    const minutes = Math.floor((safe % 3600) / 60);
+    const secs = safe % 60;
+    return `${hours.toString().padStart(2, "0")}:${minutes.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
+  };
+
+  const formatFlightEtaClock = (etaTs: number) =>
+    new Date(Math.max(0, etaTs) * 1000).toLocaleTimeString([], {
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit"
+    });
+
+  const centerOnMyPosition = () => {
+    const rect = containerRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    setPan({
+      x: rect.width / 2 - selfPlanetCoords.x * zoom,
+      y: rect.height / 2 - selfPlanetCoords.y * zoom
+    });
+  };
+
+  const isMyPlanetOutOfView = useMemo(() => {
+    if (viewportSize.width <= 0 || viewportSize.height <= 0) return false;
+    const screenX = selfPlanetCoords.x * zoom + pan.x;
+    const screenY = selfPlanetCoords.y * zoom + pan.y;
+    const margin = 46;
+    return (
+      screenX < margin ||
+      screenY < margin ||
+      screenX > viewportSize.width - margin ||
+      screenY > viewportSize.height - margin
+    );
+  }, [pan.x, pan.y, selfPlanetCoords.x, selfPlanetCoords.y, viewportSize.height, viewportSize.width, zoom]);
 
   return (
     <main className="sector-shell">
@@ -4291,40 +5490,93 @@ function SectorMapScreen({ language }: { language: UILanguage }) {
         <div className="sector-stars layer-a" style={{ backgroundPosition: `${pan.x * 0.18}px ${pan.y * 0.18}px` }} />
         <div className="sector-stars layer-b" style={{ backgroundPosition: `${pan.x * 0.4}px ${pan.y * 0.4}px` }} />
         <div className="sector-nebula" />
-        <aside
-          className="sector-daily-overlay"
-          onWheel={(e) => e.stopPropagation()}
-          onMouseDown={(e) => e.stopPropagation()}
-        >
-          <div className="sector-daily-head">
-            <Rocket size={14} />
-            <strong>{l("Missions quotidiennes", "Daily missions")}</strong>
-          </div>
-          <p className="sector-daily-reset">{l("Reset dans 13h 24m", "Reset in 13h 24m")}</p>
-          <div className="sector-daily-list">
-            {dailyQuests.map((quest) => {
-              const ratio = Math.min(100, Math.round((quest.progress / quest.target) * 100));
-              const complete = quest.progress >= quest.target;
-              return (
-                <article key={`daily_overlay_${quest.id}`} className="sector-daily-item">
-                  <header>
-                    <strong>{l(quest.titleFr, quest.titleEn)}</strong>
-                    <span>{l(quest.rewardFr, quest.rewardEn)}</span>
-                  </header>
-                  <div className="sector-daily-progress">
-                    <div style={{ width: `${ratio}%` }} />
-                  </div>
-                  <footer>
-                    <small>{quest.progress.toLocaleString()} / {quest.target.toLocaleString()}</small>
-                    <button type="button" disabled={!complete || quest.claimed} onClick={() => claimQuest(quest.id)}>
-                      {quest.claimed ? l("Recupere", "Claimed") : complete ? l("Recuperer", "Claim") : l("En cours", "In progress")}
-                    </button>
-                  </footer>
-                </article>
-              );
-            })}
-          </div>
-        </aside>
+        <div className="sector-top-stack">
+          <aside
+            className="sector-flight-overlay"
+            onWheel={(e) => e.stopPropagation()}
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <div className="sector-flight-head">
+              <Move size={14} />
+              <strong>{l("Flottes en vol", "Fleets in flight")}</strong>
+              <span>{inFlightRows.length}</span>
+            </div>
+            <div className="sector-flight-list">
+              {inFlightRows.length <= 0 ? (
+                <p className="sector-empty">{l("Aucune flotte en transit.", "No fleet currently in transit.")}</p>
+              ) : (
+                inFlightRows.map((row) => (
+                  <article key={row.id} className="sector-flight-item">
+                    <header>
+                      <strong>{row.title}</strong>
+                      {row.remainingSeconds == null ? <small>{row.detail}</small> : null}
+                    </header>
+                    <p>{row.route}</p>
+                    {row.remainingSeconds != null && row.etaTs != null ? (
+                      <div className="sector-flight-time-meta">
+                        <span>{l("Temps restant", "Time left")}</span>
+                        <strong className="sector-flight-time-value">{formatFlightCountdown(row.remainingSeconds)}</strong>
+                        <span>{l("Arrivée", "Arrival")}</span>
+                        <strong className="sector-flight-time-value">{formatFlightEtaClock(row.etaTs)}</strong>
+                      </div>
+                    ) : null}
+                    <div className="sector-flight-progress">
+                      <div style={{ width: `${Math.max(4, Math.min(100, Math.round(row.progress * 100)))}%` }} />
+                    </div>
+                    {row.canRecall ? (
+                      <button
+                        type="button"
+                        className="sector-flight-return-btn"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          void recallHarvestFleet();
+                        }}
+                        disabled={mapActionBusy}
+                      >
+                        {mapActionBusy ? l("Action...", "Processing...") : l("Retour", "Return")}
+                      </button>
+                    ) : null}
+                  </article>
+                ))
+              )}
+            </div>
+          </aside>
+
+          <aside
+            className="sector-daily-overlay"
+            onWheel={(e) => e.stopPropagation()}
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <div className="sector-daily-head">
+              <Rocket size={14} />
+              <strong>{l("Missions quotidiennes", "Daily missions")}</strong>
+            </div>
+            <p className="sector-daily-reset">{l("Reset dans 13h 24m", "Reset in 13h 24m")}</p>
+            <div className="sector-daily-list">
+              {dailyQuests.map((quest) => {
+                const ratio = Math.min(100, Math.round((quest.progress / quest.target) * 100));
+                const complete = quest.progress >= quest.target;
+                return (
+                  <article key={`daily_overlay_${quest.id}`} className="sector-daily-item">
+                    <header>
+                      <strong>{l(quest.titleFr, quest.titleEn)}</strong>
+                      <span>{l(quest.rewardFr, quest.rewardEn)}</span>
+                    </header>
+                    <div className="sector-daily-progress">
+                      <div style={{ width: `${ratio}%` }} />
+                    </div>
+                    <footer>
+                      <small>{quest.progress.toLocaleString()} / {quest.target.toLocaleString()}</small>
+                      <button type="button" disabled={!complete || quest.claimed} onClick={() => claimQuest(quest.id)}>
+                        {quest.claimed ? l("Recupere", "Claimed") : complete ? l("Recuperer", "Claim") : l("En cours", "In progress")}
+                      </button>
+                    </footer>
+                  </article>
+                );
+              })}
+            </div>
+          </aside>
+        </div>
 
         <div
           className="sector-transform"
@@ -4366,9 +5618,96 @@ function SectorMapScreen({ language }: { language: UILanguage }) {
                 </g>
               );
             })}
+
+            {mapExpeditionVisual ? (
+              <g className="sector-map-expedition-path">
+                {mapExpeditionVisual.status !== "extracting" ? (
+                  <line
+                    x1={mapExpeditionVisual.startX}
+                    y1={mapExpeditionVisual.startY}
+                    x2={mapExpeditionVisual.targetX}
+                    y2={mapExpeditionVisual.targetY}
+                    stroke="#86d7ff"
+                    strokeWidth="2.6"
+                    strokeDasharray="11 10"
+                    opacity="0.35"
+                  />
+                ) : null}
+                {mapExpeditionVisual.status === "extracting" ? (
+                  <>
+                    <circle
+                      cx={mapExpeditionVisual.currentX}
+                      cy={mapExpeditionVisual.currentY}
+                      r="18"
+                      fill="none"
+                      stroke="#aee6ff"
+                      strokeWidth="2"
+                      opacity="0.52"
+                    />
+                    <circle
+                      cx={mapExpeditionVisual.currentX}
+                      cy={mapExpeditionVisual.currentY}
+                      r="8"
+                      fill="#7ecfff"
+                      className="sector-fleet-dot"
+                    />
+                  </>
+                ) : (
+                  <>
+                    <circle
+                      cx={mapExpeditionVisual.currentX}
+                      cy={mapExpeditionVisual.currentY}
+                      r="12"
+                      fill="rgba(120, 204, 255, 0.22)"
+                    />
+                    <g transform={`translate(${mapExpeditionVisual.currentX} ${mapExpeditionVisual.currentY}) rotate(${mapExpeditionShipAngle})`}>
+                      <path
+                        d="M 0 -11 L 7 8 L 0 4 L -7 8 Z"
+                        fill="#9adfff"
+                        stroke="#e8f8ff"
+                        strokeWidth="1.2"
+                        className="sector-map-ship"
+                      />
+                    </g>
+                  </>
+                )}
+              </g>
+            ) : null}
           </svg>
 
-          {SECTOR_ENTITIES.map((entity) => {
+          {mapExtractionOverlay ? (
+            <div
+              className="sector-field-live-overlay"
+              style={{ left: mapExtractionOverlay.x, top: mapExtractionOverlay.y - 68 }}
+            >
+              <p>{l("Ressources cumulées", "Accumulated resources")}</p>
+              {mapLiveCollectedRows.length <= 0 ? (
+                <small>{l("Extraction en cours...", "Extraction in progress...")}</small>
+              ) : (
+                mapLiveCollectedRows.map((row) => (
+                  <div key={`field_live_gain_${row.resourceId}`} className="sector-field-live-row">
+                    <span>{resourceDisplayName(row.resourceId, language)}</span>
+                    <strong>+{row.amount.toLocaleString()}</strong>
+                  </div>
+                ))
+              )}
+            </div>
+          ) : null}
+
+          {sectorPlayerPlanets.map((playerPlanet) => (
+            <div
+              key={`player_planet_${playerPlanet.userId}`}
+              className={`sector-player-world ${playerPlanet.isSelf ? "self" : ""}`}
+              style={{ left: playerPlanet.x, top: playerPlanet.y }}
+            >
+              <span className="sector-player-tag">{playerPlanet.username}</span>
+              <span className="sector-world">
+                <span className="sector-world-sprite" style={getPlanetSpriteStyle(playerPlanet.worldType)} />
+              </span>
+            </div>
+          ))}
+
+          {sectorEntities.map((entity) => {
             const selected = selectedEntity?.id === entity.id;
             const targetable = actionMode !== "none" && entity.id !== "st_1";
             const visible = isVisible(entity);
@@ -4435,6 +5774,16 @@ function SectorMapScreen({ language }: { language: UILanguage }) {
         {sidebarTab === "navigation" ? (
           <>
             <div className="sector-panel">
+              <button
+                type="button"
+                className={`sector-home-btn ${isMyPlanetOutOfView ? "alert" : ""}`}
+                onClick={centerOnMyPosition}
+              >
+                <MapPin size={14} /> {l("Ma position", "My position")}
+              </button>
+            </div>
+
+            <div className="sector-panel">
               <h3><Filter size={15} /> {l("Filtres cartographiques", "Map filters")}</h3>
               <label>
                 <input type="checkbox" checked={filters.enemies} onChange={(e) => setFilters((prev) => ({ ...prev, enemies: e.target.checked }))} />
@@ -4448,6 +5797,72 @@ function SectorMapScreen({ language }: { language: UILanguage }) {
                 <input type="checkbox" checked={filters.missions} onChange={(e) => setFilters((prev) => ({ ...prev, missions: e.target.checked }))} />
                 {l("Mondes de mission", "Mission worlds")}
               </label>
+            </div>
+
+            <div className="sector-panel">
+              <h3><Hourglass size={15} /> {l("Exploitation", "Harvesting")}</h3>
+              {mapLoadError ? <p className="sector-map-error">{mapLoadError}</p> : null}
+              {mapActionError ? <p className="sector-map-error">{mapActionError}</p> : null}
+              {mapExpedition ? (
+                <div className="sector-map-expedition">
+                  <div>
+                    <span>{l("Statut", "Status")}</span>
+                    <strong>
+                      {mapExpedition.status === "travel_to_field"
+                        ? l("Trajet aller", "Traveling")
+                        : mapExpedition.status === "extracting"
+                          ? l("Extraction", "Extracting")
+                          : l("Retour", "Returning")}
+                    </strong>
+                  </div>
+                  <div>
+                    <span>{l("Fin estimee", "ETA")}</span>
+                    <strong>
+                      {new Date(
+                        (mapExpedition.status === "returning"
+                          ? mapExpedition.returnEndAt
+                          : mapExpedition.status === "extracting"
+                            ? mapExpedition.extractionEndAt
+                            : mapExpedition.arrivalAt) * 1000
+                      ).toLocaleTimeString()}
+                    </strong>
+                  </div>
+                  <div>
+                    <span>{l("Vitesse de collecte", "Harvest speed")}</span>
+                    <strong>{mapExpedition.totalHarvestSpeed.toLocaleString()}</strong>
+                  </div>
+                  {mapExpedition.status === "extracting" ? (
+                    <div className="sector-map-live-gains">
+                      <p>{l("Ressources cumulées", "Accumulated resources")}</p>
+                      {mapLiveCollectedRows.length <= 0 ? (
+                        <small>{l("Extraction en cours...", "Extraction in progress...")}</small>
+                      ) : (
+                        mapLiveCollectedRows.map((row) => (
+                          <div key={`map_gain_${row.resourceId}`} className="sector-map-live-gain-row">
+                            <span>{resourceDisplayName(row.resourceId, language)}</span>
+                            <strong>+{row.amount.toLocaleString()}</strong>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  ) : null}
+                  <button type="button" className="sector-save-marker" onClick={() => void recallHarvestFleet()} disabled={mapActionBusy || mapExpedition.status === "returning"}>
+                    {mapActionBusy ? l("Action...", "Processing...") : l("Rappeler la flotte", "Recall fleet")}
+                  </button>
+                </div>
+              ) : (
+                <p className="sector-empty">{l("Aucune flotte en exploitation.", "No active harvesting fleet.")}</p>
+              )}
+              {mapReports.length > 0 ? (
+                <div className="sector-map-reports">
+                  {mapReports.slice(0, 2).map((row) => (
+                    <article key={row.id}>
+                      <strong>{l("Retour de flotte", "Fleet return")}</strong>
+                      <small>{new Date(row.at * 1000).toLocaleString()}</small>
+                    </article>
+                  ))}
+                </div>
+              ) : null}
             </div>
 
             <div className="sector-panel">
@@ -4561,7 +5976,76 @@ function SectorMapScreen({ language }: { language: UILanguage }) {
               {selectedEntity.type === "resource" ? (
                 <div className="sector-detail-list">
                   <div><span>{l("Type", "Type")}</span><strong>{resourceTypeLabel(selectedEntity.resourceType)}</strong></div>
-                  <div><span>{l("Rendement estime", "Estimated yield")}</span><strong>{selectedEntity.amount.toLocaleString()}</strong></div>
+                  <div><span>{l("Occupation", "Occupation")}</span><strong>{selectedEntity.isOccupied ? l("Occupe", "Occupied") : l("Libre", "Free")}</strong></div>
+                  {selectedEntity.isOccupied && selectedEntity.occupiedByUsername ? (
+                    <div><span>{l("Exploitant", "Operator")}</span><strong>{selectedEntity.occupiedByUsername}</strong></div>
+                  ) : null}
+                  {selectedEntity.hiddenDetails ? (
+                    <p className="sector-empty">
+                      {l(
+                        "Contenu masque: ce champ est exploite par une flotte rivale.",
+                        "Hidden content: this field is being harvested by a rival fleet."
+                      )}
+                    </p>
+                  ) : (
+                    <>
+                      <div><span>{l("Rareté", "Rarity")}</span><strong>{mapFieldRarityDisplay(selectedEntity.rarityTier, language)}</strong></div>
+                      <div><span>{l("Qualité", "Quality")}</span><strong>{mapFieldQualityDisplay(selectedEntity.qualityTier, language)}</strong></div>
+                      <div><span>{l("Rendement restant", "Remaining yield")}</span><strong>{Math.max(0, Math.floor(Number(selectedEntity.amount ?? 0))).toLocaleString()}</strong></div>
+                      {(selectedEntity.resources ?? []).map((row) => (
+                        <div key={`rf_res_${selectedEntity.id}_${row.resourceId}`}>
+                          <span>{resourceDisplayName(row.resourceId, language)}</span>
+                          <strong>{Math.floor(row.remainingAmount).toLocaleString()} / {Math.floor(row.totalAmount).toLocaleString()}</strong>
+                        </div>
+                      ))}
+                      <div>
+                        <span>{l("Travail restant", "Remaining work")}</span>
+                        <strong>{Math.floor(Number(selectedEntity.remainingExtractionWork ?? 0)).toLocaleString()}</strong>
+                      </div>
+                      {selectedFieldPlan ? (
+                        <>
+                          <div><span>{l("Trajet estime", "Estimated travel")}</span><strong>{Math.floor(selectedFieldPlan.travelSeconds / 60)}m {selectedFieldPlan.travelSeconds % 60}s</strong></div>
+                          <div><span>{l("Extraction estimee", "Estimated extraction")}</span><strong>{Math.floor(selectedFieldPlan.extractionSeconds / 60)}m</strong></div>
+                          <div><span>{l("Capacite cargo", "Cargo capacity")}</span><strong>{selectedFieldPlan.totalCapacity.toLocaleString()}</strong></div>
+                        </>
+                      ) : null}
+                      {selectedEntity.fieldId && !mapExpedition ? (
+                        <div className="sector-field-actions">
+                          <p>{l("Flotte de collecte", "Harvest fleet")}</p>
+                          {["argo", "pegase", "arche_spatiale"].map((unitId) => {
+                            const available = Math.max(0, Math.floor(Number(harvestAvailability[unitId] ?? 0)));
+                            const raw = fleetDraft[unitId] ?? "0";
+                            return (
+                              <label key={`fleet_${unitId}`}>
+                                <span>{hangarUnitDisplayName(unitId, unitId, language)} ({available})</span>
+                                <input
+                                  type="number"
+                                  min={0}
+                                  max={available}
+                                  value={raw}
+                                  onChange={(e) => {
+                                    const next = Math.max(0, Math.min(available, Math.floor(Number(e.target.value || 0))));
+                                    setFleetDraft((prev) => ({ ...prev, [unitId]: String(next) }));
+                                  }}
+                                />
+                              </label>
+                            );
+                          })}
+                          <button
+                            type="button"
+                            className="sector-war-btn"
+                            onClick={() => void launchHarvestOnField(selectedEntity.fieldId!)}
+                            disabled={
+                              mapActionBusy ||
+                              Object.keys(fleetDraft).every((unitId) => Math.floor(Number(fleetDraft[unitId] ?? 0)) <= 0)
+                            }
+                          >
+                            {mapActionBusy ? l("Lancement...", "Launching...") : l("Lancer l'exploitation", "Start harvesting")}
+                          </button>
+                        </div>
+                      ) : null}
+                    </>
+                  )}
                 </div>
               ) : null}
             </>
@@ -4570,6 +6054,98 @@ function SectorMapScreen({ language }: { language: UILanguage }) {
           )}
         </div>
       </aside>
+
+      {fieldPopupEntity ? (
+        <div className="sector-field-modal-backdrop" onClick={() => setFieldPopupId(null)}>
+          <div className="sector-field-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="sector-detail-head">
+              <div>
+                <h4>{sectorEntityDisplayName(fieldPopupEntity, language)}</h4>
+                <p>
+                  {l("Champ de ressources", "Resource field")} • [{fieldPopupEntity.x}, {fieldPopupEntity.y}]
+                </p>
+              </div>
+              <button type="button" onClick={() => setFieldPopupId(null)}><X size={18} /></button>
+            </div>
+
+            {mapActionError ? <p className="sector-map-error">{mapActionError}</p> : null}
+
+            <div className="sector-detail-list">
+              <div><span>{l("Type", "Type")}</span><strong>{resourceTypeLabel(fieldPopupEntity.resourceType)}</strong></div>
+              <div><span>{l("Occupation", "Occupation")}</span><strong>{fieldPopupEntity.isOccupied ? l("Occupe", "Occupied") : l("Libre", "Free")}</strong></div>
+              {fieldPopupEntity.isOccupied && fieldPopupEntity.occupiedByUsername ? (
+                <div><span>{l("Exploitant", "Operator")}</span><strong>{fieldPopupEntity.occupiedByUsername}</strong></div>
+              ) : null}
+              {fieldPopupEntity.hiddenDetails ? (
+                <p className="sector-empty">
+                  {l(
+                    "Contenu masque: ce champ est exploite par une flotte rivale.",
+                    "Hidden content: this field is being harvested by a rival fleet."
+                  )}
+                </p>
+              ) : (
+                <>
+                  <div><span>{l("Rareté", "Rarity")}</span><strong>{mapFieldRarityDisplay(fieldPopupEntity.rarityTier, language)}</strong></div>
+                  <div><span>{l("Qualité", "Quality")}</span><strong>{mapFieldQualityDisplay(fieldPopupEntity.qualityTier, language)}</strong></div>
+                  <div><span>{l("Rendement restant", "Remaining yield")}</span><strong>{Math.max(0, Math.floor(Number(fieldPopupEntity.amount ?? 0))).toLocaleString()}</strong></div>
+                  {(fieldPopupEntity.resources ?? []).map((row) => (
+                    <div key={`rf_modal_res_${fieldPopupEntity.id}_${row.resourceId}`}>
+                      <span>{resourceDisplayName(row.resourceId, language)}</span>
+                      <strong>{Math.floor(row.remainingAmount).toLocaleString()} / {Math.floor(row.totalAmount).toLocaleString()}</strong>
+                    </div>
+                  ))}
+                  <div>
+                    <span>{l("Travail restant", "Remaining work")}</span>
+                    <strong>{Math.floor(Number(fieldPopupEntity.remainingExtractionWork ?? 0)).toLocaleString()}</strong>
+                  </div>
+                  {selectedFieldPlan ? (
+                    <>
+                      <div><span>{l("Trajet estime", "Estimated travel")}</span><strong>{Math.floor(selectedFieldPlan.travelSeconds / 60)}m {selectedFieldPlan.travelSeconds % 60}s</strong></div>
+                      <div><span>{l("Extraction estimee", "Estimated extraction")}</span><strong>{Math.floor(selectedFieldPlan.extractionSeconds / 60)}m</strong></div>
+                      <div><span>{l("Capacite cargo", "Cargo capacity")}</span><strong>{selectedFieldPlan.totalCapacity.toLocaleString()}</strong></div>
+                    </>
+                  ) : null}
+                  {fieldPopupEntity.fieldId && !mapExpedition ? (
+                    <div className="sector-field-actions">
+                      <p>{l("Flotte de collecte", "Harvest fleet")}</p>
+                      {["argo", "pegase", "arche_spatiale"].map((unitId) => {
+                        const available = Math.max(0, Math.floor(Number(harvestAvailability[unitId] ?? 0)));
+                        const raw = fleetDraft[unitId] ?? "0";
+                        return (
+                          <label key={`fleet_modal_${unitId}`}>
+                            <span>{hangarUnitDisplayName(unitId, unitId, language)} ({available})</span>
+                            <input
+                              type="number"
+                              min={0}
+                              max={available}
+                              value={raw}
+                              onChange={(e) => {
+                                const next = Math.max(0, Math.min(available, Math.floor(Number(e.target.value || 0))));
+                                setFleetDraft((prev) => ({ ...prev, [unitId]: String(next) }));
+                              }}
+                            />
+                          </label>
+                        );
+                      })}
+                      <button
+                        type="button"
+                        className="sector-war-btn"
+                        onClick={() => void launchHarvestOnField(fieldPopupEntity.fieldId!)}
+                        disabled={
+                          mapActionBusy ||
+                          Object.keys(fleetDraft).every((unitId) => Math.floor(Number(fleetDraft[unitId] ?? 0)) <= 0)
+                        }
+                      >
+                        {mapActionBusy ? l("Lancement...", "Launching...") : l("Lancer l'exploitation", "Start harvesting")}
+                      </button>
+                    </div>
+                  ) : null}
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      ) : null}
     </main>
   );
 }
@@ -7715,6 +9291,13 @@ function InboxScreen({
 
   const selectedMessage = useMemo(() => items.find((m) => m.id === selectedId) ?? null, [items, selectedId]);
   const currentUserId = session?.user_id || "";
+  const selectedMessageIsDailyNoonChest = useMemo(() => {
+    if (!selectedMessage) return false;
+    return (
+      selectedMessage.type === "REWARD" &&
+      String(selectedMessage.meta?.kind || "").toUpperCase() === "DAILY_NOON_CHEST"
+    );
+  }, [selectedMessage]);
 
   const playerThreadRows = useMemo(() => {
     const grouped = new Map<
@@ -7784,6 +9367,7 @@ function InboxScreen({
     selectedMessageReplyTargetUserId &&
       (!session?.user_id || selectedMessageReplyTargetUserId !== session.user_id)
   );
+  const canRunDailyNoonTest = Boolean(session && enabled);
 
   const parseInboxResponse = (rpc: any) => {
     const parsed = parseJsonObject((rpc as any)?.payload ?? rpc);
@@ -7810,7 +9394,8 @@ function InboxScreen({
         claimed: Boolean(row.claimed),
         hasAttachments: Boolean(row.hasAttachments),
         attachments: row.attachments && typeof row.attachments === "object" ? row.attachments : {},
-        combatReport: row.combatReport && typeof row.combatReport === "object" ? row.combatReport : null
+        combatReport: row.combatReport && typeof row.combatReport === "object" ? row.combatReport : null,
+        meta: row.meta && typeof row.meta === "object" ? row.meta : null
       }));
     const unreadRaw = payload?.unread && typeof payload.unread === "object" ? payload.unread : {};
     const unreadCounts: InboxUnreadCounts = {
@@ -8025,6 +9610,37 @@ function InboxScreen({
         }
       }
       setSendStatus(detail || l("Envoi impossible.", "Send failed."));
+    } finally {
+      setActionBusy(false);
+    }
+  };
+
+  const spawnDailyNoonTestMessage = async () => {
+    if (!session) return;
+    setActionBusy(true);
+    setSendStatus("");
+    try {
+      const rpc = await client.rpc(
+        session,
+        "rpc_inbox_daily_noon_test",
+        JSON.stringify({ streakDay: 7 })
+      );
+      const parsed = parseJsonObject((rpc as any)?.payload ?? rpc);
+      const nested = parseJsonObject(parsed?.payload);
+      const source = Object.keys(nested).length > 0 ? nested : parsed;
+      const created = parseJsonObject(source?.message);
+      const createdId = String(created?.id || "").trim();
+
+      setSendStatus(l("Coffre quotidien de test ajoute. Onglet Recompenses ouvert.", "Daily test chest added. Rewards tab opened."));
+      if (tab !== "REWARD") {
+        setTab("REWARD");
+      } else {
+        await loadInbox(true);
+      }
+      if (createdId) setSelectedId(createdId);
+    } catch (err) {
+      const details = extractRpcErrorMessage(err);
+      setSendStatus(details || l("Generation test impossible.", "Test generation failed."));
     } finally {
       setActionBusy(false);
     }
@@ -8365,34 +9981,52 @@ function InboxScreen({
 
             {selectedMessage.hasAttachments ? (
               <div className="inbox-attachments">
-                <h4>{l("Pieces jointes", "Attachments")}</h4>
-                {selectedMessage.attachments.resources && Object.keys(selectedMessage.attachments.resources).length > 0 ? (
-                  <ResourceCostDisplay cost={selectedMessage.attachments.resources as ResourceCost} available={{}} language={language} compact />
-                ) : null}
-                {Array.isArray(selectedMessage.attachments.items) && selectedMessage.attachments.items.length > 0 ? (
-                  <ul>
-                    {selectedMessage.attachments.items.map((it) => (
-                      <li key={`${it.itemId}_${it.quantity}`}>{it.itemId} x{it.quantity}</li>
-                    ))}
-                  </ul>
-                ) : null}
-                {Number(selectedMessage.attachments.credits ?? 0) > 0 ? (
-                  <p>{l("Credits", "Credits")}: {Math.floor(Number(selectedMessage.attachments.credits ?? 0)).toLocaleString()}</p>
-                ) : null}
-                {Array.isArray(selectedMessage.attachments.chests) && selectedMessage.attachments.chests.length > 0 ? (
-                  <ul>
-                    {selectedMessage.attachments.chests.map((ch) => (
-                      <li key={`${ch.chestType}_${ch.quantity}`}>{ch.chestType} x{ch.quantity}</li>
-                    ))}
-                  </ul>
-                ) : null}
+                <h4>{selectedMessageIsDailyNoonChest ? l("Coffre quotidien", "Daily chest") : l("Pieces jointes", "Attachments")}</h4>
+                {selectedMessageIsDailyNoonChest && !selectedMessage.claimed ? (
+                  <p>
+                    {l(
+                      "Recompense de midi non ouverte. Cliquez sur Ouvrir pour reveler le contenu.",
+                      "Midday reward not opened yet. Click Open to reveal its content."
+                    )}
+                    {Number(selectedMessage.meta?.streakDay ?? 0) > 0
+                      ? ` ${l("Palier", "Streak")} ${Math.floor(Number(selectedMessage.meta?.streakDay ?? 0))}/7.`
+                      : ""}
+                  </p>
+                ) : (
+                  <>
+                    {selectedMessage.attachments.resources && Object.keys(selectedMessage.attachments.resources).length > 0 ? (
+                      <ResourceCostDisplay cost={selectedMessage.attachments.resources as ResourceCost} available={{}} language={language} compact />
+                    ) : null}
+                    {Array.isArray(selectedMessage.attachments.items) && selectedMessage.attachments.items.length > 0 ? (
+                      <ul>
+                        {selectedMessage.attachments.items.map((it) => (
+                          <li key={`${it.itemId}_${it.quantity}`}>{it.itemId} x{it.quantity}</li>
+                        ))}
+                      </ul>
+                    ) : null}
+                    {Number(selectedMessage.attachments.credits ?? 0) > 0 ? (
+                      <p>{l("Credits", "Credits")}: {Math.floor(Number(selectedMessage.attachments.credits ?? 0)).toLocaleString()}</p>
+                    ) : null}
+                    {Array.isArray(selectedMessage.attachments.chests) && selectedMessage.attachments.chests.length > 0 ? (
+                      <ul>
+                        {selectedMessage.attachments.chests.map((ch) => (
+                          <li key={`${ch.chestType}_${ch.quantity}`}>{ch.chestType} x{ch.quantity}</li>
+                        ))}
+                      </ul>
+                    ) : null}
+                  </>
+                )}
                 <button
                   type="button"
                   className="inbox-action-btn primary"
                   disabled={actionBusy || selectedMessage.claimed || !selectedMessage.hasAttachments}
                   onClick={() => void claimMessage(selectedMessage.id)}
                 >
-                  {selectedMessage.claimed ? l("Deja reclame", "Already claimed") : l("Reclamer", "Claim")}
+                  {selectedMessage.claimed
+                    ? l("Deja reclame", "Already claimed")
+                    : selectedMessageIsDailyNoonChest
+                      ? l("Ouvrir", "Open")
+                      : l("Reclamer", "Claim")}
                 </button>
               </div>
             ) : null}
@@ -8460,6 +10094,16 @@ function InboxScreen({
           <button className="inbox-action-btn primary" type="button" onClick={() => void sendPlayerMessage()} disabled={actionBusy || !session || !enabled || playerId.length === 0}>
             {l("Envoyer", "Send")}
           </button>
+          {canRunDailyNoonTest ? (
+            <button
+              className="inbox-action-btn ghost"
+              type="button"
+              onClick={() => void spawnDailyNoonTestMessage()}
+              disabled={actionBusy || !session || !enabled}
+            >
+              {l("Tester coffre midi (admin)", "Test noon chest (admin)")}
+            </button>
+          ) : null}
           {sendStatus ? <p className="inbox-send-status">{sendStatus}</p> : null}
           {error ? <p className="inbox-send-error">{error}</p> : null}
         </div>

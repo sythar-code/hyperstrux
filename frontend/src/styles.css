@@ -2531,6 +2531,7 @@ button {
 }
 
 .sector-shell {
+  position: relative;
   flex: 1;
   display: grid;
   grid-template-columns: 1fr 330px;
@@ -2587,13 +2588,167 @@ button {
   opacity: 0.22;
 }
 
-.sector-daily-overlay {
+.sector-top-stack {
   position: absolute;
   top: 14px;
   left: 14px;
-  width: min(320px, calc(100% - 28px));
-  max-height: min(50vh, 430px);
+  width: min(360px, calc(100% - 28px));
   z-index: 26;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  pointer-events: none;
+}
+
+.sector-top-stack > aside {
+  pointer-events: auto;
+}
+
+.sector-flight-overlay {
+  border: 1px solid #3d6078;
+  border-radius: 12px;
+  background:
+    linear-gradient(180deg, rgba(12, 28, 40, 0.94), rgba(9, 19, 29, 0.9)),
+    radial-gradient(420px 140px at 50% 0%, rgba(115, 193, 255, 0.2), transparent 70%);
+  box-shadow: 0 14px 35px rgba(0, 0, 0, 0.45), 0 0 20px rgba(83, 163, 226, 0.2);
+  backdrop-filter: blur(6px);
+  padding: 10px;
+  max-height: min(30vh, 220px);
+  overflow: auto;
+}
+
+.sector-flight-head {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 7px;
+  color: #daf0ff;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 0.76rem;
+  margin-bottom: 8px;
+}
+
+.sector-flight-head strong {
+  font-weight: 700;
+}
+
+.sector-flight-head span {
+  border: 1px solid #4d7692;
+  border-radius: 999px;
+  min-width: 24px;
+  height: 20px;
+  padding: 0 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(15, 35, 50, 0.85);
+  color: #b7d6eb;
+  font-size: 0.68rem;
+}
+
+.sector-flight-list {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.sector-flight-item {
+  border: 1px solid #35556d;
+  border-radius: 10px;
+  background: rgba(11, 24, 35, 0.88);
+  padding: 8px;
+}
+
+.sector-flight-item header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 5px;
+}
+
+.sector-flight-item header strong {
+  color: #def2ff;
+  font-size: 0.74rem;
+}
+
+.sector-flight-item header small {
+  color: #9ec0d7;
+  font-size: 0.68rem;
+}
+
+.sector-flight-item p {
+  margin: 0 0 7px;
+  color: #c2def0;
+  font-size: 0.72rem;
+  line-height: 1.35;
+}
+
+.sector-flight-time-meta {
+  margin: 0 0 7px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 5px 8px;
+}
+
+.sector-flight-time-meta span {
+  color: #9ebed4;
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.sector-flight-time-value {
+  color: #59df8b;
+  font-size: 0.79rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+.sector-flight-progress {
+  height: 5px;
+  border-radius: 999px;
+  background: #102534;
+  border: 1px solid #2f4c62;
+  overflow: hidden;
+}
+
+.sector-flight-progress > div {
+  height: 100%;
+  background: linear-gradient(90deg, #4a99cf, #75d0ff);
+}
+
+.sector-flight-return-btn {
+  margin-top: 8px;
+  width: 100%;
+  height: 30px;
+  border-radius: 8px;
+  border: 1px solid #5f7f98;
+  background: linear-gradient(180deg, #1d3f56, #163346);
+  color: #d9f2ff;
+  font-size: 0.72rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 0.12s ease, border-color 0.12s ease;
+}
+
+.sector-flight-return-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  border-color: #8dc9ec;
+}
+
+.sector-flight-return-btn:disabled {
+  opacity: 0.62;
+  cursor: default;
+}
+
+.sector-daily-overlay {
+  position: relative;
+  width: 100%;
+  max-height: min(45vh, 390px);
   border: 1px solid #3d6078;
   border-radius: 12px;
   background:
@@ -2714,6 +2869,10 @@ button {
   animation: fleetPulse 1.2s ease-in-out infinite;
 }
 
+.sector-map-ship {
+  filter: drop-shadow(0 0 8px rgba(130, 207, 255, 0.85));
+}
+
 .sector-entity {
   position: absolute;
   transform: translate(-50%, -50%);
@@ -2800,6 +2959,93 @@ button {
   border-radius: 999px;
   box-shadow: inset -12px -10px 18px rgba(0, 0, 0, 0.45), inset 8px 6px 12px rgba(255, 255, 255, 0.08);
   pointer-events: none;
+}
+
+.sector-player-world {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  pointer-events: none;
+  z-index: 3;
+}
+
+.sector-player-world .sector-world {
+  width: 64px;
+  height: 64px;
+}
+
+.sector-player-world.self .sector-world {
+  border-color: #79cdff;
+  box-shadow: 0 0 30px rgba(82, 186, 255, 0.42);
+}
+
+.sector-field-live-overlay {
+  position: absolute;
+  transform: translate(-50%, -100%);
+  min-width: 190px;
+  max-width: 250px;
+  padding: 8px 10px;
+  border-radius: 11px;
+  border: 1px solid #4f7690;
+  background:
+    linear-gradient(180deg, rgba(8, 20, 30, 0.95), rgba(10, 25, 36, 0.92)),
+    radial-gradient(220px 100px at 50% 0%, rgba(95, 189, 255, 0.2), transparent 72%);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.46), 0 0 16px rgba(98, 194, 255, 0.22);
+  pointer-events: none;
+  z-index: 15;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.sector-field-live-overlay > p {
+  margin: 0;
+  color: #a8cce4;
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.sector-field-live-overlay > small {
+  color: #bdd7e8;
+  font-size: 0.69rem;
+}
+
+.sector-field-live-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.sector-field-live-row > span {
+  color: #d8eaff;
+  font-size: 0.71rem;
+}
+
+.sector-field-live-row > strong {
+  color: #6fe8a0;
+  font-size: 0.74rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.sector-player-tag {
+  margin-bottom: 7px;
+  max-width: 170px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid #3a6580;
+  background: rgba(9, 21, 32, 0.9);
+  color: #e2f3ff;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: center;
 }
 
 .sector-resource {
@@ -2922,6 +3168,143 @@ button {
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: #d6ecff;
+}
+
+.sector-home-btn {
+  width: 100%;
+  height: 36px;
+  border-radius: 9px;
+  border: 1px solid #4f7490;
+  background: linear-gradient(180deg, #17374d, #122a3b);
+  color: #d7efff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 0.12s ease, box-shadow 0.12s ease, border-color 0.12s ease;
+}
+
+.sector-home-btn:hover {
+  transform: translateY(-1px);
+}
+
+.sector-home-btn.alert {
+  border-color: #3fd483;
+  background: linear-gradient(180deg, #1d7a4d, #145f3a);
+  box-shadow: 0 0 0 1px rgba(117, 241, 176, 0.28) inset, 0 0 16px rgba(69, 221, 139, 0.4);
+  color: #ecfff4;
+}
+
+.sector-map-error {
+  margin: 0 0 8px;
+  border: 1px solid #7e3f52;
+  border-radius: 8px;
+  background: rgba(81, 26, 37, 0.72);
+  color: #ffd7e0;
+  font-size: 0.74rem;
+  padding: 7px 8px;
+}
+
+.sector-map-expedition {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.sector-map-expedition > div {
+  border: 1px solid #344f66;
+  border-radius: 8px;
+  background: rgba(11, 24, 35, 0.85);
+  padding: 7px 8px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.sector-map-expedition > div span {
+  color: #a7c4da;
+  font-size: 0.76rem;
+}
+
+.sector-map-expedition > div strong {
+  color: #e7f6ff;
+  font-size: 0.79rem;
+}
+
+.sector-map-live-gains {
+  border: 1px solid #3a5d76;
+  border-radius: 8px;
+  background: rgba(11, 24, 35, 0.82);
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.sector-map-live-gains > p {
+  margin: 0;
+  color: #a5c6da;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.sector-map-live-gains > small {
+  color: #90b2c8;
+  font-size: 0.7rem;
+}
+
+.sector-map-live-gain-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid #324f66;
+  border-radius: 7px;
+  background: rgba(14, 30, 43, 0.82);
+  padding: 5px 7px;
+}
+
+.sector-map-live-gain-row > span {
+  color: #d2e9f9;
+  font-size: 0.74rem;
+}
+
+.sector-map-live-gain-row > strong {
+  color: #5bdf8d;
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.sector-map-reports {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.sector-map-reports article {
+  border: 1px solid #3a5a73;
+  border-radius: 8px;
+  background: rgba(12, 26, 37, 0.86);
+  padding: 7px 8px;
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.sector-map-reports article strong {
+  color: #d9edfc;
+  font-size: 0.74rem;
+}
+
+.sector-map-reports article small {
+  color: #90afc5;
+  font-size: 0.68rem;
 }
 
 .sector-panel label {
@@ -3252,6 +3635,43 @@ button {
   cursor: pointer;
 }
 
+.sector-field-actions {
+  margin-top: 10px;
+  border: 1px solid #37546e;
+  border-radius: 10px;
+  background: rgba(12, 24, 36, 0.88);
+  padding: 9px;
+}
+
+.sector-field-actions p {
+  margin: 0 0 8px;
+  color: #93b6cd;
+  font-size: 0.74rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.sector-field-actions label {
+  display: grid;
+  grid-template-columns: 1fr 84px;
+  align-items: center;
+  gap: 8px;
+  color: #c7e2f3;
+  font-size: 0.78rem;
+  margin-bottom: 6px;
+}
+
+.sector-field-actions input {
+  width: 100%;
+  min-width: 0;
+  border-radius: 8px;
+  border: 1px solid #42657f;
+  background: #0f2231;
+  color: #ecf8ff;
+  height: 30px;
+  padding: 0 8px;
+}
+
 .sector-list-title {
   margin: 0 0 6px;
   color: #9dbdd3;
@@ -3284,6 +3704,40 @@ button {
   margin-top: 14px;
 }
 
+.sector-field-modal-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 18px;
+  background: rgba(3, 9, 14, 0.68);
+  backdrop-filter: blur(4px);
+}
+
+.sector-field-modal {
+  width: min(620px, 100%);
+  max-height: min(84vh, 760px);
+  overflow: auto;
+  border: 1px solid #3b6078;
+  border-radius: 14px;
+  background:
+    linear-gradient(180deg, rgba(14, 30, 43, 0.98), rgba(10, 21, 31, 0.96)),
+    radial-gradient(540px 240px at 50% 0%, rgba(117, 193, 255, 0.16), transparent 72%);
+  box-shadow: 0 18px 55px rgba(0, 0, 0, 0.55), 0 0 28px rgba(88, 161, 221, 0.2);
+  padding: 14px;
+}
+
+.sector-field-modal .sector-detail-head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: linear-gradient(180deg, rgba(13, 26, 37, 0.96), rgba(13, 26, 37, 0.92));
+  border-bottom-color: #37546a;
+  padding-top: 2px;
+}
+
 @keyframes fleetPulse {
   0%, 100% { r: 7; opacity: 0.9; }
   50% { r: 8; opacity: 1; }
@@ -3309,6 +3763,27 @@ button {
     border-left: 0;
     border-top: 1px solid #2a4154;
     max-height: 45vh;
+  }
+}
+
+@media (max-width: 760px) {
+  .sector-top-stack {
+    top: 8px;
+    left: 8px;
+    width: min(96vw, calc(100% - 16px));
+    gap: 8px;
+  }
+
+  .sector-flight-overlay {
+    max-height: min(30vh, 210px);
+  }
+
+  .sector-daily-overlay {
+    max-height: min(38vh, 310px);
+  }
+
+  .sector-field-modal-backdrop {
+    padding: 10px;
   }
 }
 
@@ -5871,6 +6346,10 @@ button {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
+.wiki-tutorial-grid .wiki-info-card {
+  min-height: 100px;
+}
+
 .wiki-info-card {
   border: 1px solid #355f7d;
   border-radius: 10px;
@@ -6058,6 +6537,59 @@ button {
   line-height: 1.45;
   font-family: "Consolas", "Courier New", monospace;
   background: rgba(5, 12, 19, 0.82);
+}
+
+.wiki-checklist {
+  border: 1px solid #3c6a85;
+  border-radius: 10px;
+  background: linear-gradient(180deg, rgba(10, 26, 39, 0.92), rgba(8, 21, 32, 0.9));
+  padding: 10px 11px;
+  display: grid;
+  gap: 8px;
+}
+
+.wiki-checklist h4 {
+  margin: 0;
+}
+
+.wiki-checklist ul {
+  margin: 0;
+  padding: 0 0 0 16px;
+  display: grid;
+  gap: 5px;
+}
+
+.wiki-checklist li {
+  color: #bfdcf0;
+  font-size: 0.75rem;
+  line-height: 1.35;
+}
+
+.wiki-faq-list {
+  border-top: 1px solid #32546d;
+  padding: 10px 11px;
+  display: grid;
+  gap: 8px;
+}
+
+.wiki-faq-item {
+  border: 1px solid #2d536b;
+  border-radius: 9px;
+  background: rgba(7, 18, 27, 0.86);
+  padding: 8px 9px;
+  display: grid;
+  gap: 4px;
+}
+
+.wiki-faq-item strong {
+  color: #d9f1ff;
+  font-size: 0.78rem;
+}
+
+.wiki-faq-item span {
+  color: #9ec4dc;
+  font-size: 0.74rem;
+  line-height: 1.35;
 }
 
 .wiki-table-wrap {

@@ -34,6 +34,23 @@ var ALLIANCE_CREATE_COST = {
   osmium: 0,
   adamantium: 0
 };
+var MAP_COLLECTION = "hyperstructure_map";
+var MAP_RESOURCE_FIELDS_KEY = "resource_fields_v1";
+var MAP_WRITE_RETRIES = 6;
+var MAP_TARGET_FIELD_COUNT = 36;
+var MAP_WORLD_SIZE = 10000;
+var MAP_PADDING = 360;
+var MAP_CENTER_EXCLUSION = 520;
+var MAP_FIELD_MIN_DISTANCE = 220;
+var MAP_FIELD_PLAYER_EXCLUSION = 130;
+var MAP_FIELD_MAX_SPAWN_ATTEMPTS = 240;
+var MAP_TRAVEL_TIME_FACTOR = 42;
+var MAP_MIN_TRAVEL_SECONDS = 120;
+var MAP_MAX_TRAVEL_SECONDS = 1200;
+var MAP_MIN_EXTRACTION_SECONDS = 3600;
+var MAP_MAX_EXTRACTION_SECONDS = 7200;
+var MAP_FIELD_MIN_LIFETIME_SEC = 48 * 60 * 60;
+var MAP_FIELD_MAX_LIFETIME_SEC = 120 * 60 * 60;
 var ALLIANCE_NAME_REGEX = /^[A-Za-z0-9 _-]+$/;
 var ALLIANCE_TAG_REGEX = /^[A-Za-z0-9]+$/;
 var ALLIANCE_BLOCKED_WORDS = ["admin", "mod", "nakama", "staff", "officiel"];
@@ -63,6 +80,123 @@ var POINT_MULTIPLIERS = {
   ship: 1.0,
   defense: 1.0,
   research: 1.0
+};
+
+var RESOURCE_RARITY = {
+  carbone: 10,
+  titane: 25,
+  osmium: 45,
+  adamantium: 65,
+  magmatite: 72,
+  neodyme: 75,
+  chronium: 82,
+  aetherium: 88,
+  isotope7: 94,
+  singulite: 100
+};
+
+var MAP_RESOURCE_BASE_AMOUNTS = {
+  carbone: { min: 60000, max: 220000 },
+  titane: { min: 30000, max: 120000 },
+  osmium: { min: 10000, max: 45000 },
+  adamantium: { min: 3500, max: 15000 },
+  magmatite: { min: 2500, max: 10000 },
+  neodyme: { min: 2200, max: 9000 },
+  chronium: { min: 1400, max: 6500 },
+  aetherium: { min: 1000, max: 4500 },
+  isotope7: { min: 700, max: 3000 },
+  singulite: { min: 250, max: 1200 }
+};
+
+var MAP_FIELD_RARITY_CONFIGS = {
+  COMMON: {
+    id: "COMMON",
+    weight: 0.45,
+    quantityMultiplier: 0.8,
+    maxTier: 2,
+    minTypes: 1,
+    maxTypes: 2,
+    workMin: 320000,
+    workMax: 520000
+  },
+  UNCOMMON: {
+    id: "UNCOMMON",
+    weight: 0.28,
+    quantityMultiplier: 1.0,
+    maxTier: 3,
+    minTypes: 2,
+    maxTypes: 2,
+    workMin: 380000,
+    workMax: 620000
+  },
+  RARE: {
+    id: "RARE",
+    weight: 0.16,
+    quantityMultiplier: 1.25,
+    maxTier: 5,
+    minTypes: 2,
+    maxTypes: 3,
+    workMin: 520000,
+    workMax: 850000
+  },
+  EPIC: {
+    id: "EPIC",
+    weight: 0.08,
+    quantityMultiplier: 1.6,
+    maxTier: 7,
+    minTypes: 3,
+    maxTypes: 3,
+    workMin: 680000,
+    workMax: 1100000
+  },
+  LEGENDARY: {
+    id: "LEGENDARY",
+    weight: 0.025,
+    quantityMultiplier: 2.1,
+    maxTier: 9,
+    minTypes: 3,
+    maxTypes: 4,
+    workMin: 900000,
+    workMax: 1400000
+  },
+  MYTHIC: {
+    id: "MYTHIC",
+    weight: 0.005,
+    quantityMultiplier: 3.0,
+    maxTier: 10,
+    minTypes: 4,
+    maxTypes: 4,
+    workMin: 1200000,
+    workMax: 2000000
+  }
+};
+
+var MAP_FIELD_QUALITY_CONFIGS = {
+  POOR: { id: "POOR", weight: 0.2, quantityMultiplier: 0.7 },
+  STANDARD: { id: "STANDARD", weight: 0.5, quantityMultiplier: 1.0 },
+  RICH: { id: "RICH", weight: 0.25, quantityMultiplier: 1.4 },
+  EXCEPTIONAL: { id: "EXCEPTIONAL", weight: 0.05, quantityMultiplier: 2.0 }
+};
+
+var MAP_FIELD_DROP_TABLE = [
+  { itemId: "", weight: 35 },
+  { itemId: "TIME_RIFT_300", weight: 50 },
+  { itemId: "TIME_RIFT_3600", weight: 10 },
+  { itemId: "TIME_RIFT_10800", weight: 4 },
+  { itemId: "TIME_RIFT_43200", weight: 1 }
+];
+
+var MAP_HARVEST_UNIT_STATS = {
+  pegase: { harvestSpeed: 120, harvestCapacity: 50, mapSpeed: 160 },
+  argo: { harvestSpeed: 320, harvestCapacity: 200, mapSpeed: 140 },
+  arche_spatiale: { harvestSpeed: 700, harvestCapacity: 500, mapSpeed: 110 },
+  eclaireur_stellaire: { harvestSpeed: 10, harvestCapacity: 10, mapSpeed: 300 },
+  foudroyant: { harvestSpeed: 5, harvestCapacity: 12, mapSpeed: 350 },
+  aurore: { harvestSpeed: 8, harvestCapacity: 7, mapSpeed: 420 },
+  spectre: { harvestSpeed: 12, harvestCapacity: 5, mapSpeed: 470 },
+  tempest: { harvestSpeed: 15, harvestCapacity: 4, mapSpeed: 500 },
+  titanide: { harvestSpeed: 18, harvestCapacity: 8, mapSpeed: 360 },
+  colosse: { harvestSpeed: 20, harvestCapacity: 12, mapSpeed: 300 }
 };
 
 var BUILDING_DEFS = {
@@ -176,6 +310,7 @@ var ITEM_DEFINITIONS = {
   TIME_RIFT_60: { id: "TIME_RIFT_60", name: "Faille Temporelle", category: "TIME_BOOST", metadata: { durationSeconds: 60 } },
   TIME_RIFT_300: { id: "TIME_RIFT_300", name: "Faille Temporelle", category: "TIME_BOOST", metadata: { durationSeconds: 300 } },
   TIME_RIFT_3600: { id: "TIME_RIFT_3600", name: "Faille Temporelle", category: "TIME_BOOST", metadata: { durationSeconds: 3600 } },
+  TIME_RIFT_10800: { id: "TIME_RIFT_10800", name: "Faille Temporelle", category: "TIME_BOOST", metadata: { durationSeconds: 10800 } },
   TIME_RIFT_43200: { id: "TIME_RIFT_43200", name: "Faille Temporelle", category: "TIME_BOOST", metadata: { durationSeconds: 43200 } },
   RESOURCE_CHEST_CLASSIC: { id: "RESOURCE_CHEST_CLASSIC", name: "Coffre de Ressources", category: "RESOURCE_CRATE", metadata: { chestType: "CLASSIC" } },
   RESOURCE_CHEST_UNCOMMON: { id: "RESOURCE_CHEST_UNCOMMON", name: "Coffre de Ressources", category: "RESOURCE_CRATE", metadata: { chestType: "UNCOMMON" } },
@@ -215,7 +350,9 @@ function defaultEconomyState() {
     building_construct_slot: null,
     research_slot: null,
     hangarQueue: [],
-    hangarInventory: {}
+    hangarInventory: {},
+    resourceExpedition: null,
+    resourceReports: []
   };
 }
 
@@ -227,7 +364,1022 @@ function makeServerId(prefix, serverNowTs) {
   return prefix + "_" + serverNowTs + "_" + Math.floor(Math.random() * 1000000000).toString(36);
 }
 
+function ensureResourceExpeditionState(state) {
+  if (!state || typeof state !== "object") return;
+  if (!state.resourceExpedition || typeof state.resourceExpedition !== "object") {
+    state.resourceExpedition = null;
+  }
+  if (!Array.isArray(state.resourceReports)) {
+    state.resourceReports = [];
+  } else if (state.resourceReports.length > 12) {
+    state.resourceReports = state.resourceReports.slice(0, 12);
+  }
+}
+
+function defaultMapFieldState() {
+  return {
+    version: 1,
+    updatedAt: nowTs(),
+    fields: [],
+    totalSpawned: 0
+  };
+}
+
+function normalizeMapFieldState(raw) {
+  var state = raw && typeof raw === "object" ? raw : defaultMapFieldState();
+  if (!Array.isArray(state.fields)) state.fields = [];
+  if (!Number.isFinite(state.version)) state.version = 1;
+  if (!Number.isFinite(state.updatedAt)) state.updatedAt = nowTs();
+  if (!Number.isFinite(state.totalSpawned)) state.totalSpawned = 0;
+  return state;
+}
+
+function hashString32(input) {
+  var hash = 2166136261;
+  var value = String(input || "");
+  for (var i = 0; i < value.length; i++) {
+    hash ^= value.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+}
+
+function mapPlayerToPlanetCoordinates(userId) {
+  var seed = String(userId || "");
+  var padding = MAP_PADDING;
+  var range = Math.max(1, MAP_WORLD_SIZE - padding * 2);
+  var x = padding + (hashString32(seed + "|x") % range);
+  var y = padding + (hashString32(seed + "|y") % range);
+  if (Math.abs(x - 5000) < 420 && Math.abs(y - 5000) < 420) {
+    x = Math.min(MAP_WORLD_SIZE - padding, x + 520);
+    y = Math.min(MAP_WORLD_SIZE - padding, y + 300);
+  }
+  return { x: x, y: y };
+}
+
+var MAP_PLAYER_BLOCKED_PREFIXES = ["probe-", "builder", "loadtest", "stress", "bot-", "autotest", "perf-"];
+
+function isMapVisibleUsername(username) {
+  var normalized = String(username || "").trim().toLowerCase();
+  if (!normalized) return false;
+  for (var i = 0; i < MAP_PLAYER_BLOCKED_PREFIXES.length; i++) {
+    if (normalized.indexOf(MAP_PLAYER_BLOCKED_PREFIXES[i]) === 0) return false;
+  }
+  return true;
+}
+
+function listMapPlayers(nk, limit) {
+  var safeLimit = Math.max(1, Math.min(10000, sanitizePositiveInt(limit || 5000)));
+  if (!nk || typeof nk.sqlQuery !== "function") return [];
+  var sql =
+    "SELECT id, username, display_name FROM users " +
+    "ORDER BY create_time DESC " +
+    "LIMIT " + safeLimit;
+  var rows = nk.sqlQuery(sql) || [];
+  var out = [];
+  var seen = {};
+  for (var i = 0; i < rows.length; i++) {
+    var row = rows[i] || {};
+    var userId = String(row.id || "").trim();
+    if (!userId || seen[userId]) continue;
+    var username = String(row.username || row.display_name || "").trim();
+    if (!username) username = "player-" + userId.slice(0, 8);
+    if (!isMapVisibleUsername(username)) continue;
+    seen[userId] = true;
+    out.push({ userId: userId, username: username });
+  }
+  return out;
+}
+
+function pickByWeight(entries) {
+  var total = 0;
+  for (var i = 0; i < entries.length; i++) {
+    var weight = Number(entries[i].weight || 0);
+    if (!Number.isFinite(weight) || weight <= 0) continue;
+    total += weight;
+  }
+  if (total <= 0) return entries.length > 0 ? entries[0] : null;
+
+  var roll = Math.random() * total;
+  for (var j = 0; j < entries.length; j++) {
+    var w = Number(entries[j].weight || 0);
+    if (!Number.isFinite(w) || w <= 0) continue;
+    roll -= w;
+    if (roll <= 0) return entries[j];
+  }
+  return entries[entries.length - 1];
+}
+
+function resourceWeightForField(resourceId, rarityConfig) {
+  var rarity = RESOURCE_RARITY[resourceId] || 100;
+  var base = 1 / rarity;
+  var tier = RESOURCE_TIERS[resourceId] || 10;
+  var tierScale = Math.max(1, rarityConfig.maxTier || 1);
+  var advancedBias = 1 + ((tier - 1) / 9) * (tierScale / 10);
+  return base * advancedBias;
+}
+
+function pickDistinctWeightedResources(allowedResourceIds, count, rarityConfig) {
+  var target = Math.max(1, Math.min(count, allowedResourceIds.length));
+  var remaining = allowedResourceIds.slice();
+  var selected = [];
+  while (selected.length < target && remaining.length > 0) {
+    var weighted = [];
+    for (var i = 0; i < remaining.length; i++) {
+      weighted.push({
+        resourceId: remaining[i],
+        weight: resourceWeightForField(remaining[i], rarityConfig)
+      });
+    }
+    var picked = pickByWeight(weighted);
+    if (!picked) break;
+    selected.push(picked.resourceId);
+    var idx = remaining.indexOf(picked.resourceId);
+    if (idx >= 0) remaining.splice(idx, 1);
+  }
+  return selected;
+}
+
+function readMapFieldState(nk) {
+  var req = { collection: MAP_COLLECTION, key: MAP_RESOURCE_FIELDS_KEY, userId: SYSTEM_USER_ID };
+  var read = nk.storageRead([req]);
+  if (!read || read.length === 0) return { state: defaultMapFieldState(), version: "" };
+  return { state: normalizeMapFieldState(read[0].value || defaultMapFieldState()), version: read[0].version || "" };
+}
+
+function distance2D(ax, ay, bx, by) {
+  var dx = Number(ax || 0) - Number(bx || 0);
+  var dy = Number(ay || 0) - Number(by || 0);
+  return Math.sqrt(dx * dx + dy * dy);
+}
+
+function clampNumber(value, min, max) {
+  var v = Number(value);
+  if (!Number.isFinite(v)) v = min;
+  if (v < min) return min;
+  if (v > max) return max;
+  return v;
+}
+
+function randomFloat(min, max) {
+  var lo = Number.isFinite(min) ? min : 0;
+  var hi = Number.isFinite(max) ? max : lo;
+  if (hi < lo) {
+    var t = hi;
+    hi = lo;
+    lo = t;
+  }
+  return lo + Math.random() * (hi - lo);
+}
+
+function mapFieldConfigList(configMap) {
+  var out = [];
+  var keys = Object.keys(configMap || {});
+  for (var i = 0; i < keys.length; i++) out.push(configMap[keys[i]]);
+  return out;
+}
+
+function pickMapFieldRarityConfig() {
+  return pickByWeight(mapFieldConfigList(MAP_FIELD_RARITY_CONFIGS)) || MAP_FIELD_RARITY_CONFIGS.COMMON;
+}
+
+function pickMapFieldQualityConfig() {
+  return pickByWeight(mapFieldConfigList(MAP_FIELD_QUALITY_CONFIGS)) || MAP_FIELD_QUALITY_CONFIGS.STANDARD;
+}
+
+function listMapPlayerPositions(nk) {
+  var players = listMapPlayers(nk, 8000);
+  var out = [];
+  for (var i = 0; i < players.length; i++) {
+    var planet = mapPlayerToPlanetCoordinates(players[i].userId);
+    out.push({ userId: players[i].userId, x: planet.x, y: planet.y });
+  }
+  return out;
+}
+
+function isMapFieldPositionValid(x, y, existingFields, playerPositions) {
+  var px = clampNumber(x, MAP_PADDING, MAP_WORLD_SIZE - MAP_PADDING);
+  var py = clampNumber(y, MAP_PADDING, MAP_WORLD_SIZE - MAP_PADDING);
+  var stations = [
+    { x: 5000, y: 5000 },
+    { x: 6650, y: 3550 },
+    { x: 3180, y: 6390 },
+    { x: 5870, y: 5480 },
+    { x: 4180, y: 4320 },
+    { x: 5450, y: 2980 }
+  ];
+  for (var s = 0; s < stations.length; s++) {
+    if (distance2D(px, py, stations[s].x, stations[s].y) < MAP_CENTER_EXCLUSION) return false;
+  }
+
+  for (var i = 0; i < existingFields.length; i++) {
+    var field = existingFields[i];
+    if (!field || !field.id) continue;
+    if (distance2D(px, py, field.x, field.y) < MAP_FIELD_MIN_DISTANCE) return false;
+  }
+
+  for (var j = 0; j < playerPositions.length; j++) {
+    var p = playerPositions[j];
+    if (distance2D(px, py, p.x, p.y) < MAP_FIELD_PLAYER_EXCLUSION) return false;
+  }
+
+  return true;
+}
+
+function buildMapFieldResources(rarityCfg, qualityCfg) {
+  var allowed = [];
+  for (var i = 0; i < RESOURCE_IDS.length; i++) {
+    var rid = RESOURCE_IDS[i];
+    if ((RESOURCE_TIERS[rid] || 10) <= rarityCfg.maxTier) allowed.push(rid);
+  }
+  if (allowed.length <= 0) allowed = ["carbone", "titane"];
+
+  var typeCount = randomIntInclusive(rarityCfg.minTypes, rarityCfg.maxTypes);
+  var selected = pickDistinctWeightedResources(allowed, typeCount, rarityCfg);
+  if (selected.length <= 0) selected = [allowed[0]];
+
+  var rows = [];
+  for (var j = 0; j < selected.length; j++) {
+    var resourceId = selected[j];
+    var baseCfg = MAP_RESOURCE_BASE_AMOUNTS[resourceId] || { min: 5000, max: 12000 };
+    var baseAmount = randomIntInclusive(baseCfg.min, baseCfg.max);
+    var amount = Math.max(
+      1,
+      Math.floor(baseAmount * qualityCfg.quantityMultiplier * rarityCfg.quantityMultiplier)
+    );
+    rows.push({
+      resourceId: resourceId,
+      totalAmount: amount,
+      remainingAmount: amount
+    });
+  }
+  return rows;
+}
+
+function createMapField(nk, mapState, existingFields, playerPositions, serverNowTs) {
+  var rarityCfg = pickMapFieldRarityConfig();
+  var qualityCfg = pickMapFieldQualityConfig();
+  var resources = buildMapFieldResources(rarityCfg, qualityCfg);
+
+  var x = randomIntInclusive(MAP_PADDING, MAP_WORLD_SIZE - MAP_PADDING);
+  var y = randomIntInclusive(MAP_PADDING, MAP_WORLD_SIZE - MAP_PADDING);
+  var placed = false;
+  for (var attempt = 0; attempt < MAP_FIELD_MAX_SPAWN_ATTEMPTS; attempt++) {
+    var tx = randomIntInclusive(MAP_PADDING, MAP_WORLD_SIZE - MAP_PADDING);
+    var ty = randomIntInclusive(MAP_PADDING, MAP_WORLD_SIZE - MAP_PADDING);
+    if (!isMapFieldPositionValid(tx, ty, existingFields, playerPositions)) continue;
+    x = tx;
+    y = ty;
+    placed = true;
+    break;
+  }
+  if (!placed) {
+    x = randomIntInclusive(1000, MAP_WORLD_SIZE - 1000);
+    y = randomIntInclusive(1000, MAP_WORLD_SIZE - 1000);
+  }
+
+  var totalWork = randomIntInclusive(rarityCfg.workMin, rarityCfg.workMax);
+  var life = randomIntInclusive(MAP_FIELD_MIN_LIFETIME_SEC, MAP_FIELD_MAX_LIFETIME_SEC);
+  mapState.totalSpawned = sanitizePositiveInt(mapState.totalSpawned) + 1;
+
+  return {
+    id: makeServerId("fld", serverNowTs) + "_" + String(mapState.totalSpawned),
+    x: x,
+    y: y,
+    rarityTier: rarityCfg.id,
+    qualityTier: qualityCfg.id,
+    resources: resources,
+    totalExtractionWork: totalWork,
+    remainingExtractionWork: totalWork,
+    spawnedAt: serverNowTs,
+    expiresAt: serverNowTs + life,
+    occupiedByPlayerId: "",
+    occupiedByUsername: "",
+    occupyingFleetId: "",
+    isOccupied: false,
+    isVisible: true
+  };
+}
+
+function normalizeMapField(field, serverNowTs) {
+  if (!field || typeof field !== "object") return null;
+  var id = String(field.id || "").trim();
+  if (!id) return null;
+  var x = clampNumber(field.x, MAP_PADDING, MAP_WORLD_SIZE - MAP_PADDING);
+  var y = clampNumber(field.y, MAP_PADDING, MAP_WORLD_SIZE - MAP_PADDING);
+  var resourcesIn = Array.isArray(field.resources) ? field.resources : [];
+  var resources = [];
+  for (var i = 0; i < resourcesIn.length; i++) {
+    var row = resourcesIn[i] || {};
+    var rid = String(row.resourceId || "").trim();
+    if (!rid || RESOURCE_IDS.indexOf(rid) === -1) continue;
+    var total = sanitizePositiveInt(row.totalAmount || row.amount || 0);
+    var remaining = sanitizePositiveInt(row.remainingAmount);
+    if (remaining <= 0) remaining = total;
+    if (total <= 0 && remaining <= 0) continue;
+    if (remaining > total && total > 0) remaining = total;
+    resources.push({
+      resourceId: rid,
+      totalAmount: Math.max(total, remaining),
+      remainingAmount: remaining
+    });
+  }
+  if (resources.length <= 0) return null;
+  var totalWork = Math.max(1, sanitizePositiveInt(field.totalExtractionWork || 0));
+  var remainingWork = sanitizePositiveInt(field.remainingExtractionWork || totalWork);
+  if (remainingWork > totalWork) remainingWork = totalWork;
+  var spawnedAt = sanitizePositiveInt(field.spawnedAt || serverNowTs);
+  var expiresAt = sanitizePositiveInt(field.expiresAt || (serverNowTs + MAP_FIELD_MIN_LIFETIME_SEC));
+  return {
+    id: id,
+    x: x,
+    y: y,
+    rarityTier: String(field.rarityTier || "COMMON"),
+    qualityTier: String(field.qualityTier || "STANDARD"),
+    resources: resources,
+    totalExtractionWork: totalWork,
+    remainingExtractionWork: remainingWork,
+    spawnedAt: spawnedAt,
+    expiresAt: expiresAt,
+    occupiedByPlayerId: String(field.occupiedByPlayerId || ""),
+    occupiedByUsername: String(field.occupiedByUsername || ""),
+    occupyingFleetId: String(field.occupyingFleetId || ""),
+    isOccupied: Boolean(field.isOccupied),
+    isVisible: field.isVisible !== false
+  };
+}
+
+function compactMapFields(mapState, serverNowTs) {
+  var next = [];
+  var fields = Array.isArray(mapState.fields) ? mapState.fields : [];
+  for (var i = 0; i < fields.length; i++) {
+    var field = normalizeMapField(fields[i], serverNowTs);
+    if (!field) continue;
+    var hasRemaining = false;
+    for (var j = 0; j < field.resources.length; j++) {
+      if (field.resources[j].remainingAmount > 0) {
+        hasRemaining = true;
+        break;
+      }
+    }
+    if (!field.isOccupied && (!hasRemaining || field.remainingExtractionWork <= 0)) continue;
+    if (!field.isOccupied && field.expiresAt > 0 && field.expiresAt <= serverNowTs) continue;
+    next.push(field);
+  }
+  mapState.fields = next;
+  return mapState;
+}
+
+function ensureMapFieldsSeeded(nk, mapState, serverNowTs) {
+  normalizeMapFieldState(mapState);
+  compactMapFields(mapState, serverNowTs);
+  if (mapState.fields.length >= MAP_TARGET_FIELD_COUNT) {
+    mapState.updatedAt = serverNowTs;
+    return mapState;
+  }
+  var playerPositions = listMapPlayerPositions(nk);
+  while (mapState.fields.length < MAP_TARGET_FIELD_COUNT) {
+    var created = createMapField(nk, mapState, mapState.fields, playerPositions, serverNowTs);
+    mapState.fields.push(created);
+  }
+  mapState.updatedAt = serverNowTs;
+  return mapState;
+}
+
+function findMapField(mapState, fieldId) {
+  var fields = Array.isArray(mapState.fields) ? mapState.fields : [];
+  for (var i = 0; i < fields.length; i++) {
+    if (String(fields[i].id || "") === String(fieldId || "")) return fields[i];
+  }
+  return null;
+}
+
+function calculateFleetHarvestStats(economy, fleetInput) {
+  ensureHangarState(economy);
+  if (!Array.isArray(fleetInput) || fleetInput.length <= 0) throw new Error("Fleet payload is required.");
+  var normalizedFleet = [];
+  var consumed = {};
+  var totalHarvestSpeed = 0;
+  var totalTransportCapacity = 0;
+  var weightedSpeed = 0;
+  var shipCount = 0;
+
+  for (var i = 0; i < fleetInput.length; i++) {
+    var row = fleetInput[i] || {};
+    var unitId = String(row.unitId || "").trim();
+    var quantity = sanitizePositiveInt(Number(row.quantity || 0));
+    if (!unitId || quantity <= 0) continue;
+    if (!HANGAR_UNIT_DEFS[unitId] || HANGAR_UNIT_DEFS[unitId].category !== "ship") {
+      throw new Error("Invalid ship unit in fleet: " + unitId);
+    }
+    var stats = MAP_HARVEST_UNIT_STATS[unitId];
+    if (!stats) throw new Error("Ship cannot harvest: " + unitId);
+    var already = consumed[unitId] || 0;
+    var available = sanitizePositiveInt(economy.hangarInventory[unitId] || 0);
+    if (already + quantity > available) throw new Error("Not enough available ships for " + unitId + ".");
+    consumed[unitId] = already + quantity;
+  }
+
+  var keys = Object.keys(consumed);
+  if (keys.length <= 0) throw new Error("Fleet payload is empty.");
+  for (var j = 0; j < keys.length; j++) {
+    var id = keys[j];
+    var qty = consumed[id];
+    var s = MAP_HARVEST_UNIT_STATS[id];
+    normalizedFleet.push({ unitId: id, quantity: qty });
+    totalHarvestSpeed += s.harvestSpeed * qty;
+    totalTransportCapacity += s.harvestCapacity * qty;
+    weightedSpeed += s.mapSpeed * qty;
+    shipCount += qty;
+  }
+
+  var mapSpeed = shipCount > 0 ? weightedSpeed / shipCount : 0;
+  if (totalHarvestSpeed <= 0) throw new Error("Fleet has no harvest speed.");
+  if (totalTransportCapacity <= 0) throw new Error("Fleet has no transport capacity.");
+  if (mapSpeed <= 0) throw new Error("Fleet has no travel speed.");
+
+  return {
+    fleet: normalizedFleet,
+    totalHarvestSpeed: totalHarvestSpeed,
+    totalTransportCapacity: totalTransportCapacity,
+    mapSpeed: mapSpeed
+  };
+}
+
+function calculateMapTravelSeconds(userId, fieldX, fieldY, mapSpeed) {
+  var origin = mapPlayerToPlanetCoordinates(userId);
+  var distance = distance2D(origin.x, origin.y, fieldX, fieldY);
+  var raw = (distance / Math.max(1, mapSpeed)) * MAP_TRAVEL_TIME_FACTOR;
+  return Math.floor(clampNumber(raw, MAP_MIN_TRAVEL_SECONDS, MAP_MAX_TRAVEL_SECONDS));
+}
+
+function calculateMapExtractionSeconds(totalWork, totalHarvestSpeed) {
+  var raw = Number(totalWork || 0) / Math.max(1, Number(totalHarvestSpeed || 0));
+  return Math.floor(clampNumber(raw, MAP_MIN_EXTRACTION_SECONDS, MAP_MAX_EXTRACTION_SECONDS));
+}
+
+function mapFieldResourcesToMap(field) {
+  var out = {};
+  var resources = Array.isArray(field.resources) ? field.resources : [];
+  for (var i = 0; i < resources.length; i++) {
+    var row = resources[i];
+    var rid = String(row.resourceId || "").trim();
+    if (!rid) continue;
+    out[rid] = sanitizePositiveInt(row.remainingAmount || 0);
+  }
+  return out;
+}
+
+function writeMapToFieldResources(field, remainingByResource) {
+  var resources = Array.isArray(field.resources) ? field.resources : [];
+  for (var i = 0; i < resources.length; i++) {
+    var row = resources[i];
+    var rid = String(row.resourceId || "").trim();
+    var total = sanitizePositiveInt(row.totalAmount || 0);
+    var remaining = sanitizePositiveInt(remainingByResource[rid] || 0);
+    if (remaining > total && total > 0) remaining = total;
+    row.remainingAmount = remaining;
+  }
+}
+
+function sumResourceMap(values) {
+  var total = 0;
+  var keys = Object.keys(values || {});
+  for (var i = 0; i < keys.length; i++) total += sanitizePositiveInt(values[keys[i]] || 0);
+  return total;
+}
+
+function settleHarvestAgainstField(field, expedition, progressRatio) {
+  var ratio = clampNumber(progressRatio, 0, 1);
+  var snapshot = expedition.snapshotResources && typeof expedition.snapshotResources === "object"
+    ? expedition.snapshotResources
+    : mapFieldResourcesToMap(field);
+  var currentRemaining = mapFieldResourcesToMap(field);
+  var potential = {};
+  var keys = Object.keys(snapshot);
+  for (var i = 0; i < keys.length; i++) {
+    var rid = keys[i];
+    var startAmount = sanitizePositiveInt(snapshot[rid] || 0);
+    if (startAmount <= 0) continue;
+    potential[rid] = Math.floor(startAmount * ratio);
+  }
+
+  var totalPotential = sumResourceMap(potential);
+  var capacity = Math.max(0, sanitizePositiveInt(expedition.totalTransportCapacity || 0));
+  var scale = 1;
+  if (capacity > 0 && totalPotential > capacity) {
+    scale = capacity / totalPotential;
+  }
+
+  var collected = {};
+  var collectedTotal = 0;
+  var pKeys = Object.keys(potential);
+  for (var j = 0; j < pKeys.length; j++) {
+    var resourceId = pKeys[j];
+    var scaled = Math.floor((potential[resourceId] || 0) * scale);
+    var current = sanitizePositiveInt(currentRemaining[resourceId] || 0);
+    var picked = Math.max(0, Math.min(current, scaled));
+    if (picked > 0) {
+      collected[resourceId] = picked;
+      currentRemaining[resourceId] = current - picked;
+      collectedTotal += picked;
+    }
+  }
+
+  var snapshotTotal = Math.max(1, sumResourceMap(snapshot));
+  var workSpent = Math.floor((field.totalExtractionWork || 0) * (collectedTotal / snapshotTotal));
+  field.remainingExtractionWork = Math.max(0, sanitizePositiveInt(field.remainingExtractionWork || 0) - workSpent);
+  writeMapToFieldResources(field, currentRemaining);
+
+  var hasRemaining = false;
+  var resources = Array.isArray(field.resources) ? field.resources : [];
+  for (var r = 0; r < resources.length; r++) {
+    if (sanitizePositiveInt(resources[r].remainingAmount || 0) > 0) {
+      hasRemaining = true;
+      break;
+    }
+  }
+
+  return {
+    collected: collected,
+    collectedTotal: collectedTotal,
+    hasRemaining: hasRemaining
+  };
+}
+
+function clearFieldOccupation(field) {
+  if (!field) return;
+  field.isOccupied = false;
+  field.occupiedByPlayerId = "";
+  field.occupiedByUsername = "";
+  field.occupyingFleetId = "";
+}
+
+function rollMapFieldDrop() {
+  var picked = pickByWeight(MAP_FIELD_DROP_TABLE);
+  if (!picked || !picked.itemId) return { itemId: "", quantity: 0 };
+  return { itemId: picked.itemId, quantity: 1 };
+}
+
+function pushMapReport(economy, report) {
+  ensureResourceExpeditionState(economy);
+  if (!report) return;
+  economy.resourceReports.unshift(report);
+  if (economy.resourceReports.length > 12) economy.resourceReports = economy.resourceReports.slice(0, 12);
+}
+
+function settleReturningExpedition(economy, inventory, expedition, serverNowTs) {
+  var gains = expedition.collectedResources && typeof expedition.collectedResources === "object"
+    ? expedition.collectedResources
+    : {};
+  var gainKeys = Object.keys(gains);
+  var addedResources = {};
+  for (var i = 0; i < gainKeys.length; i++) {
+    var rid = gainKeys[i];
+    var amount = sanitizePositiveInt(gains[rid] || 0);
+    if (amount <= 0) continue;
+    if (!economy.resources[rid]) economy.resources[rid] = { amount: 0 };
+    economy.resources[rid].amount += amount;
+    addedResources[rid] = amount;
+  }
+
+  var addedItems = [];
+  var dropItemId = String(expedition.dropItemId || "").trim();
+  var dropQuantity = sanitizePositiveInt(expedition.dropQuantity || 0);
+  if (dropItemId && dropQuantity > 0 && ITEM_DEFINITIONS[dropItemId]) {
+    addItemToInventory(inventory, dropItemId, dropQuantity);
+    addedItems.push({ itemId: dropItemId, quantity: dropQuantity });
+    inventory.mapDropNotifications = sanitizePositiveInt(inventory.mapDropNotifications || 0) + 1;
+  }
+
+  var report = {
+    id: makeServerId("mrep", serverNowTs),
+    fieldId: String(expedition.fieldId || ""),
+    at: serverNowTs,
+    resources: addedResources,
+    items: addedItems
+  };
+  pushMapReport(economy, report);
+  return report;
+}
+
+function estimateExpeditionCollected(expedition, serverNowTs) {
+  var snapshot = expedition && expedition.snapshotResources && typeof expedition.snapshotResources === "object"
+    ? expedition.snapshotResources
+    : {};
+  var startAt = sanitizePositiveInt(expedition && expedition.extractionStartAt || 0);
+  var endAt = sanitizePositiveInt(expedition && expedition.extractionEndAt || 0);
+  if (startAt <= 0 || endAt <= startAt) return {};
+  var duration = Math.max(1, endAt - startAt);
+  var elapsed = clampNumber(sanitizePositiveInt(serverNowTs || 0) - startAt, 0, duration);
+  var ratio = elapsed / duration;
+
+  var potential = {};
+  var keys = Object.keys(snapshot);
+  for (var i = 0; i < keys.length; i++) {
+    var rid = keys[i];
+    var startAmount = sanitizePositiveInt(snapshot[rid] || 0);
+    if (startAmount <= 0) continue;
+    potential[rid] = Math.floor(startAmount * ratio);
+  }
+
+  var totalPotential = sumResourceMap(potential);
+  var capacity = Math.max(0, sanitizePositiveInt(expedition && expedition.totalTransportCapacity || 0));
+  var scale = 1;
+  if (capacity > 0 && totalPotential > capacity) {
+    scale = capacity / totalPotential;
+  }
+
+  var collected = {};
+  var pKeys = Object.keys(potential);
+  for (var j = 0; j < pKeys.length; j++) {
+    var resourceId = pKeys[j];
+    var picked = Math.max(0, Math.floor((potential[resourceId] || 0) * scale));
+    if (picked > 0) collected[resourceId] = picked;
+  }
+  return collected;
+}
+
+function mapHarvestReportBody(report) {
+  var resourceNameById = {
+    carbone: "Carbone",
+    titane: "Titane",
+    osmium: "Osmium",
+    adamantium: "Adamantium",
+    magmatite: "Magmatite",
+    neodyme: "Neodyme",
+    chronium: "Chronium",
+    aetherium: "Aetherium",
+    isotope7: "Isotope-7",
+    singulite: "Singulite"
+  };
+  var lines = [];
+  var resources = report && report.resources && typeof report.resources === "object" ? report.resources : {};
+  var hasResourceGain = false;
+  for (var i = 0; i < RESOURCE_IDS.length; i++) {
+    var rid = RESOURCE_IDS[i];
+    var amount = sanitizePositiveInt(resources[rid] || 0);
+    if (amount <= 0) continue;
+    hasResourceGain = true;
+    lines.push("- " + (resourceNameById[rid] || rid) + ": +" + amount);
+  }
+  var items = Array.isArray(report && report.items) ? report.items : [];
+  if (items.length > 0) {
+    if (!hasResourceGain) lines.push("- Ressources: +0");
+    lines.push("- Objets:");
+    for (var j = 0; j < items.length; j++) {
+      var row = items[j];
+      var itemId = String(row && row.itemId || "").trim();
+      var qty = sanitizePositiveInt(row && row.quantity || 0);
+      if (!itemId || qty <= 0) continue;
+      var itemDef = ITEM_DEFINITIONS[itemId];
+      var itemName = itemDef && itemDef.name ? itemDef.name : itemId;
+      lines.push("  • " + itemName + " x" + qty);
+    }
+  }
+  if (lines.length <= 0) lines.push("- Aucun gain");
+  return lines.join("\n");
+}
+
+function createMapHarvestRewardMessage(nk, userId, report) {
+  if (!report || typeof report !== "object") return;
+  var fieldSuffix = String(report.fieldId || "").slice(-4).toUpperCase();
+  var title = "Rapport d'exploitation " + (fieldSuffix ? ("#" + fieldSuffix) : "");
+  var body = "Votre flotte de collecte est revenue.\n\n" + mapHarvestReportBody(report);
+  createRewardMessage(nk, userId, {}, title, body);
+}
+
+function serializeMapFieldForViewer(field, viewerUserId) {
+  var isOwner = String(field.occupiedByPlayerId || "") === String(viewerUserId || "");
+  var detailsVisible = !field.isOccupied || isOwner;
+  var resources = [];
+  if (detailsVisible) {
+    for (var i = 0; i < field.resources.length; i++) {
+      var row = field.resources[i];
+      resources.push({
+        resourceId: row.resourceId,
+        totalAmount: sanitizePositiveInt(row.totalAmount || 0),
+        remainingAmount: sanitizePositiveInt(row.remainingAmount || 0)
+      });
+    }
+  }
+  return {
+    id: field.id,
+    x: field.x,
+    y: field.y,
+    rarityTier: field.rarityTier,
+    qualityTier: field.qualityTier,
+    resources: resources,
+    totalExtractionWork: detailsVisible ? sanitizePositiveInt(field.totalExtractionWork || 0) : 0,
+    remainingExtractionWork: detailsVisible ? sanitizePositiveInt(field.remainingExtractionWork || 0) : 0,
+    spawnedAt: sanitizePositiveInt(field.spawnedAt || 0),
+    expiresAt: sanitizePositiveInt(field.expiresAt || 0),
+    occupiedByPlayerId: String(field.occupiedByPlayerId || ""),
+    occupiedByUsername: String(field.occupiedByUsername || ""),
+    occupyingFleetId: String(field.occupyingFleetId || ""),
+    isOccupied: Boolean(field.isOccupied),
+    isVisible: field.isVisible !== false,
+    hiddenDetails: !detailsVisible
+  };
+}
+
+function serializeMapExpedition(expedition, serverNowTs) {
+  if (!expedition || typeof expedition !== "object") return null;
+  var status = String(expedition.status || "travel_to_field");
+  var snapshotResources = expedition.snapshotResources && typeof expedition.snapshotResources === "object"
+    ? expedition.snapshotResources
+    : {};
+  var collectedResources = expedition.collectedResources && typeof expedition.collectedResources === "object"
+    ? expedition.collectedResources
+    : {};
+  if (status === "extracting") {
+    collectedResources = estimateExpeditionCollected(expedition, serverNowTs);
+  }
+  return {
+    id: String(expedition.id || ""),
+    fieldId: String(expedition.fieldId || ""),
+    status: status,
+    departureAt: sanitizePositiveInt(expedition.departureAt || 0),
+    arrivalAt: sanitizePositiveInt(expedition.arrivalAt || 0),
+    extractionStartAt: sanitizePositiveInt(expedition.extractionStartAt || 0),
+    extractionEndAt: sanitizePositiveInt(expedition.extractionEndAt || 0),
+    returnStartAt: sanitizePositiveInt(expedition.returnStartAt || 0),
+    returnEndAt: sanitizePositiveInt(expedition.returnEndAt || 0),
+    travelSeconds: sanitizePositiveInt(expedition.travelSeconds || 0),
+    extractionSeconds: sanitizePositiveInt(expedition.extractionSeconds || 0),
+    totalHarvestSpeed: sanitizePositiveInt(expedition.totalHarvestSpeed || 0),
+    totalTransportCapacity: sanitizePositiveInt(expedition.totalTransportCapacity || 0),
+    fleet: Array.isArray(expedition.fleet) ? expedition.fleet : [],
+    snapshotResources: snapshotResources,
+    collectedResources: collectedResources,
+    serverNowTs: serverNowTs
+  };
+}
+
+function syncMapExpedition(economy, inventory, mapState, userId, username, serverNowTs) {
+  ensureResourceExpeditionState(economy);
+  var expedition = economy.resourceExpedition;
+  if (!expedition) return { changed: false, report: null };
+  var changed = false;
+  var report = null;
+  var field = findMapField(mapState, expedition.fieldId);
+
+  if (expedition.status === "travel_to_field" && serverNowTs >= sanitizePositiveInt(expedition.arrivalAt || 0)) {
+    expedition.status = "extracting";
+    expedition.extractionStartAt = sanitizePositiveInt(expedition.arrivalAt || serverNowTs);
+    expedition.extractionEndAt = expedition.extractionStartAt + sanitizePositiveInt(expedition.extractionSeconds || MAP_MIN_EXTRACTION_SECONDS);
+    expedition.updatedAt = serverNowTs;
+    changed = true;
+  }
+
+  if (expedition.status === "extracting" && serverNowTs >= sanitizePositiveInt(expedition.extractionEndAt || 0)) {
+    if (field) {
+      var fullOutcome = settleHarvestAgainstField(field, expedition, 1);
+      expedition.collectedResources = fullOutcome.collected;
+      var drop = rollMapFieldDrop();
+      expedition.dropItemId = drop.itemId;
+      expedition.dropQuantity = drop.quantity;
+      clearFieldOccupation(field);
+      if (!fullOutcome.hasRemaining) {
+        field.remainingExtractionWork = 0;
+        field.expiresAt = serverNowTs;
+      }
+    } else {
+      expedition.collectedResources = {};
+      expedition.dropItemId = "";
+      expedition.dropQuantity = 0;
+    }
+    expedition.status = "returning";
+    expedition.returnStartAt = serverNowTs;
+    expedition.returnEndAt = serverNowTs + sanitizePositiveInt(expedition.travelSeconds || MAP_MIN_TRAVEL_SECONDS);
+    expedition.updatedAt = serverNowTs;
+    changed = true;
+  }
+
+  if (expedition.status === "returning" && serverNowTs >= sanitizePositiveInt(expedition.returnEndAt || 0)) {
+    report = settleReturningExpedition(economy, inventory, expedition, serverNowTs);
+    economy.resourceExpedition = null;
+    changed = true;
+  }
+
+  return { changed: changed, report: report };
+}
+
+function startMapExpedition(economy, mapState, userId, username, fieldId, fleetInput, serverNowTs) {
+  ensureResourceExpeditionState(economy);
+  if (economy.resourceExpedition) throw new Error("An expedition is already active.");
+  var field = findMapField(mapState, fieldId);
+  if (!field) throw new Error("Resource field not found.");
+  if (field.isOccupied) throw new Error("Resource field is already occupied.");
+  var stats = calculateFleetHarvestStats(economy, fleetInput);
+  var travelSeconds = calculateMapTravelSeconds(userId, field.x, field.y, stats.mapSpeed);
+  var extractionSeconds = calculateMapExtractionSeconds(field.remainingExtractionWork, stats.totalHarvestSpeed);
+  var snapshot = mapFieldResourcesToMap(field);
+
+  var expedition = {
+    id: makeServerId("exp", serverNowTs),
+    playerId: userId,
+    username: username || userId,
+    fieldId: field.id,
+    fieldRarityTier: String(field.rarityTier || "COMMON"),
+    status: "travel_to_field",
+    fleet: stats.fleet,
+    totalHarvestSpeed: stats.totalHarvestSpeed,
+    totalTransportCapacity: stats.totalTransportCapacity,
+    mapSpeed: Math.floor(stats.mapSpeed),
+    travelSeconds: travelSeconds,
+    extractionSeconds: extractionSeconds,
+    departureAt: serverNowTs,
+    arrivalAt: serverNowTs + travelSeconds,
+    extractionStartAt: 0,
+    extractionEndAt: 0,
+    returnStartAt: 0,
+    returnEndAt: 0,
+    snapshotResources: snapshot,
+    collectedResources: {},
+    dropItemId: "",
+    dropQuantity: 0,
+    updatedAt: serverNowTs
+  };
+
+  field.isOccupied = true;
+  field.occupiedByPlayerId = userId;
+  field.occupiedByUsername = username || userId;
+  field.occupyingFleetId = expedition.id;
+
+  economy.resourceExpedition = expedition;
+  return expedition;
+}
+
+function recallMapExpedition(economy, mapState, serverNowTs) {
+  ensureResourceExpeditionState(economy);
+  var expedition = economy.resourceExpedition;
+  if (!expedition) throw new Error("No active expedition.");
+  if (expedition.status === "returning") throw new Error("Expedition is already returning.");
+  var field = findMapField(mapState, expedition.fieldId);
+
+  if (expedition.status === "travel_to_field") {
+    if (field) clearFieldOccupation(field);
+    expedition.collectedResources = {};
+    expedition.dropItemId = "";
+    expedition.dropQuantity = 0;
+  } else if (expedition.status === "extracting") {
+    if (field) {
+      var startAt = sanitizePositiveInt(expedition.extractionStartAt || serverNowTs);
+      var endAt = sanitizePositiveInt(expedition.extractionEndAt || (startAt + MAP_MIN_EXTRACTION_SECONDS));
+      var duration = Math.max(1, endAt - startAt);
+      var elapsed = clampNumber(serverNowTs - startAt, 0, duration);
+      var ratio = elapsed / duration;
+      var outcome = settleHarvestAgainstField(field, expedition, ratio);
+      expedition.collectedResources = outcome.collected;
+      if (outcome.collectedTotal > 0) {
+        var rolled = rollMapFieldDrop();
+        expedition.dropItemId = rolled.itemId;
+        expedition.dropQuantity = rolled.quantity;
+      } else {
+        expedition.dropItemId = "";
+        expedition.dropQuantity = 0;
+      }
+      clearFieldOccupation(field);
+      if (!outcome.hasRemaining) {
+        field.remainingExtractionWork = 0;
+        field.expiresAt = serverNowTs;
+      }
+    } else {
+      expedition.collectedResources = {};
+      expedition.dropItemId = "";
+      expedition.dropQuantity = 0;
+    }
+  }
+
+  expedition.status = "returning";
+  expedition.returnStartAt = serverNowTs;
+  expedition.returnEndAt = serverNowTs + sanitizePositiveInt(expedition.travelSeconds || MAP_MIN_TRAVEL_SECONDS);
+  expedition.updatedAt = serverNowTs;
+  return expedition;
+}
+
+function withMapTransaction(nk, userId, username, update) {
+  var lastError = "failed";
+  for (var attempt = 0; attempt < MAP_WRITE_RETRIES; attempt++) {
+    var ts = nowTs();
+    var read = nk.storageRead([
+      { collection: ECONOMY_COLLECTION, key: ECONOMY_KEY, userId: userId },
+      { collection: INVENTORY_COLLECTION, key: INVENTORY_KEY, userId: userId },
+      { collection: MAP_COLLECTION, key: MAP_RESOURCE_FIELDS_KEY, userId: SYSTEM_USER_ID }
+    ]);
+
+    var economyState = defaultEconomyState();
+    var economyVersion = "";
+    var inventoryState = defaultInventoryState(userId);
+    var inventoryVersion = "";
+    var mapState = defaultMapFieldState();
+    var mapVersion = "";
+
+    for (var i = 0; i < (read || []).length; i++) {
+      var obj = read[i];
+      if (obj.collection === ECONOMY_COLLECTION && obj.key === ECONOMY_KEY) {
+        economyState = obj.value || defaultEconomyState();
+        economyVersion = obj.version || "";
+      } else if (obj.collection === INVENTORY_COLLECTION && obj.key === INVENTORY_KEY) {
+        inventoryState = normalizeInventory(obj.value || defaultInventoryState(userId), userId);
+        inventoryVersion = obj.version || "";
+      } else if (obj.collection === MAP_COLLECTION && obj.key === MAP_RESOURCE_FIELDS_KEY) {
+        mapState = normalizeMapFieldState(obj.value || defaultMapFieldState());
+        mapVersion = obj.version || "";
+      }
+    }
+
+    var economy = applyOfflineProduction(economyState, ts);
+    var inventory = cloneInventory(inventoryState);
+    ensureHangarState(economy);
+    ensureResourceExpeditionState(economy);
+    var mapFingerprintBefore = JSON.stringify(mapState.fields || []);
+    ensureMapFieldsSeeded(nk, mapState, ts);
+    var syncResult = syncMapExpedition(economy, inventory, mapState, userId, username, ts);
+    var result = update(economy, inventory, mapState, ts, syncResult);
+    ensureMapFieldsSeeded(nk, mapState, ts);
+
+    var forcedDirty = false;
+    if (result && typeof result === "object" && Object.prototype.hasOwnProperty.call(result, "__dirty")) {
+      forcedDirty = Boolean(result.__dirty);
+      delete result.__dirty;
+    }
+    var mapFingerprintAfter = JSON.stringify(mapState.fields || []);
+    var mapChangedByMaintenance = mapFingerprintAfter !== mapFingerprintBefore;
+    var shouldWrite = forcedDirty || syncResult.changed || mapChangedByMaintenance || !mapVersion;
+    if (!shouldWrite) {
+      return {
+        economy: economy,
+        inventory: inventory,
+        mapState: mapState,
+        result: result,
+        syncResult: syncResult
+      };
+    }
+
+    economy.version = (economy.version || 0) + 1;
+    economy.lastUpdateTs = ts;
+    inventory.version = (inventory.version || 0) + 1;
+    inventory.updatedAt = ts;
+    mapState.version = (mapState.version || 0) + 1;
+    mapState.updatedAt = ts;
+
+    try {
+      var economyWrite = {
+        collection: ECONOMY_COLLECTION,
+        key: ECONOMY_KEY,
+        userId: userId,
+        permissionRead: 0,
+        permissionWrite: 0,
+        value: economy
+      };
+      if (economyVersion) economyWrite.version = economyVersion;
+
+      var inventoryWrite = {
+        collection: INVENTORY_COLLECTION,
+        key: INVENTORY_KEY,
+        userId: userId,
+        permissionRead: 0,
+        permissionWrite: 0,
+        value: inventory
+      };
+      if (inventoryVersion) inventoryWrite.version = inventoryVersion;
+
+      var mapWrite = {
+        collection: MAP_COLLECTION,
+        key: MAP_RESOURCE_FIELDS_KEY,
+        userId: SYSTEM_USER_ID,
+        permissionRead: 2,
+        permissionWrite: 0,
+        value: mapState
+      };
+      if (mapVersion) mapWrite.version = mapVersion;
+
+      nk.storageWrite([economyWrite, inventoryWrite, mapWrite]);
+      if (syncResult && syncResult.report) {
+        try {
+          createMapHarvestRewardMessage(nk, userId, syncResult.report);
+        } catch (_postErr) {
+          // Do not fail the map transaction if inbox creation fails.
+        }
+      }
+      return {
+        economy: economy,
+        inventory: inventory,
+        mapState: mapState,
+        result: result,
+        syncResult: syncResult
+      };
+    } catch (err) {
+      lastError = String(err);
+    }
+  }
+  throw new Error("Map transaction failed after retries: " + lastError);
+}
+
 function ensureHangarState(state) {
+  ensureResourceExpeditionState(state);
   if (!Array.isArray(state.hangarQueue)) state.hangarQueue = [];
   if (!state.hangarInventory || typeof state.hangarInventory !== "object") state.hangarInventory = {};
 
@@ -284,6 +1436,7 @@ function defaultInventoryState(playerId) {
   return {
     playerId: playerId,
     items: [],
+    mapDropNotifications: 0,
     version: 1,
     updatedAt: nowTs(),
     starterSeedVersion: 0
@@ -311,6 +1464,7 @@ function normalizeInventory(inventory, userId) {
   if (typeof next.starterSeedVersion !== "number" || !Number.isFinite(next.starterSeedVersion)) {
     next.starterSeedVersion = INVENTORY_STARTER_SEED_VERSION;
   }
+  next.mapDropNotifications = sanitizePositiveInt(next.mapDropNotifications || 0);
   return next;
 }
 
@@ -1833,8 +2987,10 @@ function rpcHangarCancel(ctx, _logger, nk, payload) {
   return JSON.stringify({ ok: true, canceledId: tx.result.canceledId, hangar: tx.result.hangar });
 }
 
-function rpcInventoryGet(ctx, _logger, nk, _payload) {
+function rpcInventoryGet(ctx, _logger, nk, payload) {
   var userId = requireUserId(ctx);
+  var body = parsePayload(payload);
+  var ackMapDropNotifications = Boolean(body && body.ackMapDropNotifications);
   var tx = withInventoryTransaction(nk, userId, function(inv) {
     if ((inv.starterSeedVersion || 0) < INVENTORY_STARTER_SEED_VERSION) {
       for (var i = 0; i < INVENTORY_STARTER_SEED.length; i++) {
@@ -1850,12 +3006,41 @@ function rpcInventoryGet(ctx, _logger, nk, _payload) {
       }
       inv.starterSeedVersion = INVENTORY_STARTER_SEED_VERSION;
     }
+    if (ackMapDropNotifications && sanitizePositiveInt(inv.mapDropNotifications || 0) > 0) {
+      inv.mapDropNotifications = 0;
+    }
     return inv;
   });
   var inventory = tx.inventory;
   return JSON.stringify({
     ok: true,
-    items: serializeInventoryItems(inventory)
+    items: serializeInventoryItems(inventory),
+    mapDropNotifications: sanitizePositiveInt(inventory.mapDropNotifications || 0)
+  });
+}
+
+function rpcInventoryMeta(ctx, _logger, nk, payload) {
+  var userId = requireUserId(ctx);
+  var body = parsePayload(payload);
+  var ackMapDropNotifications = Boolean(body && body.ackMapDropNotifications);
+  if (!ackMapDropNotifications) {
+    var readOnly = readInventoryState(nk, userId);
+    var readInventory = normalizeInventory(readOnly.state || defaultInventoryState(userId), userId);
+    return JSON.stringify({
+      ok: true,
+      mapDropNotifications: sanitizePositiveInt(readInventory.mapDropNotifications || 0)
+    });
+  }
+
+  var tx = withInventoryTransaction(nk, userId, function(inv) {
+    if (sanitizePositiveInt(inv.mapDropNotifications || 0) > 0) {
+      inv.mapDropNotifications = 0;
+    }
+    return inv;
+  });
+  return JSON.stringify({
+    ok: true,
+    mapDropNotifications: sanitizePositiveInt(tx.inventory.mapDropNotifications || 0)
   });
 }
 
@@ -3431,6 +4616,38 @@ var INBOX_SEND_LIMIT_PER_HOUR = 30;
 var INBOX_SEND_TARGET_COOLDOWN_SEC = 20;
 var INBOX_SYSTEM_BROADCAST_BATCH = 500;
 var INBOX_SYSTEM_BROADCAST_MAX_USERS = 100000;
+var INBOX_DAILY_NOON_EXPIRY_SEC = 72 * 60 * 60;
+var INBOX_DAILY_NOON_META_KIND = "DAILY_NOON_CHEST";
+var INBOX_DAILY_NOON_ACCELERATOR_TABLE = [
+  { itemId: "TIME_RIFT_60", weight: 50 },
+  { itemId: "TIME_RIFT_300", weight: 35 },
+  { itemId: "TIME_RIFT_3600", weight: 13 },
+  { itemId: "TIME_RIFT_10800", weight: 1.8 },
+  { itemId: "TIME_RIFT_43200", weight: 0.2 }
+];
+var INBOX_DAILY_NOON_CHEST_TABLE = [
+  { chestType: "CLASSIC", weight: 60 },
+  { chestType: "UNCOMMON", weight: 27 },
+  { chestType: "RARE", weight: 10 },
+  { chestType: "LEGENDARY", weight: 2.7 },
+  { chestType: "DIVINE", weight: 0.3 }
+];
+var INBOX_DAILY_NOON_BONUS_TABLE = [
+  { kind: "none", weight: 70 },
+  { kind: "item", itemId: "TIME_RIFT_60", quantity: 1, weight: 15 },
+  { kind: "item", itemId: "TIME_RIFT_300", quantity: 1, weight: 8 },
+  { kind: "chest", chestType: "CLASSIC", quantity: 1, weight: 5 },
+  { kind: "chest", chestType: "UNCOMMON", quantity: 1, weight: 1.5 },
+  { kind: "item", itemId: "TIME_RIFT_3600", quantity: 1, weight: 0.4 },
+  { kind: "chest", chestType: "RARE", quantity: 1, weight: 0.1 }
+];
+var INBOX_DAILY_NOON_STREAK_DAY7_BONUS = {
+  itemId: "TIME_RIFT_10800",
+  chestType: "LEGENDARY",
+  itemQuantity: 1,
+  chestQuantity: 1
+};
+var INBOX_DAILY_NOON_TEST_ALLOWED_USERS = { "heimy": true };
 
 function defaultInboxMeta() {
   return {
@@ -3442,6 +4659,12 @@ function defaultInboxMeta() {
       COMBAT_REPORT: 0,
       SYSTEM: 0,
       PLAYER: 0
+    },
+    dailyNoon: {
+      lastDayKey: "",
+      lastNoonTs: 0,
+      streakDay: 0,
+      lastMessageId: ""
     }
   };
 }
@@ -3452,6 +4675,45 @@ function defaultInboxRate() {
     windowStart: nowTs(),
     sentInWindow: 0,
     lastByTarget: {}
+  };
+}
+
+function formatServerDayKey(dateObj) {
+  var y = dateObj.getFullYear();
+  var m = String(dateObj.getMonth() + 1).padStart(2, "0");
+  var d = String(dateObj.getDate()).padStart(2, "0");
+  return y + "-" + m + "-" + d;
+}
+
+function getServerNoonSchedule(serverNowTs) {
+  var nowSafe = Math.max(1, sanitizePositiveInt(serverNowTs || nowTs()));
+  var nowDate = new Date(nowSafe * 1000);
+  var todayNoonDate = new Date(
+    nowDate.getFullYear(),
+    nowDate.getMonth(),
+    nowDate.getDate(),
+    12,
+    0,
+    0,
+    0
+  );
+  var todayNoonTs = Math.floor(todayNoonDate.getTime() / 1000);
+  var todayKey = formatServerDayKey(nowDate);
+  var yesterdayDate = new Date(
+    nowDate.getFullYear(),
+    nowDate.getMonth(),
+    nowDate.getDate() - 1,
+    12,
+    0,
+    0,
+    0
+  );
+  var yesterdayKey = formatServerDayKey(yesterdayDate);
+  return {
+    nowTs: nowSafe,
+    todayKey: todayKey,
+    yesterdayKey: yesterdayKey,
+    todayNoonTs: todayNoonTs
   };
 }
 
@@ -3503,6 +4765,87 @@ function normalizeInboxAttachments(attachments) {
   return out;
 }
 
+function normalizeInboxMessageMeta(metaRaw) {
+  if (!metaRaw || typeof metaRaw !== "object") return {};
+  var kind = String(metaRaw.kind || "").trim().toUpperCase();
+  if (kind !== INBOX_DAILY_NOON_META_KIND) return {};
+  return {
+    kind: INBOX_DAILY_NOON_META_KIND,
+    dayKey: String(metaRaw.dayKey || "").trim(),
+    noonTs: sanitizePositiveInt(metaRaw.noonTs || 0),
+    streakDay: Math.max(1, Math.min(7, sanitizePositiveInt(metaRaw.streakDay || 1))),
+    rewardGenerated: Boolean(metaRaw.rewardGenerated),
+    openedAt: sanitizePositiveInt(metaRaw.openedAt || 0)
+  };
+}
+
+function isDailyNoonChestMessage(msg) {
+  return Boolean(
+    msg &&
+      msg.meta &&
+      typeof msg.meta === "object" &&
+      String(msg.meta.kind || "").toUpperCase() === INBOX_DAILY_NOON_META_KIND
+  );
+}
+
+function inboxMessageHasClaimable(msg) {
+  if (!msg || typeof msg !== "object") return false;
+  if (inboxHasClaimable(msg.attachments)) return true;
+  if (isDailyNoonChestMessage(msg) && sanitizePositiveInt(msg.claimedAt || 0) <= 0) return true;
+  return false;
+}
+
+function buildDailyNoonRewardPack(streakDay) {
+  var day = Math.max(1, Math.min(7, sanitizePositiveInt(streakDay || 1)));
+  var attachments = {
+    resources: {},
+    items: [],
+    credits: 0,
+    chests: []
+  };
+
+  var accel = pickByWeight(INBOX_DAILY_NOON_ACCELERATOR_TABLE);
+  if (accel && accel.itemId && ITEM_DEFINITIONS[accel.itemId]) {
+    attachments.items.push({ itemId: accel.itemId, quantity: 1 });
+  }
+
+  var chest = pickByWeight(INBOX_DAILY_NOON_CHEST_TABLE);
+  if (chest && chest.chestType && RESOURCE_CHEST_CONFIGS[chest.chestType]) {
+    attachments.chests.push({ chestType: chest.chestType, quantity: 1 });
+  }
+
+  var bonus = pickByWeight(INBOX_DAILY_NOON_BONUS_TABLE);
+  if (bonus && bonus.kind === "item" && bonus.itemId && ITEM_DEFINITIONS[bonus.itemId]) {
+    attachments.items.push({
+      itemId: bonus.itemId,
+      quantity: Math.max(1, sanitizePositiveInt(bonus.quantity || 1))
+    });
+  } else if (bonus && bonus.kind === "chest" && bonus.chestType && RESOURCE_CHEST_CONFIGS[bonus.chestType]) {
+    attachments.chests.push({
+      chestType: bonus.chestType,
+      quantity: Math.max(1, sanitizePositiveInt(bonus.quantity || 1))
+    });
+  }
+
+  // Weekly fidelity milestone.
+  if (day === 7) {
+    if (INBOX_DAILY_NOON_STREAK_DAY7_BONUS.itemId && ITEM_DEFINITIONS[INBOX_DAILY_NOON_STREAK_DAY7_BONUS.itemId]) {
+      attachments.items.push({
+        itemId: INBOX_DAILY_NOON_STREAK_DAY7_BONUS.itemId,
+        quantity: Math.max(1, sanitizePositiveInt(INBOX_DAILY_NOON_STREAK_DAY7_BONUS.itemQuantity || 1))
+      });
+    }
+    if (INBOX_DAILY_NOON_STREAK_DAY7_BONUS.chestType && RESOURCE_CHEST_CONFIGS[INBOX_DAILY_NOON_STREAK_DAY7_BONUS.chestType]) {
+      attachments.chests.push({
+        chestType: INBOX_DAILY_NOON_STREAK_DAY7_BONUS.chestType,
+        quantity: Math.max(1, sanitizePositiveInt(INBOX_DAILY_NOON_STREAK_DAY7_BONUS.chestQuantity || 1))
+      });
+    }
+  }
+
+  return normalizeInboxAttachments(attachments);
+}
+
 function inboxHasClaimable(attachments) {
   if (!attachments || typeof attachments !== "object") return false;
   if (Number(attachments.credits || 0) > 0) return true;
@@ -3526,6 +4869,7 @@ function normalizeInboxMessage(raw, key, userId) {
   var typeRaw = String(value.type || "SYSTEM").toUpperCase();
   var type = INBOX_TYPES.indexOf(typeRaw) >= 0 ? typeRaw : "SYSTEM";
   var attachments = normalizeInboxAttachments(value.attachments);
+  var meta = normalizeInboxMessageMeta(value.meta);
   var fromUserId = String(value.fromUserId || "");
   var fromUsername = String(value.fromUsername || "");
   var toUserId = String(value.toUserId || "");
@@ -3555,7 +4899,8 @@ function normalizeInboxMessage(raw, key, userId) {
     claimedAt: Math.max(0, Math.floor(Number(value.claimedAt || 0))),
     claimTxId: String(value.claimTxId || ""),
     combatReport: value.combatReport && typeof value.combatReport === "object" ? value.combatReport : null,
-    attachments: attachments
+    attachments: attachments,
+    meta: meta
   };
 }
 
@@ -3580,9 +4925,10 @@ function inboxMessageToClient(msg) {
     expired: Number(msg.expiredAt || 0) > 0,
     claimed: Number(msg.claimedAt || 0) > 0,
     claimedAt: msg.claimedAt || 0,
-    hasAttachments: inboxHasClaimable(msg.attachments),
+    hasAttachments: inboxMessageHasClaimable(msg),
     attachments: msg.attachments,
-    combatReport: msg.combatReport
+    combatReport: msg.combatReport,
+    meta: msg.meta && typeof msg.meta === "object" ? msg.meta : {}
   };
 }
 
@@ -3609,6 +4955,13 @@ function readInboxMeta(nk, userId) {
   base.unreadTotal = Math.max(0, Math.floor(Number(raw.unreadTotal || 0)));
   base.updatedAt = Math.max(0, Math.floor(Number(raw.updatedAt || nowTs())));
   base.version = Math.max(1, Math.floor(Number(raw.version || 1)));
+  var dailyNoonRaw = raw.dailyNoon && typeof raw.dailyNoon === "object" ? raw.dailyNoon : {};
+  base.dailyNoon = {
+    lastDayKey: String(dailyNoonRaw.lastDayKey || ""),
+    lastNoonTs: sanitizePositiveInt(dailyNoonRaw.lastNoonTs || 0),
+    streakDay: Math.max(0, Math.min(7, sanitizePositiveInt(dailyNoonRaw.streakDay || 0))),
+    lastMessageId: String(dailyNoonRaw.lastMessageId || "")
+  };
   return { state: base, version: read[0].version || "" };
 }
 
@@ -3659,6 +5012,7 @@ function ensureInventoryForClaim(raw, userId) {
   var inv = raw && typeof raw === "object" ? raw : defaultInventoryState(userId);
   if (!Array.isArray(inv.items)) inv.items = [];
   inv.playerId = String(inv.playerId || userId);
+  inv.mapDropNotifications = sanitizePositiveInt(inv.mapDropNotifications || 0);
   inv.version = Math.max(1, Math.floor(Number(inv.version || 1)));
   inv.updatedAt = Math.max(0, Math.floor(Number(inv.updatedAt || nowTs())));
   return inv;
@@ -3680,6 +5034,7 @@ function createInboxMessageForUser(nk, userId, data) {
       createdAt: now,
       expiresAt: Math.max(0, Math.floor(Number(data.expiresAt || 0))),
       attachments: data.attachments || {},
+      meta: data.meta || {},
       combatReport: data.combatReport || null,
       readAt: 0,
       deletedAt: 0,
@@ -3823,8 +5178,94 @@ function createSystemMessage(nk, userIdOrBroadcast, title, body) {
   });
 }
 
+function ensureDailyNoonRewardMessage(nk, userId) {
+  for (var attempt = 0; attempt < ECONOMY_WRITE_RETRIES; attempt++) {
+    var schedule = getServerNoonSchedule(nowTs());
+    if (schedule.nowTs < schedule.todayNoonTs) return null;
+
+    var metaRead = readInboxMeta(nk, userId);
+    var meta = metaRead.state || defaultInboxMeta();
+    if (!meta.dailyNoon || typeof meta.dailyNoon !== "object") {
+      meta.dailyNoon = {
+        lastDayKey: "",
+        lastNoonTs: 0,
+        streakDay: 0,
+        lastMessageId: ""
+      };
+    }
+
+    if (String(meta.dailyNoon.lastDayKey || "") === schedule.todayKey) return null;
+
+    var previous = String(meta.dailyNoon.lastDayKey || "");
+    var streak = previous === schedule.yesterdayKey
+      ? Math.max(1, Math.min(7, sanitizePositiveInt(meta.dailyNoon.streakDay || 0) + 1))
+      : 1;
+
+    var messageId = buildInboxMessageId(schedule.todayNoonTs);
+    var message = normalizeInboxMessage({
+      id: messageId,
+      type: "REWARD",
+      title: "Recompense quotidienne",
+      body:
+        "Coffre Quotidien de Midi.\nOuvrez ce coffre pour recevoir des objets de progression.",
+      createdAt: schedule.todayNoonTs,
+      expiresAt: schedule.todayNoonTs + INBOX_DAILY_NOON_EXPIRY_SEC,
+      attachments: {},
+      meta: {
+        kind: INBOX_DAILY_NOON_META_KIND,
+        dayKey: schedule.todayKey,
+        noonTs: schedule.todayNoonTs,
+        streakDay: streak,
+        rewardGenerated: false,
+        openedAt: 0
+      },
+      readAt: 0,
+      deletedAt: 0,
+      expiredAt: 0,
+      claimedAt: 0,
+      claimTxId: ""
+    }, messageId, userId);
+
+    incrementUnread(meta, "REWARD", 1);
+    meta.dailyNoon.lastDayKey = schedule.todayKey;
+    meta.dailyNoon.lastNoonTs = schedule.todayNoonTs;
+    meta.dailyNoon.streakDay = streak;
+    meta.dailyNoon.lastMessageId = messageId;
+    meta.version = Math.max(1, Math.floor(Number(meta.version || 1))) + 1;
+
+    var writes = [
+      {
+        collection: INBOX_COLLECTION,
+        key: messageId,
+        userId: userId,
+        permissionRead: 0,
+        permissionWrite: 0,
+        value: message
+      },
+      {
+        collection: INBOX_COLLECTION,
+        key: INBOX_META_KEY,
+        userId: userId,
+        permissionRead: 0,
+        permissionWrite: 0,
+        value: meta
+      }
+    ];
+    if (metaRead.version) writes[1].version = metaRead.version;
+
+    try {
+      nk.storageWrite(writes);
+      return message;
+    } catch (err) {
+      if (attempt === ECONOMY_WRITE_RETRIES - 1) throw err;
+    }
+  }
+  return null;
+}
+
 function rpcInboxList(ctx, _logger, nk, payload) {
   var userId = requireUserId(ctx);
+  ensureDailyNoonRewardMessage(nk, userId);
   var body = parsePayload(payload);
   var typeFilter = parseInboxTypeFilter(body.type);
   var limit = Math.max(1, Math.min(INBOX_LIST_LIMIT_MAX, sanitizePositiveInt(body.limit || INBOX_LIST_LIMIT_DEFAULT)));
@@ -3880,6 +5321,7 @@ function rpcInboxList(ctx, _logger, nk, payload) {
 
 function rpcInboxRead(ctx, _logger, nk, payload) {
   var userId = requireUserId(ctx);
+  ensureDailyNoonRewardMessage(nk, userId);
   var body = parsePayload(payload);
   var messageId = String(body.messageId || "").trim();
   if (!messageId) throw new Error("Missing messageId.");
@@ -4023,6 +5465,7 @@ function rpcInboxDelete(ctx, _logger, nk, payload) {
 
 function rpcInboxClaim(ctx, _logger, nk, payload) {
   var userId = requireUserId(ctx);
+  ensureDailyNoonRewardMessage(nk, userId);
   var body = parsePayload(payload);
   var messageId = String(body.messageId || "").trim();
   if (!messageId) throw new Error("Missing messageId.");
@@ -4051,7 +5494,6 @@ function rpcInboxClaim(ctx, _logger, nk, payload) {
     var msg = normalizeInboxMessage(msgObj.value, messageId, userId);
     if (msg.deletedAt > 0 || msg.expiredAt > 0) throw new Error("Message is not available.");
     if (msg.expiresAt > 0 && nowTs() >= msg.expiresAt) throw new Error("Message expired.");
-    if (!inboxHasClaimable(msg.attachments)) throw new Error("No claimable attachments.");
 
     if (msg.claimedAt > 0) {
       return JSON.stringify({
@@ -4060,6 +5502,18 @@ function rpcInboxClaim(ctx, _logger, nk, payload) {
         message: inboxMessageToClient(msg)
       });
     }
+
+    if (isDailyNoonChestMessage(msg)) {
+      var chestMeta = msg.meta && typeof msg.meta === "object" ? msg.meta : {};
+      if (!inboxHasClaimable(msg.attachments)) {
+        msg.attachments = buildDailyNoonRewardPack(chestMeta.streakDay || 1);
+      }
+      chestMeta.rewardGenerated = true;
+      chestMeta.openedAt = nowTs();
+      msg.meta = normalizeInboxMessageMeta(chestMeta);
+    }
+
+    if (!inboxHasClaimable(msg.attachments)) throw new Error("No claimable attachments.");
 
     var meta = metaObj ? readInboxMeta(nk, userId).state : defaultInboxMeta();
     var economy = ensureEconomyForClaim(economyObj && economyObj.value ? economyObj.value : null);
@@ -4454,6 +5908,7 @@ function rpcInboxSearchPlayers(ctx, _logger, nk, payload) {
 
 function rpcInboxThread(ctx, _logger, nk, payload) {
   var userId = requireUserId(ctx);
+  ensureDailyNoonRewardMessage(nk, userId);
   var body = parsePayload(payload);
   var peerRaw = String(body.peerUserId || body.peerUsername || body.peer || "").trim();
   if (!peerRaw) throw new Error("Missing peer.");
@@ -4505,6 +5960,168 @@ function rpcInboxThread(ctx, _logger, nk, payload) {
     items: items,
     nextCursor: nextCursor || ""
   });
+}
+
+function rpcInboxDailyNoonTest(ctx, _logger, nk, payload) {
+  var userId = requireUserId(ctx);
+  var username = String(ctx.username || "").trim();
+  if (!INBOX_DAILY_NOON_TEST_ALLOWED_USERS[String(username).toLowerCase()]) {
+    throw new Error("Forbidden.");
+  }
+  var body = parsePayload(payload);
+  var streakDay = Math.max(1, Math.min(7, sanitizePositiveInt(body.streakDay || 1)));
+  var now = nowTs();
+  var dayKey = "test-" + formatServerDayKey(new Date(now * 1000)) + "-" + Math.floor(Math.random() * 100000).toString(36);
+  var message = createInboxMessageForUser(nk, userId, {
+    type: "REWARD",
+    title: "Recompense quotidienne (TEST)",
+    body: "Coffre Quotidien de Midi de test.\nCliquez sur Ouvrir pour recevoir la recompense.",
+    attachments: {},
+    meta: {
+      kind: INBOX_DAILY_NOON_META_KIND,
+      dayKey: dayKey,
+      noonTs: now,
+      streakDay: streakDay,
+      rewardGenerated: false,
+      openedAt: 0
+    },
+    expiresAt: now + INBOX_DAILY_NOON_EXPIRY_SEC
+  });
+  return JSON.stringify({
+    ok: true,
+    message: inboxMessageToClient(message)
+  });
+}
+
+function serializeHarvestInventory(economy) {
+  ensureHangarState(economy);
+  var rows = [];
+  var keys = Object.keys(economy.hangarInventory || {});
+  for (var i = 0; i < keys.length; i++) {
+    var unitId = keys[i];
+    var available = sanitizePositiveInt(economy.hangarInventory[unitId] || 0);
+    if (available <= 0) continue;
+    var stats = MAP_HARVEST_UNIT_STATS[unitId];
+    if (!stats) continue;
+    rows.push({
+      unitId: unitId,
+      quantity: available,
+      harvestSpeed: stats.harvestSpeed,
+      harvestCapacity: stats.harvestCapacity,
+      mapSpeed: stats.mapSpeed
+    });
+  }
+  rows.sort(function(a, b) {
+    if (b.harvestSpeed !== a.harvestSpeed) return b.harvestSpeed - a.harvestSpeed;
+    return String(a.unitId).localeCompare(String(b.unitId));
+  });
+  return rows;
+}
+
+function rpcMapFieldsState(ctx, _logger, nk, payload) {
+  var userId = requireUserId(ctx);
+  var username = ctx.username || userId;
+  parsePayload(payload);
+
+  var tx = withMapTransaction(nk, userId, username, function(economy, _inventory, mapState, ts, syncResult) {
+    var fields = [];
+    for (var i = 0; i < mapState.fields.length; i++) {
+      fields.push(serializeMapFieldForViewer(mapState.fields[i], userId));
+    }
+    return {
+      serverNowTs: ts,
+      fields: fields,
+      expedition: serializeMapExpedition(economy.resourceExpedition, ts),
+      reports: Array.isArray(economy.resourceReports) ? economy.resourceReports.slice(0, 8) : [],
+      harvestInventory: serializeHarvestInventory(economy),
+      syncReport: syncResult && syncResult.report ? syncResult.report : null
+    };
+  });
+
+  return JSON.stringify({
+    ok: true,
+    serverNowTs: tx.result.serverNowTs,
+    fields: tx.result.fields,
+    expedition: tx.result.expedition,
+    reports: tx.result.reports,
+    harvestInventory: tx.result.harvestInventory,
+    syncReport: tx.result.syncReport
+  });
+}
+
+function rpcMapFieldsStart(ctx, _logger, nk, payload) {
+  var userId = requireUserId(ctx);
+  var username = ctx.username || userId;
+  var body = parsePayload(payload);
+  var fieldId = String(body.fieldId || "").trim();
+  var fleet = Array.isArray(body.fleet) ? body.fleet : [];
+  if (!fieldId) throw new Error("Missing fieldId.");
+  if (!Array.isArray(fleet) || fleet.length <= 0) throw new Error("Missing fleet payload.");
+
+  var tx = withMapTransaction(nk, userId, username, function(economy, _inventory, mapState, ts, syncResult) {
+    var expedition = startMapExpedition(economy, mapState, userId, username, fieldId, fleet, ts);
+    var selectedField = findMapField(mapState, fieldId);
+    var fields = [];
+    for (var i = 0; i < mapState.fields.length; i++) {
+      fields.push(serializeMapFieldForViewer(mapState.fields[i], userId));
+    }
+    return {
+      __dirty: true,
+      serverNowTs: ts,
+      expedition: serializeMapExpedition(expedition, ts),
+      selectedField: selectedField ? serializeMapFieldForViewer(selectedField, userId) : null,
+      fields: fields,
+      syncReport: syncResult && syncResult.report ? syncResult.report : null
+    };
+  });
+
+  return JSON.stringify({
+    ok: true,
+    serverNowTs: tx.result.serverNowTs,
+    expedition: tx.result.expedition,
+    selectedField: tx.result.selectedField,
+    fields: tx.result.fields,
+    syncReport: tx.result.syncReport
+  });
+}
+
+function rpcMapFieldsRecall(ctx, _logger, nk, payload) {
+  var userId = requireUserId(ctx);
+  var username = ctx.username || userId;
+  parsePayload(payload);
+
+  var tx = withMapTransaction(nk, userId, username, function(economy, _inventory, mapState, ts, syncResult) {
+    var expedition = recallMapExpedition(economy, mapState, ts);
+    var fields = [];
+    for (var i = 0; i < mapState.fields.length; i++) {
+      fields.push(serializeMapFieldForViewer(mapState.fields[i], userId));
+    }
+    return {
+      __dirty: true,
+      serverNowTs: ts,
+      expedition: serializeMapExpedition(expedition, ts),
+      fields: fields,
+      reports: Array.isArray(economy.resourceReports) ? economy.resourceReports.slice(0, 8) : [],
+      syncReport: syncResult && syncResult.report ? syncResult.report : null
+    };
+  });
+
+  return JSON.stringify({
+    ok: true,
+    serverNowTs: tx.result.serverNowTs,
+    expedition: tx.result.expedition,
+    fields: tx.result.fields,
+    reports: tx.result.reports,
+    syncReport: tx.result.syncReport
+  });
+}
+
+function rpcMapPlayers(ctx, _logger, nk, payload) {
+  requireUserId(ctx);
+  var body = parsePayload(payload);
+  var limit = Math.max(1, Math.min(5000, sanitizePositiveInt(body.limit || 5000)));
+  var out = listMapPlayers(nk, limit);
+  return JSON.stringify({ ok: true, players: out });
 }
 
 function safeLeaderboardRecordsList(nk, logger, leaderboardId, limit, ownerId) {
@@ -4774,6 +6391,7 @@ function InitModule(_ctx, logger, _nk, initializer) {
   initializer.registerRpc("hangar_start", rpcHangarStart);
   initializer.registerRpc("hangar_cancel", rpcHangarCancel);
   initializer.registerRpc("getInventory", rpcInventoryGet);
+  initializer.registerRpc("getInventoryMeta", rpcInventoryMeta);
   initializer.registerRpc("useItem", rpcInventoryUseItem);
   initializer.registerRpc("ranking_get_state", rpcRankingGetState);
   initializer.registerRpc("rpc_create_alliance", rpcCreateAlliance);
@@ -4794,6 +6412,11 @@ function InitModule(_ctx, logger, _nk, initializer) {
   initializer.registerRpc("rpc_send_player_message", rpcSendPlayerMessage);
   initializer.registerRpc("rpc_inbox_search_players", rpcInboxSearchPlayers);
   initializer.registerRpc("rpc_inbox_thread", rpcInboxThread);
+  initializer.registerRpc("rpc_inbox_daily_noon_test", rpcInboxDailyNoonTest);
+  initializer.registerRpc("rpc_map_players", rpcMapPlayers);
+  initializer.registerRpc("rpc_map_fields_state", rpcMapFieldsState);
+  initializer.registerRpc("rpc_map_fields_start", rpcMapFieldsStart);
+  initializer.registerRpc("rpc_map_fields_recall", rpcMapFieldsRecall);
   logger.info("Loaded hyperstructure economy runtime module (JS).");
 }
 
