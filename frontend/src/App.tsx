@@ -5387,7 +5387,23 @@ function SectorMapScreen({
       const source = Object.keys(nested).length > 0 ? nested : parsed;
       applyMapPayload(source);
     } catch (err) {
-      setMapActionError(l("Lancement de collecte impossible.", "Unable to launch harvesting."));
+      let detail = extractRpcErrorMessage(err);
+      if (!detail && err instanceof Response) {
+        try {
+          const raw = await err.text();
+          const parsed = parseJsonObject(raw);
+          detail =
+            String(parsed.message || parsed.error || parsed.error_message || "").trim() ||
+            raw.trim();
+        } catch {
+          // noop
+        }
+      }
+      setMapActionError(
+        detail
+          ? `${l("Lancement de collecte impossible :", "Unable to launch harvesting:")} ${detail}`
+          : l("Lancement de collecte impossible.", "Unable to launch harvesting.")
+      );
       if (import.meta.env.DEV) {
         // eslint-disable-next-line no-console
         console.error("map harvest start error", err);
