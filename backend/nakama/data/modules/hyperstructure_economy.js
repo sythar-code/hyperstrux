@@ -49,6 +49,9 @@ var MAP_MIN_TRAVEL_SECONDS = 120;
 var MAP_MAX_TRAVEL_SECONDS = 1200;
 var MAP_MIN_EXTRACTION_SECONDS = 3600;
 var MAP_MAX_EXTRACTION_SECONDS = 7200;
+var MAP_BASE_ACTIVE_FLEET_SLOTS = 1;
+var MAP_ACTIVE_FLEET_SLOT_STEP = 3;
+var MAP_ACTIVE_FLEET_SLOTS_MAX = 11;
 var MAP_FIELD_MIN_LIFETIME_SEC = 48 * 60 * 60;
 var MAP_FIELD_MAX_LIFETIME_SEC = 120 * 60 * 60;
 var ALLIANCE_NAME_REGEX = /^[A-Za-z0-9 _-]+$/;
@@ -113,8 +116,8 @@ var MAP_FIELD_RARITY_CONFIGS = {
     id: "COMMON",
     weight: 0.45,
     quantityMultiplier: 0.8,
-    maxTier: 2,
-    minTypes: 1,
+    maxTier: 25,
+    minTypes: 2,
     maxTypes: 2,
     workMin: 320000,
     workMax: 520000
@@ -123,9 +126,9 @@ var MAP_FIELD_RARITY_CONFIGS = {
     id: "UNCOMMON",
     weight: 0.28,
     quantityMultiplier: 1.0,
-    maxTier: 3,
+    maxTier: 45,
     minTypes: 2,
-    maxTypes: 2,
+    maxTypes: 3,
     workMin: 380000,
     workMax: 620000
   },
@@ -133,9 +136,9 @@ var MAP_FIELD_RARITY_CONFIGS = {
     id: "RARE",
     weight: 0.16,
     quantityMultiplier: 1.25,
-    maxTier: 5,
-    minTypes: 2,
-    maxTypes: 3,
+    maxTier: 72,
+    minTypes: 3,
+    maxTypes: 4,
     workMin: 520000,
     workMax: 850000
   },
@@ -143,9 +146,9 @@ var MAP_FIELD_RARITY_CONFIGS = {
     id: "EPIC",
     weight: 0.08,
     quantityMultiplier: 1.6,
-    maxTier: 7,
+    maxTier: 82,
     minTypes: 3,
-    maxTypes: 3,
+    maxTypes: 4,
     workMin: 680000,
     workMax: 1100000
   },
@@ -153,9 +156,9 @@ var MAP_FIELD_RARITY_CONFIGS = {
     id: "LEGENDARY",
     weight: 0.025,
     quantityMultiplier: 2.1,
-    maxTier: 9,
-    minTypes: 3,
-    maxTypes: 4,
+    maxTier: 94,
+    minTypes: 4,
+    maxTypes: 5,
     workMin: 900000,
     workMax: 1400000
   },
@@ -163,9 +166,9 @@ var MAP_FIELD_RARITY_CONFIGS = {
     id: "MYTHIC",
     weight: 0.005,
     quantityMultiplier: 3.0,
-    maxTier: 10,
+    maxTier: 100,
     minTypes: 4,
-    maxTypes: 4,
+    maxTypes: 5,
     workMin: 1200000,
     workMax: 2000000
   }
@@ -351,7 +354,9 @@ function defaultEconomyState() {
     research_slot: null,
     hangarQueue: [],
     hangarInventory: {},
+    commandementEscadreLevel: 0,
     resourceExpedition: null,
+    resourceExpeditions: [],
     resourceReports: []
   };
 }
@@ -364,16 +369,288 @@ function makeServerId(prefix, serverNowTs) {
   return prefix + "_" + serverNowTs + "_" + Math.floor(Math.random() * 1000000000).toString(36);
 }
 
+function coerceObjectList(value) {
+  if (Array.isArray(value)) return value.slice();
+  if (!value || typeof value !== "object") return [];
+
+  var out = [];
+  if (typeof value.length === "number" && Number.isFinite(value.length) && value.length >= 0) {
+    var len = Math.max(0, Math.floor(value.length));
+    var hasDefined = false;
+    for (var i = 0; i < len; i++) out.push(value[i]);
+    for (var d = 0; d < out.length; d++) {
+      if (out[d] !== undefined && out[d] !== null) {
+        hasDefined = true;
+        break;
+      }
+    }
+    if (hasDefined) return out;
+  }
+
+  var keys = Object.keys(value);
+  if (keys.length <= 0) return [];
+  keys.sort(function(a, b) {
+    var ai = Number(a);
+    var bi = Number(b);
+    var aNum = Number.isFinite(ai);
+    var bNum = Number.isFinite(bi);
+    if (aNum && bNum) return ai - bi;
+    if (aNum) return -1;
+    if (bNum) return 1;
+    return String(a).localeCompare(String(b));
+  });
+  for (var k = 0; k < keys.length; k++) {
+    out.push(value[keys[k]]);
+  }
+  return out;
+}
+
+function dedupeExpeditionRows(rows) {
+  var list = coerceObjectList(rows);
+  var out = [];
+  var seen = {};
+  for (var i = 0; i < list.length; i++) {
+    var row = list[i];
+    if (!row || typeof row !== "object") continue;
+    var rowId = String(row.id || "").trim();
+    if (!rowId) continue;
+    if (seen[rowId]) continue;
+    seen[rowId] = true;
+    out.push(row);
+  }
+  return out;
+}
+
 function ensureResourceExpeditionState(state) {
   if (!state || typeof state !== "object") return;
-  if (!state.resourceExpedition || typeof state.resourceExpedition !== "object") {
-    state.resourceExpedition = null;
+  var expeditions = [];
+  var rawExpeditions = coerceObjectList(state.resourceExpeditions);
+  if (rawExpeditions.length > 0) {
+    for (var i = 0; i < rawExpeditions.length; i++) {
+      var row = rawExpeditions[i];
+      if (!row || typeof row !== "object") continue;
+      if (!String(row.id || "").trim()) continue;
+      expeditions.push(row);
+    }
   }
+  expeditions = dedupeExpeditionRows(expeditions);
+  if (expeditions.length <= 0 && state.resourceExpedition && typeof state.resourceExpedition === "object") {
+    if (String(state.resourceExpedition.id || "").trim()) {
+      expeditions.push(state.resourceExpedition);
+    }
+  }
+  state.resourceExpeditions = expeditions;
+  state.resourceExpedition = expeditions.length > 0 ? expeditions[0] : null;
+  state.commandementEscadreLevel = sanitizePositiveInt(Number(state.commandementEscadreLevel || 0));
   if (!Array.isArray(state.resourceReports)) {
     state.resourceReports = [];
   } else if (state.resourceReports.length > 12) {
     state.resourceReports = state.resourceReports.slice(0, 12);
   }
+}
+
+function getResourceExpeditionList(economy) {
+  refreshResourceExpeditionLegacyMirror(economy);
+  return economy.resourceExpeditions;
+}
+
+function refreshResourceExpeditionLegacyMirror(economy) {
+  if (!economy || typeof economy !== "object") return;
+  var hadExpeditionsArray = Array.isArray(economy.resourceExpeditions);
+  var valid = [];
+  var rows = dedupeExpeditionRows(economy.resourceExpeditions);
+  for (var i = 0; i < rows.length; i++) {
+    var row = rows[i];
+    if (!row || typeof row !== "object") continue;
+    if (!String(row.id || "").trim()) continue;
+    valid.push(row);
+  }
+
+  var legacy = economy.resourceExpedition;
+  // Only use the legacy single-expedition mirror for old states where
+  // the expedition array does not exist yet. If the array exists, it is authoritative.
+  if (!hadExpeditionsArray && valid.length <= 0 && legacy && typeof legacy === "object" && String(legacy.id || "").trim()) {
+    valid.push(legacy);
+  }
+
+  economy.resourceExpeditions = valid;
+  economy.resourceExpedition = valid.length > 0 ? valid[0] : null;
+}
+
+function findResourceExpeditionById(economy, expeditionId) {
+  var targetId = String(expeditionId || "").trim();
+  if (!targetId) return null;
+  var expeditions = getResourceExpeditionList(economy);
+  for (var i = 0; i < expeditions.length; i++) {
+    var row = expeditions[i];
+    if (!row || typeof row !== "object") continue;
+    if (String(row.id || "") === targetId) return row;
+  }
+  return null;
+}
+
+function buildActiveOccupationIndexFromExpeditions(expeditions, serverNowTs) {
+  var now = sanitizePositiveInt(Number(serverNowTs || nowTs()));
+  var index = {};
+  var rows = Array.isArray(expeditions) ? expeditions : [];
+  for (var i = 0; i < rows.length; i++) {
+    var exp = rows[i];
+    if (!exp || typeof exp !== "object") continue;
+    var expId = String(exp.id || "").trim();
+    var fieldId = String(exp.fieldId || "").trim();
+    var status = String(exp.status || "").trim().toLowerCase();
+    var returnStartAt = sanitizePositiveInt(Number(exp.returnStartAt || 0));
+    var returnEndAt = sanitizePositiveInt(Number(exp.returnEndAt || 0));
+    if (!expId || !fieldId) continue;
+    if (status === "returning") continue;
+    if (returnStartAt > 0 && returnEndAt > 0 && now >= returnEndAt) continue;
+    index[fieldId + "::" + expId] = true;
+  }
+  return index;
+}
+
+function readOwnerActiveOccupationIndex(nk, ownerUserId, cache, serverNowTs) {
+  var ownerId = String(ownerUserId || "").trim();
+  if (!ownerId) return {};
+  if (cache && Object.prototype.hasOwnProperty.call(cache, ownerId)) {
+    return cache[ownerId] || {};
+  }
+  var economy = defaultEconomyState();
+  try {
+    var read = nk.storageRead([
+      { collection: ECONOMY_COLLECTION, key: ECONOMY_KEY, userId: ownerId }
+    ]);
+    if (Array.isArray(read) && read.length > 0 && read[0] && read[0].value && typeof read[0].value === "object") {
+      economy = read[0].value;
+    }
+  } catch (_err) {
+    economy = defaultEconomyState();
+  }
+  ensureResourceExpeditionState(economy);
+  var index = buildActiveOccupationIndexFromExpeditions(getResourceExpeditionList(economy), serverNowTs);
+  if (cache) cache[ownerId] = index;
+  return index;
+}
+
+function reconcileMapOccupancyForPlayer(nk, economy, mapState, userId, username) {
+  var changed = false;
+  var fields = Array.isArray(mapState && mapState.fields) ? mapState.fields : [];
+  var expeditions = getResourceExpeditionList(economy);
+  var now = nowTs();
+  var selfActiveIndex = buildActiveOccupationIndexFromExpeditions(expeditions, now);
+  var ownerCache = {};
+  var selfId = String(userId || "");
+
+  for (var f = 0; f < fields.length; f++) {
+    var field = fields[f];
+    if (!field || typeof field !== "object") continue;
+    if (!field.isOccupied) continue;
+    var fieldOwnerId = String(field.occupiedByPlayerId || "").trim();
+    var fleetId = String(field.occupyingFleetId || "");
+    var key = String(field.id || "") + "::" + fleetId;
+    var isValid = false;
+
+    if (fieldOwnerId && fleetId) {
+      if (fieldOwnerId === selfId) {
+        isValid = Boolean(selfActiveIndex[key]);
+      } else if (nk && typeof nk.storageRead === "function") {
+        var ownerActiveIndex = readOwnerActiveOccupationIndex(nk, fieldOwnerId, ownerCache, now);
+        isValid = Boolean(ownerActiveIndex[key]);
+      } else {
+        isValid = true;
+      }
+    }
+
+    if (!isValid) {
+      clearFieldOccupation(field);
+      changed = true;
+    }
+  }
+
+  var displayUsername = String(username || userId || "");
+  for (var j = 0; j < expeditions.length; j++) {
+    var expedition = expeditions[j];
+    if (!expedition || typeof expedition !== "object") continue;
+    var expeditionStatus = String(expedition.status || "").trim().toLowerCase();
+    if (expeditionStatus === "returning") continue;
+    var expField = findMapField(mapState, expedition.fieldId);
+    if (!expField) continue;
+    var expId = String(expedition.id || "");
+    if (!expId) continue;
+
+    if (!expField.isOccupied) {
+      expField.isOccupied = true;
+      changed = true;
+    }
+    if (String(expField.occupiedByPlayerId || "") !== String(userId || "")) {
+      expField.occupiedByPlayerId = String(userId || "");
+      changed = true;
+    }
+    if (String(expField.occupiedByUsername || "") !== displayUsername) {
+      expField.occupiedByUsername = displayUsername;
+      changed = true;
+    }
+    if (String(expField.occupyingFleetId || "") !== expId) {
+      expField.occupyingFleetId = expId;
+      changed = true;
+    }
+  }
+
+  return changed;
+}
+
+function countBlockingResourceExpeditions(expeditions, serverNowTs) {
+  var now = sanitizePositiveInt(Number(serverNowTs || nowTs()));
+  var rows = Array.isArray(expeditions) ? expeditions : [];
+  var count = 0;
+  for (var i = 0; i < rows.length; i++) {
+    var exp = rows[i];
+    if (!exp || typeof exp !== "object") continue;
+    if (!String(exp.id || "").trim()) continue;
+    var status = String(exp.status || "").trim().toLowerCase();
+    var returnEndAt = sanitizePositiveInt(Number(exp.returnEndAt || 0));
+    if (status === "returning" && returnEndAt > 0 && now >= returnEndAt) continue;
+    count += 1;
+  }
+  return count;
+}
+
+function getReservedHarvestShipsByExpeditions(economy) {
+  ensureResourceExpeditionState(economy);
+  var now = nowTs();
+  var reserved = {};
+  var expeditions = getResourceExpeditionList(economy);
+  for (var i = 0; i < expeditions.length; i++) {
+    var expedition = expeditions[i];
+    if (!expedition || typeof expedition !== "object") continue;
+    var status = String(expedition.status || "").trim().toLowerCase();
+    var returnEndAt = sanitizePositiveInt(Number(expedition.returnEndAt || 0));
+    if (status === "returning" && returnEndAt > 0 && now >= returnEndAt) continue;
+    var fleet = Array.isArray(expedition.fleet) ? expedition.fleet : [];
+    for (var j = 0; j < fleet.length; j++) {
+      var row = fleet[j] || {};
+      var unitId = String(row.unitId || "").trim();
+      var qty = sanitizePositiveInt(Number(row.quantity || 0));
+      if (!unitId || qty <= 0) continue;
+      reserved[unitId] = sanitizePositiveInt(Number(reserved[unitId] || 0)) + qty;
+    }
+  }
+  return reserved;
+}
+
+function calculateMapActiveFleetSlotsForLevel(level) {
+  var lvl = sanitizePositiveInt(Number(level || 0));
+  var slots = MAP_BASE_ACTIVE_FLEET_SLOTS + Math.floor(lvl / MAP_ACTIVE_FLEET_SLOT_STEP);
+  return Math.max(MAP_BASE_ACTIVE_FLEET_SLOTS, Math.min(MAP_ACTIVE_FLEET_SLOTS_MAX, slots));
+}
+
+function resolveMapActiveFleetSlots(economy, payloadLevel) {
+  ensureResourceExpeditionState(economy);
+  var storedLevel = sanitizePositiveInt(Number(economy.commandementEscadreLevel || 0));
+  var incomingLevel = sanitizePositiveInt(Number(payloadLevel || 0));
+  var mergedLevel = Math.max(storedLevel, incomingLevel);
+  economy.commandementEscadreLevel = mergedLevel;
+  return calculateMapActiveFleetSlotsForLevel(mergedLevel);
 }
 
 function defaultMapFieldState() {
@@ -472,11 +749,9 @@ function pickByWeight(entries) {
 
 function resourceWeightForField(resourceId, rarityConfig) {
   var rarity = RESOURCE_RARITY[resourceId] || 100;
-  var base = 1 / rarity;
-  var tier = RESOURCE_TIERS[resourceId] || 10;
-  var tierScale = Math.max(1, rarityConfig.maxTier || 1);
-  var advancedBias = 1 + ((tier - 1) / 9) * (tierScale / 10);
-  return base * advancedBias;
+  if (rarity <= 0) return 0;
+  // Inverse rarity weighting: common resources appear more often than rare ones.
+  return 1 / rarity;
 }
 
 function pickDistinctWeightedResources(allowedResourceIds, count, rarityConfig) {
@@ -519,6 +794,31 @@ function clampNumber(value, min, max) {
   if (v < min) return min;
   if (v > max) return max;
   return v;
+}
+
+function normalizeStoredString(value) {
+  return String(value || "").trim();
+}
+
+function isNullLikeString(value) {
+  var v = normalizeStoredString(value).toLowerCase();
+  return v === "" || v === "false" || v === "null" || v === "undefined" || v === "none" || v === "0" || v === "nan";
+}
+
+function normalizeStoredId(value) {
+  var raw = normalizeStoredString(value);
+  if (!raw) return "";
+  if (isNullLikeString(raw)) return "";
+  return raw;
+}
+
+function normalizeStoredBool(value, fallback) {
+  if (value === true || value === false) return value;
+  if (typeof value === "number") return value > 0;
+  var raw = normalizeStoredString(value).toLowerCase();
+  if (raw === "true" || raw === "1" || raw === "yes" || raw === "on") return true;
+  if (raw === "false" || raw === "0" || raw === "no" || raw === "off" || raw === "null" || raw === "undefined" || raw === "none" || raw === "") return false;
+  return Boolean(fallback);
 }
 
 function randomFloat(min, max) {
@@ -590,13 +890,19 @@ function buildMapFieldResources(rarityCfg, qualityCfg) {
   var allowed = [];
   for (var i = 0; i < RESOURCE_IDS.length; i++) {
     var rid = RESOURCE_IDS[i];
-    if ((RESOURCE_TIERS[rid] || 10) <= rarityCfg.maxTier) allowed.push(rid);
+    if ((RESOURCE_RARITY[rid] || 10) <= sanitizePositiveInt(rarityCfg.maxTier || 25)) allowed.push(rid);
   }
-  if (allowed.length <= 0) allowed = ["carbone", "titane"];
+  if (allowed.length <= 0) allowed = ["carbone", "titane", "osmium"];
 
-  var typeCount = randomIntInclusive(rarityCfg.minTypes, rarityCfg.maxTypes);
+  // Design rule: each field carries between 2 and 5 resource types.
+  var typeCount = randomIntInclusive(2, 5);
+  if (Number.isFinite(rarityCfg.minTypes)) typeCount = Math.max(typeCount, sanitizePositiveInt(rarityCfg.minTypes));
+  if (Number.isFinite(rarityCfg.maxTypes) && sanitizePositiveInt(rarityCfg.maxTypes) > 0) {
+    typeCount = Math.min(typeCount, sanitizePositiveInt(rarityCfg.maxTypes));
+  }
+  typeCount = Math.max(2, Math.min(typeCount, allowed.length));
   var selected = pickDistinctWeightedResources(allowed, typeCount, rarityCfg);
-  if (selected.length <= 0) selected = [allowed[0]];
+  if (selected.length <= 0) selected = allowed.slice(0, Math.min(2, allowed.length));
 
   var rows = [];
   for (var j = 0; j < selected.length; j++) {
@@ -661,6 +967,18 @@ function createMapField(nk, mapState, existingFields, playerPositions, serverNow
   };
 }
 
+function generateResourceField(nk, mapState, existingFields, playerPositions, serverNowTs) {
+  return createMapField(nk, mapState, existingFields, playerPositions, serverNowTs);
+}
+
+function respawnResourceField(nk, mapState, serverNowTs) {
+  var playerPositions = listMapPlayerPositions(nk);
+  var created = generateResourceField(nk, mapState, mapState.fields || [], playerPositions, serverNowTs);
+  if (!Array.isArray(mapState.fields)) mapState.fields = [];
+  mapState.fields.push(created);
+  return created;
+}
+
 function normalizeMapField(field, serverNowTs) {
   if (!field || typeof field !== "object") return null;
   var id = String(field.id || "").trim();
@@ -690,6 +1008,20 @@ function normalizeMapField(field, serverNowTs) {
   if (remainingWork > totalWork) remainingWork = totalWork;
   var spawnedAt = sanitizePositiveInt(field.spawnedAt || serverNowTs);
   var expiresAt = sanitizePositiveInt(field.expiresAt || (serverNowTs + MAP_FIELD_MIN_LIFETIME_SEC));
+  var occupiedByPlayerId = normalizeStoredId(field.occupiedByPlayerId);
+  var occupiedByUsername = normalizeStoredString(field.occupiedByUsername);
+  var occupyingFleetId = normalizeStoredId(field.occupyingFleetId);
+  var isOccupied = normalizeStoredBool(field.isOccupied, false);
+  if (!occupiedByPlayerId && !occupyingFleetId) {
+    isOccupied = false;
+  } else if (!isOccupied) {
+    isOccupied = true;
+  }
+  if (!isOccupied) {
+    occupiedByPlayerId = "";
+    occupiedByUsername = "";
+    occupyingFleetId = "";
+  }
   return {
     id: id,
     x: x,
@@ -701,10 +1033,10 @@ function normalizeMapField(field, serverNowTs) {
     remainingExtractionWork: remainingWork,
     spawnedAt: spawnedAt,
     expiresAt: expiresAt,
-    occupiedByPlayerId: String(field.occupiedByPlayerId || ""),
-    occupiedByUsername: String(field.occupiedByUsername || ""),
-    occupyingFleetId: String(field.occupyingFleetId || ""),
-    isOccupied: Boolean(field.isOccupied),
+    occupiedByPlayerId: occupiedByPlayerId,
+    occupiedByUsername: occupiedByUsername,
+    occupyingFleetId: occupyingFleetId,
+    isOccupied: isOccupied,
     isVisible: field.isVisible !== false
   };
 }
@@ -739,7 +1071,7 @@ function ensureMapFieldsSeeded(nk, mapState, serverNowTs) {
   }
   var playerPositions = listMapPlayerPositions(nk);
   while (mapState.fields.length < MAP_TARGET_FIELD_COUNT) {
-    var created = createMapField(nk, mapState, mapState.fields, playerPositions, serverNowTs);
+    var created = generateResourceField(nk, mapState, mapState.fields, playerPositions, serverNowTs);
     mapState.fields.push(created);
   }
   mapState.updatedAt = serverNowTs;
@@ -757,6 +1089,7 @@ function findMapField(mapState, fieldId) {
 function calculateFleetHarvestStats(economy, fleetInput) {
   ensureHangarState(economy);
   if (!Array.isArray(fleetInput) || fleetInput.length <= 0) throw new Error("Fleet payload is required.");
+  var reservedByExpeditions = getReservedHarvestShipsByExpeditions(economy);
   var normalizedFleet = [];
   var consumed = {};
   var totalHarvestSpeed = 0;
@@ -775,7 +1108,9 @@ function calculateFleetHarvestStats(economy, fleetInput) {
     var stats = MAP_HARVEST_UNIT_STATS[unitId];
     if (!stats) throw new Error("Ship cannot harvest: " + unitId);
     var already = consumed[unitId] || 0;
-    var available = sanitizePositiveInt(economy.hangarInventory[unitId] || 0);
+    var inventoryAmount = sanitizePositiveInt(economy.hangarInventory[unitId] || 0);
+    var reservedAmount = sanitizePositiveInt(reservedByExpeditions[unitId] || 0);
+    var available = Math.max(0, inventoryAmount - reservedAmount);
     if (already + quantity > available) throw new Error("Not enough available ships for " + unitId + ".");
     consumed[unitId] = already + quantity;
   }
@@ -818,13 +1153,53 @@ function calculateMapExtractionSeconds(totalWork, totalHarvestSpeed) {
   return Math.floor(clampNumber(raw, MAP_MIN_EXTRACTION_SECONDS, MAP_MAX_EXTRACTION_SECONDS));
 }
 
-function mapFieldResourcesToMap(field) {
+function getAvailableResourcesForPlayer(player) {
   var out = {};
+  var buildings = player && player.buildings && typeof player.buildings === "object" ? player.buildings : {};
+  for (var i = 0; i < RESOURCE_IDS.length; i++) {
+    var rid = RESOURCE_IDS[i];
+    var level = sanitizePositiveInt(Number((buildings[rid] && buildings[rid].level) || 0));
+    if (level > 0) out[rid] = true;
+  }
+  return out;
+}
+
+function calculateHarvestSpeed(fleetRows) {
+  var rows = Array.isArray(fleetRows) ? fleetRows : [];
+  var totalHarvestSpeed = 0;
+  for (var i = 0; i < rows.length; i++) {
+    var row = rows[i] || {};
+    var unitId = String(row.unitId || "").trim();
+    var qty = sanitizePositiveInt(Number(row.quantity || 0));
+    if (!unitId || qty <= 0) continue;
+    var stats = MAP_HARVEST_UNIT_STATS[unitId];
+    if (!stats) continue;
+    totalHarvestSpeed += sanitizePositiveInt(Number(stats.harvestSpeed || 0)) * qty;
+  }
+  return totalHarvestSpeed;
+}
+
+function calculatePlayerHarvestScore(state) {
+  var points = computePlayerPointBreakdown(state);
+  return sanitizePositiveInt(points && points.total || 0);
+}
+
+function calculateHarvestScoreBonus(playerScore) {
+  var safeScore = Math.max(1, sanitizePositiveInt(Number(playerScore || 0)));
+  var bonus = 1 + Math.log10(safeScore) * 0.05;
+  if (!Number.isFinite(bonus)) bonus = 1;
+  return clampNumber(bonus, 1, 2);
+}
+
+function mapFieldResourcesToMap(field, allowedResources) {
+  var out = {};
+  var allowed = allowedResources && typeof allowedResources === "object" ? allowedResources : null;
   var resources = Array.isArray(field.resources) ? field.resources : [];
   for (var i = 0; i < resources.length; i++) {
     var row = resources[i];
     var rid = String(row.resourceId || "").trim();
     if (!rid) continue;
+    if (allowed && !allowed[rid]) continue;
     out[rid] = sanitizePositiveInt(row.remainingAmount || 0);
   }
   return out;
@@ -849,23 +1224,47 @@ function sumResourceMap(values) {
   return total;
 }
 
-function settleHarvestAgainstField(field, expedition, progressRatio) {
-  var ratio = clampNumber(progressRatio, 0, 1);
-  var snapshot = expedition.snapshotResources && typeof expedition.snapshotResources === "object"
-    ? expedition.snapshotResources
-    : mapFieldResourcesToMap(field);
-  var currentRemaining = mapFieldResourcesToMap(field);
-  var potential = {};
+function calculateHarvestedResources(fieldResources, fleetRows, playerScore, harvestTimeSeconds) {
+  var snapshot = fieldResources && typeof fieldResources === "object" ? fieldResources : {};
+  var elapsed = Math.max(0, sanitizePositiveInt(Number(harvestTimeSeconds || 0)));
+  var fleetHarvestSpeed = Math.max(0, calculateHarvestSpeed(fleetRows));
+  var scoreBonus = calculateHarvestScoreBonus(playerScore);
+  var harvestedByResource = {};
+
+  if (elapsed <= 0 || fleetHarvestSpeed <= 0) {
+    return {
+      fleetHarvestSpeed: fleetHarvestSpeed,
+      scoreBonus: scoreBonus,
+      harvestedByResource: harvestedByResource
+    };
+  }
+
   var keys = Object.keys(snapshot);
   for (var i = 0; i < keys.length; i++) {
     var rid = keys[i];
-    var startAmount = sanitizePositiveInt(snapshot[rid] || 0);
-    if (startAmount <= 0) continue;
-    potential[rid] = Math.floor(startAmount * ratio);
+    var maxAmount = sanitizePositiveInt(snapshot[rid] || 0);
+    if (maxAmount <= 0) continue;
+    var rarity = Math.max(1, sanitizePositiveInt(RESOURCE_RARITY[rid] || 100));
+    var coefficient = 1 / rarity;
+    var value = Math.floor(elapsed * fleetHarvestSpeed * scoreBonus * coefficient);
+    var harvested = Math.max(0, Math.min(maxAmount, value));
+    if (harvested > 0) harvestedByResource[rid] = harvested;
   }
 
+  return {
+    fleetHarvestSpeed: fleetHarvestSpeed,
+    scoreBonus: scoreBonus,
+    harvestedByResource: harvestedByResource
+  };
+}
+
+function resolveReturnResources(harvestedByResource, currentRemainingByResource, totalTransportCapacity) {
+  var potential = harvestedByResource && typeof harvestedByResource === "object" ? harvestedByResource : {};
+  var remaining = currentRemainingByResource && typeof currentRemainingByResource === "object"
+    ? JSON.parse(JSON.stringify(currentRemainingByResource))
+    : {};
+  var capacity = Math.max(0, sanitizePositiveInt(Number(totalTransportCapacity || 0)));
   var totalPotential = sumResourceMap(potential);
-  var capacity = Math.max(0, sanitizePositiveInt(expedition.totalTransportCapacity || 0));
   var scale = 1;
   if (capacity > 0 && totalPotential > capacity) {
     scale = capacity / totalPotential;
@@ -873,23 +1272,47 @@ function settleHarvestAgainstField(field, expedition, progressRatio) {
 
   var collected = {};
   var collectedTotal = 0;
-  var pKeys = Object.keys(potential);
-  for (var j = 0; j < pKeys.length; j++) {
-    var resourceId = pKeys[j];
-    var scaled = Math.floor((potential[resourceId] || 0) * scale);
-    var current = sanitizePositiveInt(currentRemaining[resourceId] || 0);
-    var picked = Math.max(0, Math.min(current, scaled));
-    if (picked > 0) {
-      collected[resourceId] = picked;
-      currentRemaining[resourceId] = current - picked;
-      collectedTotal += picked;
-    }
+  var keys = Object.keys(potential);
+  for (var i = 0; i < keys.length; i++) {
+    var rid = keys[i];
+    var expected = Math.max(0, Math.floor(sanitizePositiveInt(potential[rid] || 0) * scale));
+    var fieldRemaining = sanitizePositiveInt(remaining[rid] || 0);
+    var picked = Math.max(0, Math.min(fieldRemaining, expected));
+    if (picked <= 0) continue;
+    collected[rid] = picked;
+    remaining[rid] = fieldRemaining - picked;
+    collectedTotal += picked;
   }
+
+  return {
+    collected: collected,
+    collectedTotal: collectedTotal,
+    remainingByResource: remaining
+  };
+}
+
+function settleHarvestAgainstField(field, expedition, progressRatio) {
+  var ratio = clampNumber(progressRatio, 0, 1);
+  var snapshot = expedition.snapshotResources && typeof expedition.snapshotResources === "object"
+    ? expedition.snapshotResources
+    : mapFieldResourcesToMap(field);
+  var currentRemaining = mapFieldResourcesToMap(field);
+  var extractionSeconds = Math.max(1, sanitizePositiveInt(expedition.extractionSeconds || MAP_MIN_EXTRACTION_SECONDS));
+  var harvestTimeSeconds = Math.floor(extractionSeconds * ratio);
+  var playerScore = sanitizePositiveInt(expedition.playerScore || 0);
+  var harvestModel = calculateHarvestedResources(snapshot, expedition.fleet, playerScore, harvestTimeSeconds);
+  var resolved = resolveReturnResources(
+    harvestModel.harvestedByResource,
+    currentRemaining,
+    expedition.totalTransportCapacity
+  );
+  var collected = resolved.collected;
+  var collectedTotal = resolved.collectedTotal;
 
   var snapshotTotal = Math.max(1, sumResourceMap(snapshot));
   var workSpent = Math.floor((field.totalExtractionWork || 0) * (collectedTotal / snapshotTotal));
   field.remainingExtractionWork = Math.max(0, sanitizePositiveInt(field.remainingExtractionWork || 0) - workSpent);
-  writeMapToFieldResources(field, currentRemaining);
+  writeMapToFieldResources(field, resolved.remainingByResource);
 
   var hasRemaining = false;
   var resources = Array.isArray(field.resources) ? field.resources : [];
@@ -952,8 +1375,9 @@ function settleReturningExpedition(economy, inventory, expedition, serverNowTs) 
     inventory.mapDropNotifications = sanitizePositiveInt(inventory.mapDropNotifications || 0) + 1;
   }
 
+  var expeditionId = String(expedition.id || "").trim();
   var report = {
-    id: makeServerId("mrep", serverNowTs),
+    id: expeditionId ? ("mrep_" + expeditionId) : makeServerId("mrep", serverNowTs),
     fieldId: String(expedition.fieldId || ""),
     at: serverNowTs,
     resources: addedResources,
@@ -972,32 +1396,14 @@ function estimateExpeditionCollected(expedition, serverNowTs) {
   if (startAt <= 0 || endAt <= startAt) return {};
   var duration = Math.max(1, endAt - startAt);
   var elapsed = clampNumber(sanitizePositiveInt(serverNowTs || 0) - startAt, 0, duration);
-  var ratio = elapsed / duration;
-
-  var potential = {};
-  var keys = Object.keys(snapshot);
-  for (var i = 0; i < keys.length; i++) {
-    var rid = keys[i];
-    var startAmount = sanitizePositiveInt(snapshot[rid] || 0);
-    if (startAmount <= 0) continue;
-    potential[rid] = Math.floor(startAmount * ratio);
-  }
-
-  var totalPotential = sumResourceMap(potential);
-  var capacity = Math.max(0, sanitizePositiveInt(expedition && expedition.totalTransportCapacity || 0));
-  var scale = 1;
-  if (capacity > 0 && totalPotential > capacity) {
-    scale = capacity / totalPotential;
-  }
-
-  var collected = {};
-  var pKeys = Object.keys(potential);
-  for (var j = 0; j < pKeys.length; j++) {
-    var resourceId = pKeys[j];
-    var picked = Math.max(0, Math.floor((potential[resourceId] || 0) * scale));
-    if (picked > 0) collected[resourceId] = picked;
-  }
-  return collected;
+  var playerScore = sanitizePositiveInt(expedition && expedition.playerScore || 0);
+  var harvested = calculateHarvestedResources(snapshot, expedition && expedition.fleet, playerScore, elapsed);
+  var resolved = resolveReturnResources(
+    harvested.harvestedByResource,
+    snapshot,
+    expedition && expedition.totalTransportCapacity
+  );
+  return resolved.collected;
 }
 
 function mapHarvestReportBody(report) {
@@ -1043,10 +1449,26 @@ function mapHarvestReportBody(report) {
 
 function createMapHarvestRewardMessage(nk, userId, report) {
   if (!report || typeof report !== "object") return;
+  var reportId = String(report.id || "").trim();
+  var messageId = "map_harvest_" + (reportId || makeServerId("mrep", nowTs()));
+  var existing = nk.storageRead([
+    { collection: INBOX_COLLECTION, key: messageId, userId: userId }
+  ]);
+  if (Array.isArray(existing) && existing.length > 0 && existing[0] && existing[0].value) {
+    return;
+  }
   var fieldSuffix = String(report.fieldId || "").slice(-4).toUpperCase();
   var title = "Rapport d'exploitation " + (fieldSuffix ? ("#" + fieldSuffix) : "");
   var body = "Votre flotte de collecte est revenue.\n\n" + mapHarvestReportBody(report);
-  createRewardMessage(nk, userId, {}, title, body);
+  createInboxMessageForUser(nk, userId, {
+    id: messageId,
+    type: "REWARD",
+    title: title,
+    body: body,
+    attachments: {},
+    meta: { kind: "MAP_HARVEST_REPORT", reportId: reportId },
+    expiresAt: nowTs() + 60 * 60 * 24 * 60
+  });
 }
 
 function serializeMapFieldForViewer(field, viewerUserId) {
@@ -1109,6 +1531,8 @@ function serializeMapExpedition(expedition, serverNowTs) {
     extractionSeconds: sanitizePositiveInt(expedition.extractionSeconds || 0),
     totalHarvestSpeed: sanitizePositiveInt(expedition.totalHarvestSpeed || 0),
     totalTransportCapacity: sanitizePositiveInt(expedition.totalTransportCapacity || 0),
+    playerScore: sanitizePositiveInt(expedition.playerScore || 0),
+    scoreBonus: Number.isFinite(Number(expedition.scoreBonus || 0)) ? Number(expedition.scoreBonus || 0) : 1,
     fleet: Array.isArray(expedition.fleet) ? expedition.fleet : [],
     snapshotResources: snapshotResources,
     collectedResources: collectedResources,
@@ -1116,65 +1540,149 @@ function serializeMapExpedition(expedition, serverNowTs) {
   };
 }
 
-function syncMapExpedition(economy, inventory, mapState, userId, username, serverNowTs) {
+function syncMapExpeditions(economy, inventory, mapState, userId, username, serverNowTs) {
   ensureResourceExpeditionState(economy);
-  var expedition = economy.resourceExpedition;
-  if (!expedition) return { changed: false, report: null };
+  var expeditions = dedupeExpeditionRows(getResourceExpeditionList(economy));
+  economy.resourceExpeditions = expeditions;
+  if (expeditions.length <= 0) return { changed: false, report: null, reports: [] };
   var changed = false;
-  var report = null;
-  var field = findMapField(mapState, expedition.fieldId);
+  var reports = [];
 
-  if (expedition.status === "travel_to_field" && serverNowTs >= sanitizePositiveInt(expedition.arrivalAt || 0)) {
-    expedition.status = "extracting";
-    expedition.extractionStartAt = sanitizePositiveInt(expedition.arrivalAt || serverNowTs);
-    expedition.extractionEndAt = expedition.extractionStartAt + sanitizePositiveInt(expedition.extractionSeconds || MAP_MIN_EXTRACTION_SECONDS);
-    expedition.updatedAt = serverNowTs;
-    changed = true;
-  }
-
-  if (expedition.status === "extracting" && serverNowTs >= sanitizePositiveInt(expedition.extractionEndAt || 0)) {
-    if (field) {
-      var fullOutcome = settleHarvestAgainstField(field, expedition, 1);
-      expedition.collectedResources = fullOutcome.collected;
-      var drop = rollMapFieldDrop();
-      expedition.dropItemId = drop.itemId;
-      expedition.dropQuantity = drop.quantity;
-      clearFieldOccupation(field);
-      if (!fullOutcome.hasRemaining) {
-        field.remainingExtractionWork = 0;
-        field.expiresAt = serverNowTs;
-      }
-    } else {
-      expedition.collectedResources = {};
-      expedition.dropItemId = "";
-      expedition.dropQuantity = 0;
+  for (var i = expeditions.length - 1; i >= 0; i--) {
+    var expedition = expeditions[i];
+    if (!expedition || typeof expedition !== "object") {
+      expeditions.splice(i, 1);
+      changed = true;
+      continue;
     }
-    expedition.status = "returning";
-    expedition.returnStartAt = serverNowTs;
-    expedition.returnEndAt = serverNowTs + sanitizePositiveInt(expedition.travelSeconds || MAP_MIN_TRAVEL_SECONDS);
-    expedition.updatedAt = serverNowTs;
-    changed = true;
+    var status = String(expedition.status || "travel_to_field").trim().toLowerCase();
+    if (String(expedition.status || "") !== status) {
+      expedition.status = status;
+      changed = true;
+    }
+    if (status !== "travel_to_field" && status !== "extracting" && status !== "returning") {
+      if (sanitizePositiveInt(expedition.returnStartAt || 0) > 0) {
+        status = "returning";
+      } else if (sanitizePositiveInt(expedition.extractionStartAt || 0) > 0) {
+        status = "extracting";
+      } else {
+        status = "travel_to_field";
+      }
+      expedition.status = status;
+      changed = true;
+    }
+    var field = findMapField(mapState, expedition.fieldId);
+
+    if (status === "travel_to_field" && serverNowTs >= sanitizePositiveInt(expedition.arrivalAt || 0)) {
+      expedition.status = "extracting";
+      status = "extracting";
+      expedition.extractionStartAt = sanitizePositiveInt(expedition.arrivalAt || serverNowTs);
+      expedition.extractionEndAt = expedition.extractionStartAt + sanitizePositiveInt(expedition.extractionSeconds || MAP_MIN_EXTRACTION_SECONDS);
+      expedition.updatedAt = serverNowTs;
+      changed = true;
+    }
+
+    if (status === "extracting" && serverNowTs >= sanitizePositiveInt(expedition.extractionEndAt || 0)) {
+      if (field) {
+        var fullOutcome = settleHarvestAgainstField(field, expedition, 1);
+        expedition.collectedResources = fullOutcome.collected;
+        var drop = rollMapFieldDrop();
+        expedition.dropItemId = drop.itemId;
+        expedition.dropQuantity = drop.quantity;
+        clearFieldOccupation(field);
+        if (!fullOutcome.hasRemaining) {
+          field.remainingExtractionWork = 0;
+          field.expiresAt = serverNowTs;
+        }
+      } else {
+        expedition.collectedResources = {};
+        expedition.dropItemId = "";
+        expedition.dropQuantity = 0;
+      }
+      expedition.status = "returning";
+      status = "returning";
+      expedition.returnStartAt = serverNowTs;
+      expedition.returnEndAt = serverNowTs + sanitizePositiveInt(expedition.travelSeconds || MAP_MIN_TRAVEL_SECONDS);
+      expedition.updatedAt = serverNowTs;
+      changed = true;
+    }
+
+    var normalizedReturnEndAt = sanitizePositiveInt(expedition.returnEndAt || 0);
+    if (status === "returning" && normalizedReturnEndAt <= 0) {
+      normalizedReturnEndAt = sanitizePositiveInt(serverNowTs);
+      expedition.returnEndAt = normalizedReturnEndAt;
+      expedition.updatedAt = serverNowTs;
+      changed = true;
+    }
+
+    if (status === "returning" && serverNowTs >= normalizedReturnEndAt) {
+      var settledExpeditionId = String(expedition.id || "").trim();
+      var settledAt = sanitizePositiveInt(expedition.settledAt || 0);
+      if (settledAt <= 0) {
+        expedition.settledAt = serverNowTs;
+        try {
+          reports.push(settleReturningExpedition(economy, inventory, expedition, serverNowTs));
+        } catch (_settleErr) {
+          // Failsafe: never keep a returning expedition stuck forever.
+        }
+      }
+      if (field) clearFieldOccupation(field);
+      expeditions.splice(i, 1);
+      if (
+        economy.resourceExpedition &&
+        String(economy.resourceExpedition.id || "").trim() === settledExpeditionId
+      ) {
+        economy.resourceExpedition = null;
+      }
+      changed = true;
+    }
   }
 
-  if (expedition.status === "returning" && serverNowTs >= sanitizePositiveInt(expedition.returnEndAt || 0)) {
-    report = settleReturningExpedition(economy, inventory, expedition, serverNowTs);
-    economy.resourceExpedition = null;
-    changed = true;
-  }
-
-  return { changed: changed, report: report };
+  refreshResourceExpeditionLegacyMirror(economy);
+  return { changed: changed, report: reports.length > 0 ? reports[0] : null, reports: reports };
 }
 
-function startMapExpedition(economy, mapState, userId, username, fieldId, fleetInput, serverNowTs) {
+function syncMapExpedition(economy, inventory, mapState, userId, username, serverNowTs) {
+  // Backward-compatible alias used by existing callsites.
+  return syncMapExpeditions(economy, inventory, mapState, userId, username, serverNowTs);
+}
+
+function startMapExpedition(economy, mapState, userId, username, fieldId, fleetInput, serverNowTs, maxActiveSlots, nk) {
   ensureResourceExpeditionState(economy);
-  if (economy.resourceExpedition) throw new Error("An expedition is already active.");
+  var expeditions = coerceObjectList(getResourceExpeditionList(economy));
+  economy.resourceExpeditions = expeditions;
+  var slotCap = Math.max(1, sanitizePositiveInt(Number(maxActiveSlots || 1)));
+  var blockingExpeditions = countBlockingResourceExpeditions(expeditions, serverNowTs);
+  if (blockingExpeditions >= slotCap) {
+    throw new Error("Active fleet slot limit reached (" + blockingExpeditions + "/" + slotCap + ").");
+  }
   var field = findMapField(mapState, fieldId);
   if (!field) throw new Error("Resource field not found.");
+  if (field.isOccupied) {
+    var fieldOwnerId = String(field.occupiedByPlayerId || "");
+    var fleetId = String(field.occupyingFleetId || "");
+    var key = String(field.id || "") + "::" + fleetId;
+    var activeIndex = null;
+    if (fieldOwnerId === String(userId || "")) {
+      activeIndex = buildActiveOccupationIndexFromExpeditions(getResourceExpeditionList(economy), serverNowTs);
+    } else if (nk && typeof nk.storageRead === "function") {
+      activeIndex = readOwnerActiveOccupationIndex(nk, fieldOwnerId, {}, serverNowTs);
+    }
+    if (!fieldOwnerId || !fleetId || !activeIndex || !activeIndex[key]) {
+      clearFieldOccupation(field);
+    }
+  }
   if (field.isOccupied) throw new Error("Resource field is already occupied.");
   var stats = calculateFleetHarvestStats(economy, fleetInput);
   var travelSeconds = calculateMapTravelSeconds(userId, field.x, field.y, stats.mapSpeed);
   var extractionSeconds = calculateMapExtractionSeconds(field.remainingExtractionWork, stats.totalHarvestSpeed);
-  var snapshot = mapFieldResourcesToMap(field);
+  var allowedResources = getAvailableResourcesForPlayer(economy);
+  var snapshot = mapFieldResourcesToMap(field, allowedResources);
+  if (sumResourceMap(snapshot) <= 0) {
+    throw new Error("No harvestable resources unlocked for this field.");
+  }
+  var playerScore = calculatePlayerHarvestScore(economy);
+  var scoreBonus = calculateHarvestScoreBonus(playerScore);
 
   var expedition = {
     id: makeServerId("exp", serverNowTs),
@@ -1196,9 +1704,12 @@ function startMapExpedition(economy, mapState, userId, username, fieldId, fleetI
     returnStartAt: 0,
     returnEndAt: 0,
     snapshotResources: snapshot,
+    playerScore: playerScore,
+    scoreBonus: scoreBonus,
     collectedResources: {},
     dropItemId: "",
     dropQuantity: 0,
+    settledAt: 0,
     updatedAt: serverNowTs
   };
 
@@ -1207,14 +1718,38 @@ function startMapExpedition(economy, mapState, userId, username, fieldId, fleetI
   field.occupiedByUsername = username || userId;
   field.occupyingFleetId = expedition.id;
 
+  var nextExpeditions = expeditions.slice();
+  nextExpeditions.push(expedition);
+  economy.resourceExpeditions = nextExpeditions;
   economy.resourceExpedition = expedition;
   return expedition;
 }
 
-function recallMapExpedition(economy, mapState, serverNowTs) {
+function recallMapExpedition(economy, mapState, serverNowTs, expeditionId) {
   ensureResourceExpeditionState(economy);
-  var expedition = economy.resourceExpedition;
-  if (!expedition) throw new Error("No active expedition.");
+  var expeditions = coerceObjectList(getResourceExpeditionList(economy));
+  economy.resourceExpeditions = expeditions;
+  if (expeditions.length <= 0) throw new Error("No active expedition.");
+  var selectedIndex = -1;
+  var selectedId = String(expeditionId || "").trim();
+  if (selectedId) {
+    for (var i = 0; i < expeditions.length; i++) {
+      if (String(expeditions[i].id || "") === selectedId) {
+        selectedIndex = i;
+        break;
+      }
+    }
+    if (selectedIndex === -1) throw new Error("Expedition not found.");
+  } else {
+    for (var j = 0; j < expeditions.length; j++) {
+      if (String(expeditions[j].status || "") !== "returning") {
+        selectedIndex = j;
+        break;
+      }
+    }
+    if (selectedIndex === -1) throw new Error("No recallable expedition.");
+  }
+  var expedition = expeditions[selectedIndex];
   if (expedition.status === "returning") throw new Error("Expedition is already returning.");
   var field = findMapField(mapState, expedition.fieldId);
 
@@ -1256,6 +1791,7 @@ function recallMapExpedition(economy, mapState, serverNowTs) {
   expedition.returnStartAt = serverNowTs;
   expedition.returnEndAt = serverNowTs + sanitizePositiveInt(expedition.travelSeconds || MAP_MIN_TRAVEL_SECONDS);
   expedition.updatedAt = serverNowTs;
+  refreshResourceExpeditionLegacyMirror(economy);
   return expedition;
 }
 
@@ -1297,7 +1833,9 @@ function withMapTransaction(nk, userId, username, update) {
     var mapFingerprintBefore = JSON.stringify(mapState.fields || []);
     ensureMapFieldsSeeded(nk, mapState, ts);
     var syncResult = syncMapExpedition(economy, inventory, mapState, userId, username, ts);
+    var occupancyRepairedBefore = reconcileMapOccupancyForPlayer(nk, economy, mapState, userId, username);
     var result = update(economy, inventory, mapState, ts, syncResult);
+    var occupancyRepairedAfter = reconcileMapOccupancyForPlayer(nk, economy, mapState, userId, username);
     ensureMapFieldsSeeded(nk, mapState, ts);
 
     var forcedDirty = false;
@@ -1307,7 +1845,13 @@ function withMapTransaction(nk, userId, username, update) {
     }
     var mapFingerprintAfter = JSON.stringify(mapState.fields || []);
     var mapChangedByMaintenance = mapFingerprintAfter !== mapFingerprintBefore;
-    var shouldWrite = forcedDirty || syncResult.changed || mapChangedByMaintenance || !mapVersion;
+    var shouldWrite =
+      forcedDirty ||
+      syncResult.changed ||
+      mapChangedByMaintenance ||
+      occupancyRepairedBefore ||
+      occupancyRepairedAfter ||
+      !mapVersion;
     if (!shouldWrite) {
       return {
         economy: economy,
@@ -1357,11 +1901,20 @@ function withMapTransaction(nk, userId, username, update) {
       if (mapVersion) mapWrite.version = mapVersion;
 
       nk.storageWrite([economyWrite, inventoryWrite, mapWrite]);
-      if (syncResult && syncResult.report) {
+      if (syncResult && Array.isArray(syncResult.reports) && syncResult.reports.length > 0) {
+        for (var ri = 0; ri < syncResult.reports.length; ri++) {
+          try {
+            createMapHarvestRewardMessage(nk, userId, syncResult.reports[ri]);
+          } catch (_postErr) {
+            // Do not fail the map transaction if inbox creation fails.
+          }
+        }
+      } else if (syncResult && syncResult.report) {
+        // Backward-compatible fallback.
         try {
           createMapHarvestRewardMessage(nk, userId, syncResult.report);
-        } catch (_postErr) {
-          // Do not fail the map transaction if inbox creation fails.
+        } catch (_postErrSingle) {
+          // noop
         }
       }
       return {
@@ -4648,6 +5201,46 @@ var INBOX_DAILY_NOON_STREAK_DAY7_BONUS = {
   chestQuantity: 1
 };
 var INBOX_DAILY_NOON_TEST_ALLOWED_USERS = { "heimy": true };
+var CHAT_LIKES_COLLECTION = "hsg_chat_likes_v1";
+var CHAT_LIKES_KEY_PREFIX = "msg:";
+var CHAT_LIKES_MAX_BATCH = 200;
+
+function buildChatLikesKey(messageId) {
+  return CHAT_LIKES_KEY_PREFIX + String(messageId || "").trim();
+}
+
+function defaultChatLikeState(messageId, channelId) {
+  return {
+    messageId: String(messageId || "").trim(),
+    channelId: String(channelId || "").trim(),
+    userIds: [],
+    count: 0,
+    updatedAt: nowTs(),
+    version: 1
+  };
+}
+
+function normalizeChatLikeState(raw, fallbackMessageId, fallbackChannelId) {
+  var messageId = String((raw && raw.messageId) || fallbackMessageId || "").trim();
+  var channelId = String((raw && raw.channelId) || fallbackChannelId || "").trim();
+  var source = raw && Array.isArray(raw.userIds) ? raw.userIds : [];
+  var userIds = [];
+  var seen = {};
+  for (var i = 0; i < source.length; i++) {
+    var uid = String(source[i] || "").trim();
+    if (!uid || seen[uid]) continue;
+    seen[uid] = true;
+    userIds.push(uid);
+  }
+  return {
+    messageId: messageId,
+    channelId: channelId,
+    userIds: userIds,
+    count: userIds.length,
+    updatedAt: sanitizePositiveInt((raw && raw.updatedAt) || nowTs()),
+    version: Math.max(1, sanitizePositiveInt((raw && raw.version) || 1))
+  };
+}
 
 function defaultInboxMeta() {
   return {
@@ -5021,9 +5614,19 @@ function ensureInventoryForClaim(raw, userId) {
 function createInboxMessageForUser(nk, userId, data) {
   for (var attempt = 0; attempt < ECONOMY_WRITE_RETRIES; attempt++) {
     var now = nowTs();
+    var forcedMessageId = String(data && data.id || "").trim();
+    var messageId = forcedMessageId || buildInboxMessageId(now);
+    if (forcedMessageId) {
+      var existing = nk.storageRead([
+        { collection: INBOX_COLLECTION, key: messageId, userId: userId }
+      ]);
+      if (Array.isArray(existing) && existing.length > 0 && existing[0] && existing[0].value) {
+        return normalizeInboxMessage(existing[0].value, messageId, userId);
+      }
+    }
+
     var metaRead = readInboxMeta(nk, userId);
     var meta = metaRead.state;
-    var messageId = buildInboxMessageId(now);
     var message = normalizeInboxMessage({
       id: messageId,
       type: data.type,
@@ -5064,12 +5667,21 @@ function createInboxMessageForUser(nk, userId, data) {
         value: meta
       }
     ];
+    if (forcedMessageId) writes[0].version = "*";
     if (metaRead.version) writes[1].version = metaRead.version;
 
     try {
       nk.storageWrite(writes);
       return message;
     } catch (err) {
+      if (forcedMessageId) {
+        var existingAfter = nk.storageRead([
+          { collection: INBOX_COLLECTION, key: messageId, userId: userId }
+        ]);
+        if (Array.isArray(existingAfter) && existingAfter.length > 0 && existingAfter[0] && existingAfter[0].value) {
+          return normalizeInboxMessage(existingAfter[0].value, messageId, userId);
+        }
+      }
       if (attempt === ECONOMY_WRITE_RETRIES - 1) throw err;
     }
   }
@@ -5993,13 +6605,115 @@ function rpcInboxDailyNoonTest(ctx, _logger, nk, payload) {
   });
 }
 
+function rpcChatGetLikes(ctx, _logger, nk, payload) {
+  var userId = requireUserId(ctx);
+  var body = parsePayload(payload);
+  var idsRaw = Array.isArray(body.messageIds) ? body.messageIds : [];
+  var ids = [];
+  var seen = {};
+  for (var i = 0; i < idsRaw.length; i++) {
+    var id = String(idsRaw[i] || "").trim();
+    if (!id || seen[id]) continue;
+    seen[id] = true;
+    ids.push(id);
+    if (ids.length >= CHAT_LIKES_MAX_BATCH) break;
+  }
+  if (ids.length <= 0) return JSON.stringify({ ok: true, likesByMessage: {} });
+
+  var channelIdFilter = String(body.channelId || "").trim();
+  var reads = [];
+  for (var r = 0; r < ids.length; r++) {
+    reads.push({
+      collection: CHAT_LIKES_COLLECTION,
+      key: buildChatLikesKey(ids[r]),
+      userId: SYSTEM_USER_ID
+    });
+  }
+  var rows = nk.storageRead(reads) || [];
+  var likesByMessage = {};
+  for (var z = 0; z < ids.length; z++) {
+    likesByMessage[ids[z]] = { count: 0, hasLiked: false };
+  }
+  for (var j = 0; j < rows.length; j++) {
+    var row = rows[j] || {};
+    if (!row || !row.key) continue;
+    var rawState = row.value || {};
+    var keyMessageId = String(row.key || "").indexOf(CHAT_LIKES_KEY_PREFIX) === 0
+      ? String(row.key).slice(CHAT_LIKES_KEY_PREFIX.length)
+      : "";
+    var state = normalizeChatLikeState(rawState, keyMessageId, "");
+    if (!state.messageId) continue;
+    if (channelIdFilter && state.channelId && state.channelId !== channelIdFilter) continue;
+    likesByMessage[state.messageId] = {
+      count: state.count,
+      hasLiked: state.userIds.indexOf(userId) >= 0
+    };
+  }
+  return JSON.stringify({ ok: true, likesByMessage: likesByMessage });
+}
+
+function rpcChatToggleLike(ctx, _logger, nk, payload) {
+  var userId = requireUserId(ctx);
+  var body = parsePayload(payload);
+  var messageId = String(body.messageId || "").trim();
+  var channelId = String(body.channelId || "").trim();
+  if (!messageId) throw new Error("Missing messageId.");
+
+  var key = buildChatLikesKey(messageId);
+  for (var attempt = 0; attempt < ECONOMY_WRITE_RETRIES; attempt++) {
+    var read = readStorageObject(nk, CHAT_LIKES_COLLECTION, key, SYSTEM_USER_ID);
+    var state = normalizeChatLikeState(read.state, messageId, channelId);
+    if (!state.messageId) state.messageId = messageId;
+    if (!state.channelId && channelId) state.channelId = channelId;
+
+    var idx = state.userIds.indexOf(userId);
+    var hasLiked = false;
+    if (idx >= 0) {
+      state.userIds.splice(idx, 1);
+      hasLiked = false;
+    } else {
+      state.userIds.push(userId);
+      hasLiked = true;
+    }
+    state.count = state.userIds.length;
+    state.updatedAt = nowTs();
+    state.version = Math.max(1, sanitizePositiveInt(state.version || 1)) + 1;
+
+    var writeReq = makeStorageWriteReq(
+      CHAT_LIKES_COLLECTION,
+      key,
+      SYSTEM_USER_ID,
+      state,
+      read.version || "",
+      0,
+      0
+    );
+    try {
+      nk.storageWrite([writeReq]);
+      return JSON.stringify({
+        ok: true,
+        messageId: messageId,
+        channelId: state.channelId || channelId,
+        count: state.count,
+        hasLiked: hasLiked
+      });
+    } catch (errWrite) {
+      if (attempt === ECONOMY_WRITE_RETRIES - 1) throw errWrite;
+    }
+  }
+  throw new Error("Chat like toggle failed.");
+}
+
 function serializeHarvestInventory(economy) {
   ensureHangarState(economy);
+  var reserved = getReservedHarvestShipsByExpeditions(economy);
   var rows = [];
   var keys = Object.keys(economy.hangarInventory || {});
   for (var i = 0; i < keys.length; i++) {
     var unitId = keys[i];
-    var available = sanitizePositiveInt(economy.hangarInventory[unitId] || 0);
+    var totalAmount = sanitizePositiveInt(economy.hangarInventory[unitId] || 0);
+    var reservedAmount = sanitizePositiveInt(reserved[unitId] || 0);
+    var available = Math.max(0, totalAmount - reservedAmount);
     if (available <= 0) continue;
     var stats = MAP_HARVEST_UNIT_STATS[unitId];
     if (!stats) continue;
@@ -6021,9 +6735,18 @@ function serializeHarvestInventory(economy) {
 function rpcMapFieldsState(ctx, _logger, nk, payload) {
   var userId = requireUserId(ctx);
   var username = ctx.username || userId;
-  parsePayload(payload);
+  var body = parsePayload(payload);
+  var commandementEscadreLevel = sanitizePositiveInt(Number(body.commandementEscadreLevel || body.commandement_escadre_level || 0));
 
-  var tx = withMapTransaction(nk, userId, username, function(economy, _inventory, mapState, ts, syncResult) {
+  var tx = withMapTransaction(nk, userId, username, function(economy, inventory, mapState, ts, syncResult) {
+    if (commandementEscadreLevel > 0) {
+      resolveMapActiveFleetSlots(economy, commandementEscadreLevel);
+    }
+    var expeditionList = getResourceExpeditionList(economy);
+    var serializedExpeditions = [];
+    for (var ei = 0; ei < expeditionList.length; ei++) {
+      serializedExpeditions.push(serializeMapExpedition(expeditionList[ei], ts));
+    }
     var fields = [];
     for (var i = 0; i < mapState.fields.length; i++) {
       fields.push(serializeMapFieldForViewer(mapState.fields[i], userId));
@@ -6031,10 +6754,17 @@ function rpcMapFieldsState(ctx, _logger, nk, payload) {
     return {
       serverNowTs: ts,
       fields: fields,
-      expedition: serializeMapExpedition(economy.resourceExpedition, ts),
+      expedition: serializedExpeditions.length > 0 ? serializedExpeditions[0] : null,
+      expeditions: serializedExpeditions,
       reports: Array.isArray(economy.resourceReports) ? economy.resourceReports.slice(0, 8) : [],
       harvestInventory: serializeHarvestInventory(economy),
-      syncReport: syncResult && syncResult.report ? syncResult.report : null
+      maxActiveExpeditions: calculateMapActiveFleetSlotsForLevel(economy.commandementEscadreLevel || 0),
+      syncReport: syncResult && syncResult.report ? syncResult.report : null,
+      state: {
+        resources: serializeResourceAmounts(economy),
+        credits: Math.max(0, Math.floor(Number(economy.premiumCredits || 0))),
+        mapDropNotifications: sanitizePositiveInt(inventory && inventory.mapDropNotifications || 0)
+      }
     };
   });
 
@@ -6043,9 +6773,12 @@ function rpcMapFieldsState(ctx, _logger, nk, payload) {
     serverNowTs: tx.result.serverNowTs,
     fields: tx.result.fields,
     expedition: tx.result.expedition,
+    expeditions: tx.result.expeditions,
     reports: tx.result.reports,
     harvestInventory: tx.result.harvestInventory,
-    syncReport: tx.result.syncReport
+    maxActiveExpeditions: tx.result.maxActiveExpeditions,
+    syncReport: tx.result.syncReport,
+    state: tx.result.state
   });
 }
 
@@ -6055,11 +6788,22 @@ function rpcMapFieldsStart(ctx, _logger, nk, payload) {
   var body = parsePayload(payload);
   var fieldId = String(body.fieldId || "").trim();
   var fleet = Array.isArray(body.fleet) ? body.fleet : [];
+  var commandementEscadreLevel = sanitizePositiveInt(Number(body.commandementEscadreLevel || body.commandement_escadre_level || 0));
   if (!fieldId) throw new Error("Missing fieldId.");
   if (!Array.isArray(fleet) || fleet.length <= 0) throw new Error("Missing fleet payload.");
 
-  var tx = withMapTransaction(nk, userId, username, function(economy, _inventory, mapState, ts, syncResult) {
-    var expedition = startMapExpedition(economy, mapState, userId, username, fieldId, fleet, ts);
+  var tx = withMapTransaction(nk, userId, username, function(economy, inventory, mapState, ts, syncResult) {
+    var maxActiveSlots = resolveMapActiveFleetSlots(economy, commandementEscadreLevel);
+    var expedition = startMapExpedition(economy, mapState, userId, username, fieldId, fleet, ts, maxActiveSlots, nk);
+    var expeditionList = getResourceExpeditionList(economy);
+    var serializedExpeditions = [];
+    for (var ei = 0; ei < expeditionList.length; ei++) {
+      serializedExpeditions.push(serializeMapExpedition(expeditionList[ei], ts));
+    }
+    if (serializedExpeditions.length <= 0) {
+      var single = serializeMapExpedition(expedition, ts);
+      if (single) serializedExpeditions.push(single);
+    }
     var selectedField = findMapField(mapState, fieldId);
     var fields = [];
     for (var i = 0; i < mapState.fields.length; i++) {
@@ -6069,9 +6813,17 @@ function rpcMapFieldsStart(ctx, _logger, nk, payload) {
       __dirty: true,
       serverNowTs: ts,
       expedition: serializeMapExpedition(expedition, ts),
+      expeditions: serializedExpeditions,
       selectedField: selectedField ? serializeMapFieldForViewer(selectedField, userId) : null,
       fields: fields,
-      syncReport: syncResult && syncResult.report ? syncResult.report : null
+      harvestInventory: serializeHarvestInventory(economy),
+      maxActiveExpeditions: maxActiveSlots,
+      syncReport: syncResult && syncResult.report ? syncResult.report : null,
+      state: {
+        resources: serializeResourceAmounts(economy),
+        credits: Math.max(0, Math.floor(Number(economy.premiumCredits || 0))),
+        mapDropNotifications: sanitizePositiveInt(inventory && inventory.mapDropNotifications || 0)
+      }
     };
   });
 
@@ -6079,19 +6831,29 @@ function rpcMapFieldsStart(ctx, _logger, nk, payload) {
     ok: true,
     serverNowTs: tx.result.serverNowTs,
     expedition: tx.result.expedition,
+    expeditions: tx.result.expeditions,
     selectedField: tx.result.selectedField,
     fields: tx.result.fields,
-    syncReport: tx.result.syncReport
+    harvestInventory: tx.result.harvestInventory,
+    maxActiveExpeditions: tx.result.maxActiveExpeditions,
+    syncReport: tx.result.syncReport,
+    state: tx.result.state
   });
 }
 
 function rpcMapFieldsRecall(ctx, _logger, nk, payload) {
   var userId = requireUserId(ctx);
   var username = ctx.username || userId;
-  parsePayload(payload);
+  var body = parsePayload(payload);
+  var expeditionId = String(body.expeditionId || "").trim();
 
-  var tx = withMapTransaction(nk, userId, username, function(economy, _inventory, mapState, ts, syncResult) {
-    var expedition = recallMapExpedition(economy, mapState, ts);
+  var tx = withMapTransaction(nk, userId, username, function(economy, inventory, mapState, ts, syncResult) {
+    var expedition = recallMapExpedition(economy, mapState, ts, expeditionId);
+    var expeditionList = getResourceExpeditionList(economy);
+    var serializedExpeditions = [];
+    for (var ei = 0; ei < expeditionList.length; ei++) {
+      serializedExpeditions.push(serializeMapExpedition(expeditionList[ei], ts));
+    }
     var fields = [];
     for (var i = 0; i < mapState.fields.length; i++) {
       fields.push(serializeMapFieldForViewer(mapState.fields[i], userId));
@@ -6100,9 +6862,17 @@ function rpcMapFieldsRecall(ctx, _logger, nk, payload) {
       __dirty: true,
       serverNowTs: ts,
       expedition: serializeMapExpedition(expedition, ts),
+      expeditions: serializedExpeditions,
       fields: fields,
       reports: Array.isArray(economy.resourceReports) ? economy.resourceReports.slice(0, 8) : [],
-      syncReport: syncResult && syncResult.report ? syncResult.report : null
+      harvestInventory: serializeHarvestInventory(economy),
+      maxActiveExpeditions: calculateMapActiveFleetSlotsForLevel(economy.commandementEscadreLevel || 0),
+      syncReport: syncResult && syncResult.report ? syncResult.report : null,
+      state: {
+        resources: serializeResourceAmounts(economy),
+        credits: Math.max(0, Math.floor(Number(economy.premiumCredits || 0))),
+        mapDropNotifications: sanitizePositiveInt(inventory && inventory.mapDropNotifications || 0)
+      }
     };
   });
 
@@ -6110,9 +6880,13 @@ function rpcMapFieldsRecall(ctx, _logger, nk, payload) {
     ok: true,
     serverNowTs: tx.result.serverNowTs,
     expedition: tx.result.expedition,
+    expeditions: tx.result.expeditions,
     fields: tx.result.fields,
     reports: tx.result.reports,
-    syncReport: tx.result.syncReport
+    harvestInventory: tx.result.harvestInventory,
+    maxActiveExpeditions: tx.result.maxActiveExpeditions,
+    syncReport: tx.result.syncReport,
+    state: tx.result.state
   });
 }
 
@@ -6413,6 +7187,8 @@ function InitModule(_ctx, logger, _nk, initializer) {
   initializer.registerRpc("rpc_inbox_search_players", rpcInboxSearchPlayers);
   initializer.registerRpc("rpc_inbox_thread", rpcInboxThread);
   initializer.registerRpc("rpc_inbox_daily_noon_test", rpcInboxDailyNoonTest);
+  initializer.registerRpc("rpc_chat_get_likes", rpcChatGetLikes);
+  initializer.registerRpc("rpc_chat_toggle_like", rpcChatToggleLike);
   initializer.registerRpc("rpc_map_players", rpcMapPlayers);
   initializer.registerRpc("rpc_map_fields_state", rpcMapFieldsState);
   initializer.registerRpc("rpc_map_fields_start", rpcMapFieldsStart);
@@ -6440,6 +7216,12 @@ if (typeof module !== "undefined" && module.exports) {
       withEconomyInventoryTransaction: withEconomyInventoryTransaction,
       normalizeInboxAttachments: normalizeInboxAttachments,
       inboxMessageToClient: inboxMessageToClient,
+      generateResourceField: generateResourceField,
+      getAvailableResourcesForPlayer: getAvailableResourcesForPlayer,
+      calculateHarvestSpeed: calculateHarvestSpeed,
+      calculateHarvestedResources: calculateHarvestedResources,
+      resolveReturnResources: resolveReturnResources,
+      respawnResourceField: respawnResourceField,
       createRewardMessage: createRewardMessage,
       createCombatReportMessage: createCombatReportMessage,
       createSystemMessage: createSystemMessage

@@ -40,7 +40,7 @@ import {
   Heart,
   Smile
 } from "lucide-react";
-import { CSSProperties, FormEvent, Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { CSSProperties, FormEvent, Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 type ResourceId =
   | "carbone"
@@ -156,6 +156,7 @@ const AUTH_SESSION_KEY = "hsg_nakama_session_v1";
 const UI_SCREEN_KEY = "hsg_ui_screen_v1";
 const PROFILE_EMAIL_DRAFT_KEY = "hsg_profile_email_draft_v1";
 const UI_LANG_KEY = "hsg_ui_lang_v1";
+const INVENTORY_UI_NOTIFS_KEY = "hsg_inventory_notifs_v1";
 const TIME_BOOST_ITEM_IMAGE = "/room-images/item-acceleration.png";
 type UIScreen =
   | "home"
@@ -201,7 +202,7 @@ const ROOM_CONFIG: Record<RoomType, RoomConfig> = {
     width: 3,
     color: "room-living",
     icon: <Bed size={20} />,
-    image: "/room-images/carbone.png",
+    image: "/room-images/batiment-carbone.png",
     maxLevel: 9999,
     baseCost: 120,
     buildSecondsBase: 60,
@@ -212,7 +213,7 @@ const ROOM_CONFIG: Record<RoomType, RoomConfig> = {
     width: 3,
     color: "room-power",
     icon: <Zap size={20} />,
-    image: "/room-images/titane.png",
+    image: "/room-images/batiment-titane.png",
     maxLevel: 9999,
     baseCost: 250,
     buildSecondsBase: 120,
@@ -223,7 +224,7 @@ const ROOM_CONFIG: Record<RoomType, RoomConfig> = {
     width: 3,
     color: "room-food",
     icon: <Utensils size={20} />,
-    image: "/room-images/osmium.png",
+    image: "/room-images/batiment-osmium.png",
     maxLevel: 9999,
     baseCost: 540,
     buildSecondsBase: 240,
@@ -234,7 +235,7 @@ const ROOM_CONFIG: Record<RoomType, RoomConfig> = {
     width: 3,
     color: "room-water",
     icon: <Droplet size={20} />,
-    image: "/room-images/adamantium.png",
+    image: "/room-images/batiment-adamantium.png",
     maxLevel: 9999,
     baseCost: 980,
     buildSecondsBase: 480,
@@ -245,7 +246,7 @@ const ROOM_CONFIG: Record<RoomType, RoomConfig> = {
     width: 3,
     color: "room-power",
     icon: <Zap size={20} />,
-    image: "/room-images/magmatite.png",
+    image: "/room-images/batiment-magmatite.png",
     maxLevel: 9999,
     baseCost: 1800,
     buildSecondsBase: 900,
@@ -256,7 +257,7 @@ const ROOM_CONFIG: Record<RoomType, RoomConfig> = {
     width: 3,
     color: "room-water",
     icon: <Droplet size={20} />,
-    image: "/room-images/neodyme.png",
+    image: "/room-images/batiment-neodyme.png",
     maxLevel: 9999,
     baseCost: 2600,
     buildSecondsBase: 1200,
@@ -289,7 +290,7 @@ const ROOM_CONFIG: Record<RoomType, RoomConfig> = {
     width: 3,
     color: "room-power",
     icon: <Zap size={20} />,
-    image: "/room-images/isotope7.png",
+    image: "/room-images/batiment-isotope.png",
     maxLevel: 9999,
     baseCost: 9200,
     buildSecondsBase: 3600,
@@ -300,7 +301,7 @@ const ROOM_CONFIG: Record<RoomType, RoomConfig> = {
     width: 3,
     color: "room-entrance",
     icon: <DoorOpen size={20} />,
-    image: "/room-images/singulite.png",
+    image: "/room-images/batiment-singulite.png",
     maxLevel: 9999,
     baseCost: 14500,
     buildSecondsBase: 5400,
@@ -336,13 +337,41 @@ const ROOM_NAME_EN: Record<RoomType, string> = {
 const roomDisplayName = (type: RoomType, language: UILanguage): string =>
   language === "en" ? ROOM_NAME_EN[type] ?? ROOM_CONFIG[type].name : ROOM_CONFIG[type].name;
 
-const ROOM_RESOURCE_BADGE_IMAGE: Partial<Record<RoomType, string>> = {
-  carbone: "/room-images/icone-carbone.png",
-  titane: "/room-images/icone-titane.png"
+const PRODUCTION_BUILDING_SPRITE_SHEET = "/room-images/batiment.png";
+const PRODUCTION_BUILDING_SPRITE_SHEET_WIDTH = 1024;
+const PRODUCTION_BUILDING_SPRITE_SHEET_HEIGHT = 640;
+const PRODUCTION_BUILDING_SPRITE_CELL_WIDTH = 512;
+const PRODUCTION_BUILDING_SPRITE_CELL_HEIGHT = 128;
+const PRODUCTION_BUILDING_SPRITE_INSET_LEFT = 12;
+const PRODUCTION_BUILDING_SPRITE_INSET_RIGHT = 12;
+const PRODUCTION_BUILDING_SPRITE_INSET_TOP = 16;
+const PRODUCTION_BUILDING_SPRITE_INSET_BOTTOM = 16;
+
+const PRODUCTION_BUILDING_SPRITE_SLOT: Partial<Record<RoomType, { col: number; row: number }>> = {
+  chronium: { col: 1, row: 1 },
+  aetherium: { col: 1, row: 2 }
 };
 
-const roomBadgeImage = (type: RoomType): string => ROOM_RESOURCE_BADGE_IMAGE[type] ?? ROOM_CONFIG[type].image;
-const hasResourceBadge = (type: RoomType): boolean => type === "carbone" || type === "titane";
+const roomProductionSpriteStyle = (type: RoomType): CSSProperties | null => {
+  const slot = PRODUCTION_BUILDING_SPRITE_SLOT[type];
+  if (!slot) return null;
+  const frameX = slot.col * PRODUCTION_BUILDING_SPRITE_CELL_WIDTH + PRODUCTION_BUILDING_SPRITE_INSET_LEFT;
+  const frameY = slot.row * PRODUCTION_BUILDING_SPRITE_CELL_HEIGHT + PRODUCTION_BUILDING_SPRITE_INSET_TOP;
+  const visibleWidth = Math.max(1, PRODUCTION_BUILDING_SPRITE_CELL_WIDTH - PRODUCTION_BUILDING_SPRITE_INSET_LEFT - PRODUCTION_BUILDING_SPRITE_INSET_RIGHT);
+  const visibleHeight = Math.max(1, PRODUCTION_BUILDING_SPRITE_CELL_HEIGHT - PRODUCTION_BUILDING_SPRITE_INSET_TOP - PRODUCTION_BUILDING_SPRITE_INSET_BOTTOM);
+  const sizeX = (PRODUCTION_BUILDING_SPRITE_SHEET_WIDTH / visibleWidth) * 100;
+  const sizeY = (PRODUCTION_BUILDING_SPRITE_SHEET_HEIGHT / visibleHeight) * 100;
+  const maxOffsetX = Math.max(1, PRODUCTION_BUILDING_SPRITE_SHEET_WIDTH - visibleWidth);
+  const maxOffsetY = Math.max(1, PRODUCTION_BUILDING_SPRITE_SHEET_HEIGHT - visibleHeight);
+  const x = Math.max(0, Math.min(100, (frameX / maxOffsetX) * 100));
+  const y = Math.max(0, Math.min(100, (frameY / maxOffsetY) * 100));
+  return {
+    backgroundImage: `url(${PRODUCTION_BUILDING_SPRITE_SHEET})`,
+    backgroundSize: `${sizeX}% ${sizeY}%`,
+    backgroundPosition: `${x}% ${y}%`,
+    backgroundRepeat: "no-repeat"
+  };
+};
 
 const BUILDABLE_ROOMS: RoomType[] = [
   "osmium",
@@ -1868,9 +1897,59 @@ const mapFieldDisplayName = (fieldId: string, language: UILanguage) =>
     ? `Resource Field ${fieldId.slice(-4).toUpperCase()}`
     : `Champ de ressources ${fieldId.slice(-4).toUpperCase()}`;
 
+const parseBooleanFlag = (value: unknown, fallback = false): boolean => {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return Number.isFinite(value) ? value !== 0 : fallback;
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === "true" || normalized === "1" || normalized === "yes" || normalized === "y" || normalized === "on") {
+      return true;
+    }
+    if (
+      normalized === "false" ||
+      normalized === "0" ||
+      normalized === "no" ||
+      normalized === "n" ||
+      normalized === "off" ||
+      normalized === ""
+    ) {
+      return false;
+    }
+  }
+  return fallback;
+};
+
+const normalizeMapEntityId = (value: unknown): string => {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "";
+  const lowered = raw.toLowerCase();
+  if (
+    lowered === "false" ||
+    lowered === "null" ||
+    lowered === "undefined" ||
+    lowered === "none" ||
+    lowered === "0" ||
+    lowered === "nan"
+  ) {
+    return "";
+  }
+  return raw;
+};
+
+const normalizeMapOccupiedFlag = (
+  occupiedValue: unknown,
+  occupiedByPlayerId: string,
+  occupyingFleetId: string
+): boolean =>
+  parseBooleanFlag(occupiedValue, false) &&
+  (occupiedByPlayerId.trim().length > 0 || occupyingFleetId.trim().length > 0);
+
 const mapFieldToSectorEntity = (field: MapFieldServerDto, language: UILanguage): SectorResource => {
   const firstResource = field.resources && field.resources.length > 0 ? field.resources[0].resourceId : "carbone";
   const remaining = (field.resources || []).reduce((sum, row) => sum + Math.max(0, Math.floor(Number(row.remainingAmount || 0))), 0);
+  const occupiedByPlayerId = normalizeMapEntityId(field.occupiedByPlayerId);
+  const occupyingFleetId = normalizeMapEntityId(field.occupyingFleetId);
+  const isOccupied = normalizeMapOccupiedFlag(field.isOccupied, occupiedByPlayerId, occupyingFleetId);
   return {
     id: `rf_${field.id}`,
     fieldId: field.id,
@@ -1889,11 +1968,11 @@ const mapFieldToSectorEntity = (field: MapFieldServerDto, language: UILanguage):
         totalAmount: Math.max(0, Math.floor(Number(row.totalAmount || 0))),
         remainingAmount: Math.max(0, Math.floor(Number(row.remainingAmount || 0)))
       })),
-    hiddenDetails: Boolean(field.hiddenDetails),
-    isOccupied: Boolean(field.isOccupied),
-    occupiedByPlayerId: String(field.occupiedByPlayerId || ""),
+    hiddenDetails: parseBooleanFlag(field.hiddenDetails, false),
+    isOccupied,
+    occupiedByPlayerId,
     occupiedByUsername: String(field.occupiedByUsername || ""),
-    occupyingFleetId: String(field.occupyingFleetId || ""),
+    occupyingFleetId,
     totalExtractionWork: Math.max(0, Math.floor(Number(field.totalExtractionWork || 0))),
     remainingExtractionWork: Math.max(0, Math.floor(Number(field.remainingExtractionWork || 0))),
     spawnedAt: Math.max(0, Math.floor(Number(field.spawnedAt || 0))),
@@ -1971,6 +2050,15 @@ type InventoryViewItem = {
   quantity: number;
   durationSeconds?: number;
   chestType?: "CLASSIC" | "UNCOMMON" | "RARE" | "LEGENDARY" | "DIVINE";
+};
+
+type InventoryBoostTarget = {
+  id: string;
+  target: "building" | "hangar" | "research_local";
+  label: string;
+  detail: string;
+  remainingSeconds: number;
+  queueId?: string;
 };
 
 type ChestLootSummary = {
@@ -2185,6 +2273,96 @@ const extractInventoryMapDropNotifications = (rpcResponse: any): number => {
   return Math.max(0, Math.floor(raw));
 };
 
+const sanitizeInventoryNotificationMap = (raw: unknown): Record<string, number> => {
+  const out: Record<string, number> = {};
+  if (!raw || typeof raw !== "object") return out;
+  for (const [keyRaw, qtyRaw] of Object.entries(raw as Record<string, unknown>)) {
+    const key = String(keyRaw || "").trim();
+    const qty = Math.max(0, Math.floor(Number(qtyRaw ?? 0)));
+    if (!key || qty <= 0) continue;
+    out[key] = qty;
+  }
+  return out;
+};
+
+const inventoryNotificationStorageKeyForUser = (userId: string): string =>
+  `${INVENTORY_UI_NOTIFS_KEY}_${String(userId || "").trim()}`;
+
+const readPersistedInventoryNotificationState = (
+  userId: string
+): { inboxBadgeCount: number; pending: Record<string, number>; visible: Record<string, number> } => {
+  const fallback = { inboxBadgeCount: 0, pending: {}, visible: {} };
+  const uid = String(userId || "").trim();
+  if (!uid) return fallback;
+  try {
+    const raw = localStorage.getItem(inventoryNotificationStorageKeyForUser(uid));
+    if (!raw) return fallback;
+    const parsed = parseJsonObject(raw);
+    const inboxBadgeCount = Math.max(0, Math.floor(Number(parsed?.inboxBadgeCount ?? 0)));
+    return {
+      inboxBadgeCount,
+      pending: sanitizeInventoryNotificationMap(parsed?.pending),
+      visible: sanitizeInventoryNotificationMap(parsed?.visible)
+    };
+  } catch {
+    return fallback;
+  }
+};
+
+const writePersistedInventoryNotificationState = (
+  userId: string,
+  state: { inboxBadgeCount: number; pending: Record<string, number>; visible: Record<string, number> }
+) => {
+  const uid = String(userId || "").trim();
+  if (!uid) return;
+  try {
+    const payload = {
+      inboxBadgeCount: Math.max(0, Math.floor(Number(state.inboxBadgeCount ?? 0))),
+      pending: sanitizeInventoryNotificationMap(state.pending),
+      visible: sanitizeInventoryNotificationMap(state.visible)
+    };
+    localStorage.setItem(inventoryNotificationStorageKeyForUser(uid), JSON.stringify(payload));
+  } catch {
+    // ignore storage quota/private mode issues
+  }
+};
+
+const toInventoryChestItemId = (rawChestType: string): string => {
+  const normalized = String(rawChestType || "").trim().toUpperCase();
+  if (normalized === "DIVINE") return "RESOURCE_CHEST_DIVINE";
+  if (normalized === "LEGENDARY") return "RESOURCE_CHEST_LEGENDARY";
+  if (normalized === "RARE") return "RESOURCE_CHEST_RARE";
+  if (normalized === "UNCOMMON") return "RESOURCE_CHEST_UNCOMMON";
+  return "RESOURCE_CHEST_CLASSIC";
+};
+
+const extractInventoryItemNotificationsFromClaim = (claimPayload: any): { total: number; byItemId: Record<string, number> } => {
+  const source = claimPayload && typeof claimPayload === "object" ? claimPayload : {};
+  const rewards = source.rewards && typeof source.rewards === "object" ? source.rewards : {};
+  const byItemId: Record<string, number> = {};
+  let total = 0;
+
+  const push = (rawItemId: string, rawQty: unknown) => {
+    const itemId = String(rawItemId || "").trim();
+    const qty = Math.max(0, Math.floor(Number(rawQty ?? 0)));
+    if (!itemId || qty <= 0) return;
+    byItemId[itemId] = Math.max(0, Math.floor(Number(byItemId[itemId] ?? 0))) + qty;
+    total += qty;
+  };
+
+  const items = Array.isArray(rewards.items) ? rewards.items : [];
+  for (const it of items) {
+    push(String(it?.itemId || ""), it?.quantity);
+  }
+
+  const chests = Array.isArray(rewards.chests) ? rewards.chests : [];
+  for (const ch of chests) {
+    push(toInventoryChestItemId(String(ch?.chestType || "")), ch?.quantity);
+  }
+
+  return { total, byItemId };
+};
+
 const normalizeHangarRpcSnapshot = (rpcResponse: any): HangarRpcSnapshot | null => {
   const parsed = parseJsonObject(rpcResponse?.payload ?? rpcResponse);
   const nested = parseJsonObject(parsed?.payload);
@@ -2338,7 +2516,10 @@ export default function App() {
   const [inventoryError, setInventoryError] = useState("");
   const [inventoryActionLoadingId, setInventoryActionLoadingId] = useState("");
   const [inventoryLastSyncAt, setInventoryLastSyncAt] = useState<number | null>(null);
-  const [inventoryMenuBadgeCount, setInventoryMenuBadgeCount] = useState(0);
+  const [inventoryServerBadgeCount, setInventoryServerBadgeCount] = useState(0);
+  const [inventoryInboxBadgeCount, setInventoryInboxBadgeCount] = useState(0);
+  const [inventoryPendingItemNotifications, setInventoryPendingItemNotifications] = useState<Record<string, number>>({});
+  const [inventoryVisibleItemNotifications, setInventoryVisibleItemNotifications] = useState<Record<string, number>>({});
   const [chestLootSummary, setChestLootSummary] = useState<ChestLootSummary | null>(null);
   const [hangarQueue, setHangarQueue] = useState<HangarQueueItem[]>([]);
   const [hangarInventory, setHangarInventory] = useState<Record<string, number>>({});
@@ -2357,10 +2538,13 @@ export default function App() {
   const [serverClockOffsetMs, setServerClockOffsetMs] = useState<number>(0);
   const [constructionFxRoomId, setConstructionFxRoomId] = useState<string>("");
   const [vaultHydrated, setVaultHydrated] = useState<boolean>(false);
+  const processedMapSyncReportIdsRef = useRef<Record<string, boolean>>({});
 
   const client = useMemo(() => createClient(), []);
   const transformRef = useRef<HTMLDivElement>(null);
+  const previousScreenRef = useRef<UIScreen>(screen);
   const l = (fr: string, en: string) => (uiLanguage === "en" ? en : fr);
+  const inventoryMenuBadgeCount = Math.max(0, inventoryServerBadgeCount + inventoryInboxBadgeCount);
   const roomByType = useMemo(() => {
     const map: Partial<Record<RoomType, Room>> = {};
     for (const room of rooms) map[room.type] = room;
@@ -2377,6 +2561,7 @@ export default function App() {
     setProfileError("");
     setShowAuth(false);
     setAuthChecking(false);
+    processedMapSyncReportIdsRef.current = {};
   };
   const entrepotLevel = roomByType.entrepot?.level ?? 1;
   const productionBonusesByResource = useMemo(() => technologyProductionBonuses(technologyLevels), [technologyLevels]);
@@ -2491,13 +2676,8 @@ export default function App() {
       );
       const sanitized = normalizeInventoryRpcItems(rpc as any);
       setInventoryItems(sanitized);
-      setInventoryMenuBadgeCount(extractInventoryMapDropNotifications(rpc as any));
+      setInventoryServerBadgeCount(extractInventoryMapDropNotifications(rpc as any));
       setInventoryLastSyncAt(Date.now());
-
-      if (import.meta.env.DEV) {
-        // eslint-disable-next-line no-console
-        console.log("inventory payload", rpc);
-      }
     } catch (err) {
       if (isUnauthorizedError(err)) {
         invalidateSession();
@@ -2515,12 +2695,12 @@ export default function App() {
 
   const refreshInventoryMenuBadge = async (silent = true) => {
     if (!session) {
-      setInventoryMenuBadgeCount(0);
+      setInventoryServerBadgeCount(0);
       return;
     }
     try {
       const rpc = await client.rpc(session, "getinventorymeta", "{}");
-      setInventoryMenuBadgeCount(extractInventoryMapDropNotifications(rpc as any));
+      setInventoryServerBadgeCount(extractInventoryMapDropNotifications(rpc as any));
     } catch (err) {
       if (isUnauthorizedError(err)) {
         invalidateSession();
@@ -2813,6 +2993,10 @@ export default function App() {
       setInventoryItems([]);
       setInventoryError("");
       setInventoryLastSyncAt(null);
+      setInventoryServerBadgeCount(0);
+      setInventoryInboxBadgeCount(0);
+      setInventoryPendingItemNotifications({});
+      setInventoryVisibleItemNotifications({});
       setHangarQueue([]);
       setHangarInventory({});
       setHangarServerResources(null);
@@ -2936,7 +3120,14 @@ export default function App() {
 
   useEffect(() => {
     if (!session) {
-      setInventoryMenuBadgeCount(0);
+      setInventoryServerBadgeCount(0);
+      setInventoryInboxBadgeCount(0);
+      setInventoryPendingItemNotifications({});
+      setInventoryVisibleItemNotifications({});
+      return;
+    }
+    if (screen === "inventory") {
+      setInventoryServerBadgeCount(0);
       return;
     }
     void refreshInventoryMenuBadge(true);
@@ -2945,7 +3136,27 @@ export default function App() {
     }, 15000);
     return () => clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session]);
+  }, [screen, session]);
+
+  useEffect(() => {
+    const prev = previousScreenRef.current;
+    if (screen === "inventory" && prev !== "inventory") {
+      const next: Record<string, number> = {};
+      for (const [itemId, qtyRaw] of Object.entries(inventoryPendingItemNotifications)) {
+        const qty = Math.max(0, Math.floor(Number(qtyRaw ?? 0)));
+        if (!itemId || qty <= 0) continue;
+        next[itemId] = qty;
+      }
+      setInventoryVisibleItemNotifications(next);
+      setInventoryPendingItemNotifications({});
+      setInventoryInboxBadgeCount(0);
+      setInventoryServerBadgeCount(0);
+    } else if (prev === "inventory" && screen !== "inventory") {
+      setInventoryVisibleItemNotifications({});
+    }
+    previousScreenRef.current = screen;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [screen]);
 
   useEffect(() => {
     if (!session) return;
@@ -2974,6 +3185,24 @@ export default function App() {
     }, 1000);
     return () => clearInterval(interval);
   }, [resourceLoading, session]);
+
+  useEffect(() => {
+    if (!session?.user_id) return;
+    const persisted = readPersistedInventoryNotificationState(session.user_id);
+    setInventoryInboxBadgeCount(persisted.inboxBadgeCount);
+    setInventoryPendingItemNotifications(persisted.pending);
+    setInventoryVisibleItemNotifications(persisted.visible);
+    processedMapSyncReportIdsRef.current = {};
+  }, [session?.user_id]);
+
+  useEffect(() => {
+    if (!session?.user_id) return;
+    writePersistedInventoryNotificationState(session.user_id, {
+      inboxBadgeCount: inventoryInboxBadgeCount,
+      pending: inventoryPendingItemNotifications,
+      visible: inventoryVisibleItemNotifications
+    });
+  }, [session?.user_id, inventoryInboxBadgeCount, inventoryPendingItemNotifications, inventoryVisibleItemNotifications]);
 
   useEffect(() => {
     if (!session || resourceLoading) return;
@@ -3016,13 +3245,13 @@ export default function App() {
         let restored = Session.restore(parsed.token, parsed.refreshToken);
         const now = Math.floor(Date.now() / 1000);
 
-        if (restored.isexpired(now) && !restored.isrefreshexpired(now)) {
+        if (restored.isexpired(now)) {
+          if (restored.isrefreshexpired(now)) throw new Error("Refresh session expired");
           restored = await client.sessionRefresh(restored);
         }
 
         if (restored.isexpired(Math.floor(Date.now() / 1000))) throw new Error("Session expired");
 
-        setSession(restored);
         try {
           const account = await client.getAccount(restored);
           applyAccount(account, restored);
@@ -3030,6 +3259,7 @@ export default function App() {
           if (isUnauthorizedError(err)) throw err;
           setPlayerId((restored.username ?? restored.user_id ?? "player").slice(0, 20));
         }
+        setSession(restored);
         setNakamaStatus("online");
         saveSession(restored);
       } catch {
@@ -3540,6 +3770,48 @@ export default function App() {
 
   const researchRemainingSeconds = researchJob ? Math.max(0, Math.floor((researchJob.endAt - nowMs) / 1000)) : 0;
   const displayedScorePoints = Math.max(0, Math.floor(Number(playerScorePoints || 0)));
+  const inventoryBoostTargets = useMemo<InventoryBoostTarget[]>(() => {
+    const rows: InventoryBoostTarget[] = [];
+    if (constructionJob) {
+      rows.push({
+        id: "building",
+        target: "building",
+        label: `${l("Batiment", "Building")} • ${roomDisplayName(constructionJob.roomType, uiLanguage)}`,
+        detail:
+          constructionJob.mode === "build"
+            ? l("Construction en cours", "Construction in progress")
+            : l("Amelioration en cours", "Upgrade in progress"),
+        remainingSeconds: Math.max(0, Math.floor((constructionJob.endAt - nowMs) / 1000))
+      });
+    }
+    if (hangarQueue.length > 0) {
+      const active = hangarQueue[0];
+      const unitDef = HANGAR_UNIT_DEFS.find((def) => def.id === active.unitId);
+      const unitName = hangarUnitDisplayName(active.unitId, unitDef?.name ?? active.unitId, uiLanguage);
+      rows.push({
+        id: `hangar_${active.id}`,
+        target: "hangar",
+        queueId: active.id,
+        label: `${l("Hangar", "Hangar")} • ${unitName} x${active.quantity}`,
+        detail: l("Production en cours", "Production in progress"),
+        remainingSeconds: Math.max(0, Math.floor((active.endAt - nowMs) / 1000))
+      });
+    }
+    if (researchJob) {
+      const techDef = TECHNOLOGY_BY_ID[researchJob.technologyId];
+      const techName = techDef
+        ? technologyDisplayName(techDef.id, techDef.name, uiLanguage)
+        : researchJob.technologyId;
+      rows.push({
+        id: "research",
+        target: "research_local",
+        label: `${l("Recherche", "Research")} • ${techName} Lv.${researchJob.targetLevel}`,
+        detail: l("Recherche active", "Research active"),
+        remainingSeconds: Math.max(0, Math.floor((researchJob.endAt - nowMs) / 1000))
+      });
+    }
+    return rows;
+  }, [constructionJob, hangarQueue, nowMs, researchJob, uiLanguage]);
 
   const onUseInventoryItem = async (
     itemId: string,
@@ -3557,9 +3829,23 @@ export default function App() {
       return;
     }
     const isTimeBoost = item.category === "TIME_BOOST";
+    const hasAnyBoostTarget = Boolean(constructionJob) || hangarQueue.length > 0 || Boolean(researchJob);
+    if (isTimeBoost && targetOverride === "auto" && !hasAnyBoostTarget) {
+      setInventoryError(
+        l(
+          "Aucune file active a accelerer (batiment, hangar ou recherche).",
+          "No active queue to accelerate (building, hangar, or research)."
+        )
+      );
+      return;
+    }
     const resolvedTarget =
       targetOverride === "auto"
-        ? "building"
+        ? constructionJob
+          ? "building"
+          : hangarQueue.length > 0
+            ? "hangar"
+            : "research_local"
         : targetOverride;
     if (isTimeBoost && resolvedTarget === "building" && !constructionJob) {
       setInventoryError(l("Aucune construction active a accelerer.", "No active construction to accelerate."));
@@ -3918,6 +4204,33 @@ export default function App() {
             session={session}
             currentUserId={session?.user_id ?? ""}
             hangarInventory={hangarInventory}
+            technologyLevels={technologyLevels}
+            onMapStateSync={(payload) => {
+              const nextResources = payload?.resources;
+              if (nextResources && typeof nextResources === "object") {
+                setResourceAmounts((prev) => {
+                  const merged = { ...prev };
+                  for (const def of RESOURCE_DEFS) {
+                    const value = Number(nextResources[def.id] ?? merged[def.id] ?? 0);
+                    if (Number.isFinite(value) && value >= 0) merged[def.id] = value;
+                  }
+                  return merged;
+                });
+              }
+              const nextCredits = Number(payload?.credits ?? NaN);
+              if (Number.isFinite(nextCredits) && nextCredits >= 0) {
+                setCredits(Math.floor(nextCredits));
+              }
+              const syncReportId = String(payload?.syncReport?.id || "").trim();
+              if (syncReportId && !processedMapSyncReportIdsRef.current[syncReportId]) {
+                processedMapSyncReportIdsRef.current[syncReportId] = true;
+                const mapDropNotifications = Number(payload?.mapDropNotifications ?? NaN);
+                if (Number.isFinite(mapDropNotifications) && mapDropNotifications >= 0) {
+                  setInventoryServerBadgeCount(Math.max(0, Math.floor(mapDropNotifications)));
+                }
+                void refreshInboxUnread(true);
+              }
+            }}
           />
         </>
       ) : screen === "chat" ? (
@@ -4002,10 +4315,11 @@ export default function App() {
             error={inventoryError}
             items={inventoryItems}
             lastSyncAt={inventoryLastSyncAt}
-            hasActiveQueue={Boolean(constructionJob)}
+            hasActiveQueue={Boolean(constructionJob) || hangarQueue.length > 0 || Boolean(researchJob)}
+            boostTargets={inventoryBoostTargets}
             actionLoadingId={inventoryActionLoadingId}
+            newItemNotifications={inventoryVisibleItemNotifications}
             onUseItem={onUseInventoryItem}
-            onRefresh={() => void loadInventory(true)}
           />
         </>
       ) : screen === "inbox" ? (
@@ -4033,6 +4347,19 @@ export default function App() {
               const nextCredits = Number(payload?.state?.credits ?? NaN);
               if (Number.isFinite(nextCredits) && nextCredits >= 0) {
                 setCredits(Math.floor(nextCredits));
+              }
+              const claimNotif = extractInventoryItemNotificationsFromClaim(payload);
+              if (claimNotif.total > 0) {
+                setInventoryInboxBadgeCount((prev) => prev + claimNotif.total);
+                setInventoryPendingItemNotifications((prev) => {
+                  const next = { ...prev };
+                  for (const [itemId, qtyRaw] of Object.entries(claimNotif.byItemId)) {
+                    const qty = Math.max(0, Math.floor(Number(qtyRaw ?? 0)));
+                    if (!itemId || qty <= 0) continue;
+                    next[itemId] = Math.max(0, Math.floor(Number(next[itemId] ?? 0))) + qty;
+                  }
+                  return next;
+                });
               }
               void loadInventory();
               void loadRankingState(true);
@@ -4205,6 +4532,7 @@ export default function App() {
 
                     {rooms.map((room) => {
                       const cfg = ROOM_CONFIG[room.type];
+                      const spriteStyle = roomProductionSpriteStyle(room.type);
                       const isDraggingRoom = draggedRoom?.id === room.id;
                       const isUpgradingRoom = constructionJob?.mode === "upgrade" && constructionJob.roomId === room.id;
                       const isJustCompleted = constructionFxRoomId === room.id;
@@ -4216,50 +4544,43 @@ export default function App() {
                           style={{ left: room.x * CELL_WIDTH, bottom: room.y * CELL_HEIGHT, width: room.width * CELL_WIDTH, height: CELL_HEIGHT }}
                           onMouseDown={(e) => onRoomMouseDown(e, room)}
                         >
-                          <img
-                            src={cfg.image}
-                            alt={roomDisplayName(room.type, uiLanguage)}
-                            className="room-art"
-                            onError={(e) => {
-                              (e.currentTarget as HTMLImageElement).style.display = "none";
-                            }}
-                          />
-                          {room.width > 1 && (
-                            <div className="room-meta">
-                              <p className="room-name">{roomDisplayName(room.type, uiLanguage)}</p>
-                              <p className="room-level">Lvl {room.level}</p>
-                              {room.type !== "entrance" ? (
-                                <div className="room-action-row">
-                                  {hasResourceBadge(room.type) ? (
-                                    <div className="room-inline-icon">
-                                      <img
-                                        src={roomBadgeImage(room.type)}
-                                        alt={roomDisplayName(room.type, uiLanguage)}
-                                        onError={(e) => {
-                                          (e.currentTarget as HTMLImageElement).src = cfg.image;
-                                        }}
-                                      />
-                                    </div>
-                                  ) : null}
-                                  <button
-                                    type="button"
-                                    className="room-upgrade-btn"
-                                    onMouseDown={(e) => {
-                                      e.preventDefault();
-                                      e.stopPropagation();
-                                    }}
-                                    onClick={(e) => {
-                                      e.preventDefault();
-                                      e.stopPropagation();
-                                      setActiveRoom(room);
-                                    }}
-                                  >
-                                    {l("Ameliorer", "Upgrade")}
-                                  </button>
-                                </div>
-                              ) : null}
-                            </div>
+                          {spriteStyle ? (
+                            <span className="room-art room-art-sprite" style={spriteStyle} />
+                          ) : (
+                            <img
+                              src={cfg.image}
+                              alt={roomDisplayName(room.type, uiLanguage)}
+                              className="room-art"
+                              onError={(e) => {
+                                (e.currentTarget as HTMLImageElement).style.display = "none";
+                              }}
+                            />
                           )}
+                          <div className="room-meta">
+                            <p className="room-name">{roomDisplayName(room.type, uiLanguage)}</p>
+                            <p className="room-level">Lvl {room.level}</p>
+                            <div className="room-action-row">
+                              {room.type !== "entrance" ? (
+                                <button
+                                  type="button"
+                                  className="room-upgrade-btn"
+                                  onMouseDown={(e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                  }}
+                                  onClick={(e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    setActiveRoom(room);
+                                  }}
+                                >
+                                  {l("Ameliorer", "Upgrade")}
+                                </button>
+                              ) : (
+                                <span className="room-action-placeholder" aria-hidden="true" />
+                              )}
+                            </div>
+                          </div>
                           {isUpgradingRoom ? (
                             <div className="room-construction-overlay">
                               <div className="room-clock">
@@ -4285,11 +4606,15 @@ export default function App() {
                           height: CELL_HEIGHT
                         }}
                         >
-                          <img
-                            src={ROOM_CONFIG[constructionJob.roomType].image}
-                          alt={roomDisplayName(constructionJob.roomType, uiLanguage)}
-                            className="room-art"
-                          />
+                          {roomProductionSpriteStyle(constructionJob.roomType) ? (
+                            <span className="room-art room-art-sprite" style={roomProductionSpriteStyle(constructionJob.roomType)!} />
+                          ) : (
+                            <img
+                              src={ROOM_CONFIG[constructionJob.roomType].image}
+                              alt={roomDisplayName(constructionJob.roomType, uiLanguage)}
+                              className="room-art"
+                            />
+                          )}
                         <div className="room-meta">
                           <p className="room-name">{roomDisplayName(constructionJob.roomType, uiLanguage)}</p>
                         </div>
@@ -4512,13 +4837,22 @@ function SectorMapScreen({
   client,
   session,
   currentUserId,
-  hangarInventory
+  hangarInventory,
+  technologyLevels,
+  onMapStateSync
 }: {
   language: UILanguage;
   client: Client;
   session: Session | null;
   currentUserId: string;
   hangarInventory: Record<string, number>;
+  technologyLevels: Record<TechnologyId, number>;
+  onMapStateSync?: (payload: {
+    resources?: Partial<Record<ResourceId, number>>;
+    credits?: number;
+    mapDropNotifications?: number;
+    syncReport?: any;
+  }) => void;
 }) {
   const l = (fr: string, en: string) => (language === "en" ? en : fr);
   const initialMapZoom = 1.06;
@@ -4531,6 +4865,7 @@ function SectorMapScreen({
   const [fleets, setFleets] = useState<SectorFleet[]>([]);
   const [actionMode, setActionMode] = useState<"none" | "attack" | "mine" | "mission">("none");
   const [sidebarTab, setSidebarTab] = useState<"navigation" | "quests">("navigation");
+  const [sidebarOpen, setSidebarOpen] = useState(true);
   const [dailyQuests, setDailyQuests] = useState([
     {
       id: "q1",
@@ -4577,10 +4912,12 @@ function SectorMapScreen({
   const [mapPlayers, setMapPlayers] = useState<Array<{ userId: string; username: string }>>([]);
   const [mapFields, setMapFields] = useState<MapFieldServerDto[]>([]);
   const [mapExpedition, setMapExpedition] = useState<MapExpeditionDto | null>(null);
+  const [mapExpeditions, setMapExpeditions] = useState<MapExpeditionDto[]>([]);
   const [mapReports, setMapReports] = useState<
     Array<{ id: string; fieldId: string; at: number; resources: Partial<Record<ResourceId, number>>; items?: Array<{ itemId: string; quantity: number }> }>
   >([]);
   const [mapHarvestInventory, setMapHarvestInventory] = useState<MapHarvestShipRow[]>([]);
+  const [mapServerMaxActiveExpeditions, setMapServerMaxActiveExpeditions] = useState(1);
   const [mapLoadError, setMapLoadError] = useState("");
   const [mapActionError, setMapActionError] = useState("");
   const [mapActionBusy, setMapActionBusy] = useState(false);
@@ -4594,8 +4931,72 @@ function SectorMapScreen({
   const [mapServerSync, setMapServerSync] = useState<{ serverMs: number; localMs: number } | null>(null);
   const [viewportSize, setViewportSize] = useState({ width: 0, height: 0 });
 
+  const commandementEscadreLevel = Math.max(0, Math.floor(Number(technologyLevels.commandement_escadre ?? 0)));
+  const mapMaxActiveExpeditions = Math.max(1, mapServerMaxActiveExpeditions, 1 + Math.floor(commandementEscadreLevel / 3));
+  const mapActiveBlockingExpeditions = useMemo(() => {
+    const nowSec = Math.max(0, Math.floor(mapNowMs / 1000));
+    return mapExpeditions.reduce((count, expedition) => {
+      if (!expedition || typeof expedition !== "object") return count;
+      const status = String(expedition.status || "").trim().toLowerCase();
+      if (status === "returning") {
+        const returnEndAt = Math.max(0, Math.floor(Number(expedition.returnEndAt ?? 0)));
+        if (returnEndAt > 0 && returnEndAt <= nowSec) return count;
+        return count + 1;
+      }
+      if (status === "travel_to_field") {
+        const arrivalAt = Math.max(0, Math.floor(Number(expedition.arrivalAt ?? 0)));
+        if (arrivalAt > 0 && arrivalAt <= nowSec) return count;
+        return count + 1;
+      }
+      if (status === "extracting") {
+        const extractionEndAt = Math.max(0, Math.floor(Number(expedition.extractionEndAt ?? 0)));
+        if (extractionEndAt > 0 && extractionEndAt <= nowSec) return count;
+        return count + 1;
+      }
+      return count;
+    }, 0);
+  }, [mapExpeditions, mapNowMs]);
+  const canLaunchAnotherMapExpedition = mapActiveBlockingExpeditions < mapMaxActiveExpeditions;
+
   const containerRef = useRef<HTMLDivElement>(null);
   const didCenterOnHomeRef = useRef(false);
+  const mapOverdueSyncAtRef = useRef(0);
+
+  const parseMapExpeditionRow = (expeditionRaw: Record<string, any>): MapExpeditionDto | null => {
+    if (!expeditionRaw || typeof expeditionRaw !== "object") return null;
+    const id = String(expeditionRaw.id || "").trim();
+    if (!id) return null;
+    return {
+      id,
+      fieldId: String(expeditionRaw.fieldId || ""),
+      status: (String(expeditionRaw.status || "travel_to_field") as MapExpeditionDto["status"]),
+      departureAt: Math.max(0, Math.floor(Number(expeditionRaw.departureAt ?? 0))),
+      arrivalAt: Math.max(0, Math.floor(Number(expeditionRaw.arrivalAt ?? 0))),
+      extractionStartAt: Math.max(0, Math.floor(Number(expeditionRaw.extractionStartAt ?? 0))),
+      extractionEndAt: Math.max(0, Math.floor(Number(expeditionRaw.extractionEndAt ?? 0))),
+      returnStartAt: Math.max(0, Math.floor(Number(expeditionRaw.returnStartAt ?? 0))),
+      returnEndAt: Math.max(0, Math.floor(Number(expeditionRaw.returnEndAt ?? 0))),
+      travelSeconds: Math.max(0, Math.floor(Number(expeditionRaw.travelSeconds ?? 0))),
+      extractionSeconds: Math.max(0, Math.floor(Number(expeditionRaw.extractionSeconds ?? 0))),
+      totalHarvestSpeed: Math.max(0, Math.floor(Number(expeditionRaw.totalHarvestSpeed ?? 0))),
+      totalTransportCapacity: Math.max(0, Math.floor(Number(expeditionRaw.totalTransportCapacity ?? 0))),
+      fleet: Array.isArray(expeditionRaw.fleet)
+        ? expeditionRaw.fleet
+            .map((row: any) => ({
+              unitId: String(row?.unitId || "").trim(),
+              quantity: Math.max(0, Math.floor(Number(row?.quantity ?? 0)))
+            }))
+            .filter((row: any) => row.unitId.length > 0 && row.quantity > 0)
+        : [],
+      snapshotResources: (expeditionRaw.snapshotResources && typeof expeditionRaw.snapshotResources === "object"
+        ? expeditionRaw.snapshotResources
+        : {}) as Partial<Record<ResourceId, number>>,
+      collectedResources: (expeditionRaw.collectedResources && typeof expeditionRaw.collectedResources === "object"
+        ? expeditionRaw.collectedResources
+        : {}) as Partial<Record<ResourceId, number>>,
+      serverNowTs: Math.max(0, Math.floor(Number(expeditionRaw.serverNowTs ?? Math.floor(Date.now() / 1000))))
+    };
+  };
 
   useEffect(() => {
     if (!session) {
@@ -4640,85 +5041,74 @@ function SectorMapScreen({
     if (!session) {
       setMapFields([]);
       setMapExpedition(null);
+      setMapExpeditions([]);
       setMapReports([]);
       setMapHarvestInventory([]);
+      setMapServerMaxActiveExpeditions(1);
       setMapLoadError("");
       return;
     }
     let cancelled = false;
     const loadMapState = async () => {
       try {
-        const rpc = await client.rpc(session, "rpc_map_fields_state", "{}");
+        const rpc = await client.rpc(
+          session,
+          "rpc_map_fields_state",
+          JSON.stringify({ commandementEscadreLevel })
+        );
         const parsed = parseJsonObject((rpc as any)?.payload ?? rpc);
         const nested = parseJsonObject(parsed?.payload);
         const source = Object.keys(nested).length > 0 ? nested : parsed;
         const fieldsRaw = Array.isArray(source?.fields) ? source.fields : [];
         const expeditionRaw = parseJsonObject(source?.expedition);
+        const expeditionsRaw = Array.isArray(source?.expeditions) ? source.expeditions : [];
         const reportsRaw = Array.isArray(source?.reports) ? source.reports : [];
         const harvestRaw = Array.isArray(source?.harvestInventory) ? source.harvestInventory : [];
+        const maxActiveExpeditions = Math.max(1, Math.floor(Number(source?.maxActiveExpeditions ?? 1)));
 
         const nextFields: MapFieldServerDto[] = fieldsRaw
-          .map((row: any) => ({
-            id: String(row?.id || "").trim(),
-            x: Math.floor(Number(row?.x ?? 0)),
-            y: Math.floor(Number(row?.y ?? 0)),
-            rarityTier: String(row?.rarityTier || "COMMON").toUpperCase() as MapFieldServerDto["rarityTier"],
-            qualityTier: String(row?.qualityTier || "STANDARD").toUpperCase() as MapFieldServerDto["qualityTier"],
-            resources: Array.isArray(row?.resources)
-              ? row.resources
-                  .map((res: any) => ({
-                    resourceId: String(res?.resourceId || "").trim(),
-                    totalAmount: Math.max(0, Math.floor(Number(res?.totalAmount ?? 0))),
-                    remainingAmount: Math.max(0, Math.floor(Number(res?.remainingAmount ?? 0)))
-                  }))
-                  .filter((res: any) => res.resourceId.length > 0)
-              : [],
-            totalExtractionWork: Math.max(0, Math.floor(Number(row?.totalExtractionWork ?? 0))),
-            remainingExtractionWork: Math.max(0, Math.floor(Number(row?.remainingExtractionWork ?? 0))),
-            spawnedAt: Math.max(0, Math.floor(Number(row?.spawnedAt ?? 0))),
-            expiresAt: Math.max(0, Math.floor(Number(row?.expiresAt ?? 0))),
-            occupiedByPlayerId: String(row?.occupiedByPlayerId || ""),
-            occupiedByUsername: String(row?.occupiedByUsername || ""),
-            occupyingFleetId: String(row?.occupyingFleetId || ""),
-            isOccupied: Boolean(row?.isOccupied),
-            isVisible: row?.isVisible !== false,
-            hiddenDetails: Boolean(row?.hiddenDetails)
-          }))
+          .map((row: any) => {
+            const occupiedByPlayerId = normalizeMapEntityId(row?.occupiedByPlayerId);
+            const occupyingFleetId = normalizeMapEntityId(row?.occupyingFleetId);
+            return {
+              id: String(row?.id || "").trim(),
+              x: Math.floor(Number(row?.x ?? 0)),
+              y: Math.floor(Number(row?.y ?? 0)),
+              rarityTier: String(row?.rarityTier || "COMMON").toUpperCase() as MapFieldServerDto["rarityTier"],
+              qualityTier: String(row?.qualityTier || "STANDARD").toUpperCase() as MapFieldServerDto["qualityTier"],
+              resources: Array.isArray(row?.resources)
+                ? row.resources
+                    .map((res: any) => ({
+                      resourceId: String(res?.resourceId || "").trim(),
+                      totalAmount: Math.max(0, Math.floor(Number(res?.totalAmount ?? 0))),
+                      remainingAmount: Math.max(0, Math.floor(Number(res?.remainingAmount ?? 0)))
+                    }))
+                    .filter((res: any) => res.resourceId.length > 0)
+                : [],
+              totalExtractionWork: Math.max(0, Math.floor(Number(row?.totalExtractionWork ?? 0))),
+              remainingExtractionWork: Math.max(0, Math.floor(Number(row?.remainingExtractionWork ?? 0))),
+              spawnedAt: Math.max(0, Math.floor(Number(row?.spawnedAt ?? 0))),
+              expiresAt: Math.max(0, Math.floor(Number(row?.expiresAt ?? 0))),
+              occupiedByPlayerId,
+              occupiedByUsername: String(row?.occupiedByUsername || ""),
+              occupyingFleetId,
+              isOccupied: normalizeMapOccupiedFlag(row?.isOccupied, occupiedByPlayerId, occupyingFleetId),
+              isVisible: parseBooleanFlag(row?.isVisible, true),
+              hiddenDetails: parseBooleanFlag(row?.hiddenDetails, false)
+            };
+          })
           .filter((row: MapFieldServerDto) => row.id.length > 0);
 
-        const nextExpedition: MapExpeditionDto | null =
-          expeditionRaw && typeof expeditionRaw === "object" && String(expeditionRaw.id || "").trim().length > 0
-            ? {
-                id: String(expeditionRaw.id || ""),
-                fieldId: String(expeditionRaw.fieldId || ""),
-                status: (String(expeditionRaw.status || "travel_to_field") as MapExpeditionDto["status"]),
-                departureAt: Math.max(0, Math.floor(Number(expeditionRaw.departureAt ?? 0))),
-                arrivalAt: Math.max(0, Math.floor(Number(expeditionRaw.arrivalAt ?? 0))),
-                extractionStartAt: Math.max(0, Math.floor(Number(expeditionRaw.extractionStartAt ?? 0))),
-                extractionEndAt: Math.max(0, Math.floor(Number(expeditionRaw.extractionEndAt ?? 0))),
-                returnStartAt: Math.max(0, Math.floor(Number(expeditionRaw.returnStartAt ?? 0))),
-                returnEndAt: Math.max(0, Math.floor(Number(expeditionRaw.returnEndAt ?? 0))),
-                travelSeconds: Math.max(0, Math.floor(Number(expeditionRaw.travelSeconds ?? 0))),
-                extractionSeconds: Math.max(0, Math.floor(Number(expeditionRaw.extractionSeconds ?? 0))),
-                totalHarvestSpeed: Math.max(0, Math.floor(Number(expeditionRaw.totalHarvestSpeed ?? 0))),
-                totalTransportCapacity: Math.max(0, Math.floor(Number(expeditionRaw.totalTransportCapacity ?? 0))),
-                fleet: Array.isArray(expeditionRaw.fleet)
-                  ? expeditionRaw.fleet
-                      .map((row: any) => ({
-                        unitId: String(row?.unitId || "").trim(),
-                        quantity: Math.max(0, Math.floor(Number(row?.quantity ?? 0)))
-                      }))
-                      .filter((row: any) => row.unitId.length > 0 && row.quantity > 0)
-                  : [],
-                snapshotResources: (expeditionRaw.snapshotResources && typeof expeditionRaw.snapshotResources === "object"
-                  ? expeditionRaw.snapshotResources
-                  : {}) as Partial<Record<ResourceId, number>>,
-                collectedResources: (expeditionRaw.collectedResources && typeof expeditionRaw.collectedResources === "object"
-                  ? expeditionRaw.collectedResources
-                  : {}) as Partial<Record<ResourceId, number>>,
-                serverNowTs: Math.max(0, Math.floor(Number(expeditionRaw.serverNowTs ?? Math.floor(Date.now() / 1000))))
-              }
-            : null;
+        const parsedExpeditions = expeditionsRaw
+          .map((row: any) => parseMapExpeditionRow(parseJsonObject(row)))
+          .filter((row: MapExpeditionDto | null): row is MapExpeditionDto => Boolean(row));
+        const fallbackExpedition = parseMapExpeditionRow(expeditionRaw);
+        const nextExpeditions = parsedExpeditions.length > 0
+          ? parsedExpeditions
+          : fallbackExpedition
+            ? [fallbackExpedition]
+            : [];
+        const nextExpedition: MapExpeditionDto | null = nextExpeditions[0] ?? null;
 
         const nextReports = reportsRaw
           .map((row: any) => ({
@@ -4747,12 +5137,29 @@ function SectorMapScreen({
           }))
           .filter((row: MapHarvestShipRow) => row.unitId.length > 0 && row.quantity > 0);
 
+        const stateRaw = parseJsonObject(source?.state);
+        const stateResources =
+          stateRaw?.resources && typeof stateRaw.resources === "object"
+            ? (stateRaw.resources as Partial<Record<ResourceId, number>>)
+            : undefined;
+        const stateCredits = Number(stateRaw?.credits ?? NaN);
+        const stateMapDropNotifications = Number(stateRaw?.mapDropNotifications ?? NaN);
+        const syncReport = parseJsonObject(source?.syncReport);
+
         if (!cancelled) {
           setMapFields(nextFields);
+          setMapExpeditions(nextExpeditions);
           setMapExpedition(nextExpedition);
           setMapReports(nextReports);
           setMapHarvestInventory(nextHarvestInventory);
+          setMapServerMaxActiveExpeditions(maxActiveExpeditions);
           setMapLoadError("");
+          onMapStateSync?.({
+            resources: stateResources,
+            credits: Number.isFinite(stateCredits) ? Math.max(0, Math.floor(stateCredits)) : undefined,
+            mapDropNotifications: Number.isFinite(stateMapDropNotifications) ? Math.max(0, Math.floor(stateMapDropNotifications)) : undefined,
+            syncReport: Object.keys(syncReport).length > 0 ? syncReport : null
+          });
         }
       } catch (err) {
         if (!cancelled) {
@@ -4771,7 +5178,7 @@ function SectorMapScreen({
       cancelled = true;
       clearInterval(interval);
     };
-  }, [client, session, language]);
+  }, [client, commandementEscadreLevel, session, language]);
 
   useEffect(() => {
     const tick = setInterval(() => setMapNowMs(Date.now()), 1000);
@@ -4928,6 +5335,10 @@ function SectorMapScreen({
     if (!mapExpedition) return null;
     const field = mapFields.find((row) => row.id === mapExpedition.fieldId);
     if (!field) return null;
+    const status = String(mapExpedition.status || "").trim().toLowerCase();
+    if (status === "returning" && mapExpedition.returnEndAt > 0 && mapNowTs >= mapExpedition.returnEndAt) return null;
+    if (status === "travel_to_field" && mapExpedition.arrivalAt > 0 && mapNowTs >= mapExpedition.arrivalAt) return null;
+    if (status === "extracting" && mapExpedition.extractionEndAt > 0 && mapNowTs >= mapExpedition.extractionEndAt) return null;
     const home = selfPlanetCoords;
     const fieldPoint = { x: field.x, y: field.y };
     if (mapExpedition.status === "extracting") {
@@ -4986,6 +5397,7 @@ function SectorMapScreen({
       remainingSeconds?: number;
       etaTs?: number;
       canRecall?: boolean;
+      expeditionId?: string;
     }> = fleets
       .map((fleet) => {
         const missionLabel = fleet.missionType === "attack"
@@ -5005,40 +5417,56 @@ function SectorMapScreen({
       })
       .filter((row) => row.progress < 1);
 
-    if (mapExpedition && mapExpeditionVisual) {
-      const field = mapFields.find((row) => row.id === mapExpedition.fieldId);
-      const fieldName = field ? mapFieldDisplayName(field.id, language) : mapFieldDisplayName(mapExpedition.fieldId, language);
-      const statusLabel = mapExpedition.status === "extracting"
+    const displayedExpeditions = mapExpeditions.length > 0 ? mapExpeditions : (mapExpedition ? [mapExpedition] : []);
+    for (const expedition of displayedExpeditions) {
+      const field = mapFields.find((row) => row.id === expedition.fieldId);
+      const fieldName = field ? mapFieldDisplayName(field.id, language) : mapFieldDisplayName(expedition.fieldId, language);
+      const status = String(expedition.status || "travel_to_field");
+      const statusLabel = status === "extracting"
         ? (language === "en" ? "Harvesting fleet" : "Flotte en extraction")
-        : mapExpedition.status === "returning"
+        : status === "returning"
           ? (language === "en" ? "Returning fleet" : "Flotte en retour")
           : (language === "en" ? "Traveling fleet" : "Flotte en trajet");
-      const route = mapExpedition.status === "extracting"
+      const route = status === "extracting"
         ? `${fieldName} • ${language === "en" ? "Harvesting in progress" : "Exploitation en cours"}`
-        : mapExpedition.status === "returning"
+        : status === "returning"
           ? `${fieldName} → ${language === "en" ? "Your planet" : "Votre planète"}`
           : `${language === "en" ? "Your planet" : "Votre planète"} → ${fieldName}`;
-      const isExtracting = mapExpedition.status === "extracting";
-      const etaTs = isExtracting ? mapExpedition.extractionEndAt : mapExpeditionVisual.etaTs;
-      const progress = isExtracting
+      const etaTs = status === "extracting"
+        ? expedition.extractionEndAt
+        : status === "returning"
+          ? expedition.returnEndAt
+          : expedition.arrivalAt;
+      const remainingSeconds = Math.max(0, etaTs - mapNowTs);
+      if (remainingSeconds <= 0) continue;
+      const progress = status === "extracting"
         ? (() => {
-            const total = Math.max(1, mapExpedition.extractionEndAt - mapExpedition.extractionStartAt);
-            return Math.max(0, Math.min(1, (mapNowTs - mapExpedition.extractionStartAt) / total));
+            const total = Math.max(1, expedition.extractionEndAt - expedition.extractionStartAt);
+            return Math.max(0, Math.min(1, (mapNowTs - expedition.extractionStartAt) / total));
           })()
-        : Math.max(0, Math.min(1, mapExpeditionVisual.progress));
+        : status === "returning"
+          ? (() => {
+              const total = Math.max(1, expedition.returnEndAt - expedition.returnStartAt);
+              return Math.max(0, Math.min(1, (mapNowTs - expedition.returnStartAt) / total));
+            })()
+          : (() => {
+              const total = Math.max(1, expedition.arrivalAt - expedition.departureAt);
+              return Math.max(0, Math.min(1, (mapNowTs - expedition.departureAt) / total));
+            })();
       rows.unshift({
-        id: `expedition_${mapExpedition.id}`,
+        id: `expedition_${expedition.id}`,
         title: statusLabel,
         route,
         detail: `${language === "en" ? "ETA" : "Arrivée"} ${new Date(etaTs * 1000).toLocaleTimeString()}`,
         progress,
-        remainingSeconds: Math.max(0, etaTs - mapNowTs),
+        remainingSeconds,
         etaTs,
-        canRecall: mapExpedition.status !== "returning"
+        canRecall: status !== "returning",
+        expeditionId: expedition.id
       });
     }
     return rows;
-  }, [entityLabelById, fleets, language, mapExpedition, mapExpeditionVisual, mapFields, mapNowTs]);
+  }, [entityLabelById, fleets, language, mapExpedition, mapExpeditions, mapFields, mapNowTs]);
 
   const mapLiveCollectedRows = useMemo(() => {
     if (!mapExpedition || mapExpedition.status !== "extracting") return [] as Array<{ resourceId: ResourceId; amount: number }>;
@@ -5196,27 +5624,40 @@ function SectorMapScreen({
     if (e.button === 2 || e.button === 1) setIsDragging(false);
   };
 
-  const handleWheel = (e: React.WheelEvent) => {
-    const delta = -e.deltaY * 0.0011;
-    const nextZoom = Math.min(Math.max(zoom + delta, 0.22), 2.6);
-    if (!containerRef.current) {
-      setZoom(nextZoom);
-      return;
-    }
+  const applyZoomAtPoint = useCallback((deltaY: number, clientX: number, clientY: number) => {
+    setZoom((prevZoom) => {
+      const delta = -deltaY * 0.0011;
+      const nextZoom = Math.min(Math.max(prevZoom + delta, 0.22), 2.6);
+      if (!containerRef.current || nextZoom === prevZoom) return nextZoom;
 
-    const rect = containerRef.current.getBoundingClientRect();
-    const mouseX = e.clientX - rect.left;
-    const mouseY = e.clientY - rect.top;
+      const rect = containerRef.current.getBoundingClientRect();
+      const mouseX = clientX - rect.left;
+      const mouseY = clientY - rect.top;
 
-    setPan((prev) => {
-      const ratio = nextZoom / zoom;
-      return {
-        x: mouseX - (mouseX - prev.x) * ratio,
-        y: mouseY - (mouseY - prev.y) * ratio
-      };
+      setPan((prevPan) => {
+        const ratio = nextZoom / prevZoom;
+        return {
+          x: mouseX - (mouseX - prevPan.x) * ratio,
+          y: mouseY - (mouseY - prevPan.y) * ratio
+        };
+      });
+      return nextZoom;
     });
-    setZoom(nextZoom);
-  };
+  }, []);
+
+  useEffect(() => {
+    const node = containerRef.current;
+    if (!node) return;
+    const onWheel = (event: WheelEvent) => {
+      event.preventDefault();
+      event.stopPropagation();
+      applyZoomAtPoint(event.deltaY, event.clientX, event.clientY);
+    };
+    node.addEventListener("wheel", onWheel, { passive: false });
+    return () => {
+      node.removeEventListener("wheel", onWheel);
+    };
+  }, [applyZoomAtPoint]);
 
   const navigateTo = (x: number, y: number) => {
     if (!containerRef.current) return;
@@ -5268,7 +5709,7 @@ function SectorMapScreen({
   const handleEntityClick = (entity: SectorEntity) => {
     if (actionMode !== "none" && selectedEntity?.id === "st_1") {
       if (actionMode === "mine" && entity.type === "resource" && entity.fieldId) {
-        const canLaunch = !mapActionBusy && !mapExpedition;
+        const canLaunch = !mapActionBusy && canLaunchAnotherMapExpedition;
         if (canLaunch) {
           void launchHarvestOnField(entity.fieldId);
         }
@@ -5310,69 +5751,69 @@ function SectorMapScreen({
   const applyMapPayload = (source: Record<string, any>) => {
     const rowsRaw = Array.isArray(source?.fields) ? source.fields : [];
     const nextFields: MapFieldServerDto[] = rowsRaw
-      .map((row: any) => ({
-        id: String(row?.id || "").trim(),
-        x: Math.floor(Number(row?.x ?? 0)),
-        y: Math.floor(Number(row?.y ?? 0)),
-        rarityTier: String(row?.rarityTier || "COMMON").toUpperCase() as MapFieldServerDto["rarityTier"],
-        qualityTier: String(row?.qualityTier || "STANDARD").toUpperCase() as MapFieldServerDto["qualityTier"],
-        resources: Array.isArray(row?.resources)
-          ? row.resources
-              .map((res: any) => ({
-                resourceId: String(res?.resourceId || "").trim(),
-                totalAmount: Math.max(0, Math.floor(Number(res?.totalAmount ?? 0))),
-                remainingAmount: Math.max(0, Math.floor(Number(res?.remainingAmount ?? 0)))
-              }))
-              .filter((res: any) => res.resourceId.length > 0)
-          : [],
-        totalExtractionWork: Math.max(0, Math.floor(Number(row?.totalExtractionWork ?? 0))),
-        remainingExtractionWork: Math.max(0, Math.floor(Number(row?.remainingExtractionWork ?? 0))),
-        spawnedAt: Math.max(0, Math.floor(Number(row?.spawnedAt ?? 0))),
-        expiresAt: Math.max(0, Math.floor(Number(row?.expiresAt ?? 0))),
-        occupiedByPlayerId: String(row?.occupiedByPlayerId || ""),
-        occupiedByUsername: String(row?.occupiedByUsername || ""),
-        occupyingFleetId: String(row?.occupyingFleetId || ""),
-        isOccupied: Boolean(row?.isOccupied),
-        isVisible: row?.isVisible !== false,
-        hiddenDetails: Boolean(row?.hiddenDetails)
-      }))
+      .map((row: any) => {
+        const occupiedByPlayerId = normalizeMapEntityId(row?.occupiedByPlayerId);
+        const occupyingFleetId = normalizeMapEntityId(row?.occupyingFleetId);
+        return {
+          id: String(row?.id || "").trim(),
+          x: Math.floor(Number(row?.x ?? 0)),
+          y: Math.floor(Number(row?.y ?? 0)),
+          rarityTier: String(row?.rarityTier || "COMMON").toUpperCase() as MapFieldServerDto["rarityTier"],
+          qualityTier: String(row?.qualityTier || "STANDARD").toUpperCase() as MapFieldServerDto["qualityTier"],
+          resources: Array.isArray(row?.resources)
+            ? row.resources
+                .map((res: any) => ({
+                  resourceId: String(res?.resourceId || "").trim(),
+                  totalAmount: Math.max(0, Math.floor(Number(res?.totalAmount ?? 0))),
+                  remainingAmount: Math.max(0, Math.floor(Number(res?.remainingAmount ?? 0)))
+                }))
+                .filter((res: any) => res.resourceId.length > 0)
+            : [],
+          totalExtractionWork: Math.max(0, Math.floor(Number(row?.totalExtractionWork ?? 0))),
+          remainingExtractionWork: Math.max(0, Math.floor(Number(row?.remainingExtractionWork ?? 0))),
+          spawnedAt: Math.max(0, Math.floor(Number(row?.spawnedAt ?? 0))),
+          expiresAt: Math.max(0, Math.floor(Number(row?.expiresAt ?? 0))),
+          occupiedByPlayerId,
+          occupiedByUsername: String(row?.occupiedByUsername || ""),
+          occupyingFleetId,
+          isOccupied: normalizeMapOccupiedFlag(row?.isOccupied, occupiedByPlayerId, occupyingFleetId),
+          isVisible: parseBooleanFlag(row?.isVisible, true),
+          hiddenDetails: parseBooleanFlag(row?.hiddenDetails, false)
+        };
+      })
       .filter((row: MapFieldServerDto) => row.id.length > 0);
     setMapFields(nextFields);
+    setMapServerMaxActiveExpeditions(Math.max(1, Math.floor(Number(source?.maxActiveExpeditions ?? 1))));
 
     const expeditionRaw = parseJsonObject(source?.expedition);
-    if (Object.keys(expeditionRaw).length > 0 && String(expeditionRaw.id || "").trim().length > 0) {
-      setMapExpedition({
-        id: String(expeditionRaw.id || ""),
-        fieldId: String(expeditionRaw.fieldId || ""),
-        status: (String(expeditionRaw.status || "travel_to_field") as MapExpeditionDto["status"]),
-        departureAt: Math.max(0, Math.floor(Number(expeditionRaw.departureAt ?? 0))),
-        arrivalAt: Math.max(0, Math.floor(Number(expeditionRaw.arrivalAt ?? 0))),
-        extractionStartAt: Math.max(0, Math.floor(Number(expeditionRaw.extractionStartAt ?? 0))),
-        extractionEndAt: Math.max(0, Math.floor(Number(expeditionRaw.extractionEndAt ?? 0))),
-        returnStartAt: Math.max(0, Math.floor(Number(expeditionRaw.returnStartAt ?? 0))),
-        returnEndAt: Math.max(0, Math.floor(Number(expeditionRaw.returnEndAt ?? 0))),
-        travelSeconds: Math.max(0, Math.floor(Number(expeditionRaw.travelSeconds ?? 0))),
-        extractionSeconds: Math.max(0, Math.floor(Number(expeditionRaw.extractionSeconds ?? 0))),
-        totalHarvestSpeed: Math.max(0, Math.floor(Number(expeditionRaw.totalHarvestSpeed ?? 0))),
-        totalTransportCapacity: Math.max(0, Math.floor(Number(expeditionRaw.totalTransportCapacity ?? 0))),
-        fleet: Array.isArray(expeditionRaw.fleet)
-          ? expeditionRaw.fleet
-              .map((row: any) => ({
-                unitId: String(row?.unitId || "").trim(),
-                quantity: Math.max(0, Math.floor(Number(row?.quantity ?? 0)))
-              }))
-              .filter((row: any) => row.unitId.length > 0 && row.quantity > 0)
-          : [],
-        snapshotResources: (expeditionRaw.snapshotResources && typeof expeditionRaw.snapshotResources === "object"
-          ? expeditionRaw.snapshotResources
-          : {}) as Partial<Record<ResourceId, number>>,
-        collectedResources: (expeditionRaw.collectedResources && typeof expeditionRaw.collectedResources === "object"
-          ? expeditionRaw.collectedResources
-          : {}) as Partial<Record<ResourceId, number>>,
-        serverNowTs: Math.max(0, Math.floor(Number(expeditionRaw.serverNowTs ?? Math.floor(Date.now() / 1000))))
-      });
-    } else if (source?.expedition === null) {
+    const expeditionsRaw = Array.isArray(source?.expeditions) ? source.expeditions : [];
+    const parsedExpeditions = expeditionsRaw
+      .map((row: any) => parseMapExpeditionRow(parseJsonObject(row)))
+      .filter((row: MapExpeditionDto | null): row is MapExpeditionDto => Boolean(row));
+    const fallbackExpedition = parseMapExpeditionRow(expeditionRaw);
+    const nextExpeditions = parsedExpeditions.length > 0
+      ? parsedExpeditions
+      : fallbackExpedition
+        ? [fallbackExpedition]
+        : [];
+    setMapExpeditions(nextExpeditions);
+    if (nextExpeditions.length > 0) {
+      setMapExpedition(nextExpeditions[0]);
+    } else {
       setMapExpedition(null);
+    }
+
+    if (Array.isArray(source?.harvestInventory)) {
+      const nextHarvestInventory: MapHarvestShipRow[] = source.harvestInventory
+        .map((row: any) => ({
+          unitId: String(row?.unitId || "").trim(),
+          quantity: Math.max(0, Math.floor(Number(row?.quantity ?? 0))),
+          harvestSpeed: Math.max(0, Math.floor(Number(row?.harvestSpeed ?? 0))),
+          harvestCapacity: Math.max(0, Math.floor(Number(row?.harvestCapacity ?? 0))),
+          mapSpeed: Math.max(0, Math.floor(Number(row?.mapSpeed ?? 0)))
+        }))
+        .filter((row: MapHarvestShipRow) => row.unitId.length > 0 && row.quantity > 0);
+      setMapHarvestInventory(nextHarvestInventory);
     }
 
     if (Array.isArray(source?.reports)) {
@@ -5394,7 +5835,66 @@ function SectorMapScreen({
         .filter((row: any) => row.id.length > 0);
       setMapReports(nextReports);
     }
+
+    const stateRaw = parseJsonObject(source?.state);
+    const stateResources =
+      stateRaw?.resources && typeof stateRaw.resources === "object"
+        ? (stateRaw.resources as Partial<Record<ResourceId, number>>)
+        : undefined;
+    const stateCredits = Number(stateRaw?.credits ?? NaN);
+    const stateMapDropNotifications = Number(stateRaw?.mapDropNotifications ?? NaN);
+    const syncReport = parseJsonObject(source?.syncReport);
+    onMapStateSync?.({
+      resources: stateResources,
+      credits: Number.isFinite(stateCredits) ? Math.max(0, Math.floor(stateCredits)) : undefined,
+      mapDropNotifications: Number.isFinite(stateMapDropNotifications) ? Math.max(0, Math.floor(stateMapDropNotifications)) : undefined,
+      syncReport: Object.keys(syncReport).length > 0 ? syncReport : null
+    });
   };
+
+  useEffect(() => {
+    if (!session || mapActionBusy) return;
+    const displayedExpeditions = mapExpeditions.length > 0 ? mapExpeditions : (mapExpedition ? [mapExpedition] : []);
+    if (displayedExpeditions.length <= 0) return;
+
+    const hasOverdue = displayedExpeditions.some((expedition) => {
+      const status = String(expedition?.status || "").trim().toLowerCase();
+      const etaTs =
+        status === "extracting"
+          ? Math.max(0, Math.floor(Number(expedition?.extractionEndAt ?? 0)))
+          : status === "returning"
+            ? Math.max(0, Math.floor(Number(expedition?.returnEndAt ?? 0)))
+            : Math.max(0, Math.floor(Number(expedition?.arrivalAt ?? 0)));
+      return etaTs > 0 && etaTs <= mapNowTs;
+    });
+
+    if (!hasOverdue) return;
+    const now = Date.now();
+    if (now - mapOverdueSyncAtRef.current < 2500) return;
+    mapOverdueSyncAtRef.current = now;
+
+    let cancelled = false;
+    const forceSync = async () => {
+      try {
+        const rpc = await client.rpc(
+          session,
+          "rpc_map_fields_state",
+          JSON.stringify({ commandementEscadreLevel })
+        );
+        if (cancelled) return;
+        const parsed = parseJsonObject((rpc as any)?.payload ?? rpc);
+        const nested = parseJsonObject(parsed?.payload);
+        const source = Object.keys(nested).length > 0 ? nested : parsed;
+        applyMapPayload(source);
+      } catch {
+        // noop
+      }
+    };
+    void forceSync();
+    return () => {
+      cancelled = true;
+    };
+  }, [applyMapPayload, client, commandementEscadreLevel, mapActionBusy, mapExpedition, mapExpeditions, mapNowTs, session]);
 
   const launchHarvestOnField = async (fieldId: string) => {
     if (!session) return;
@@ -5419,7 +5919,11 @@ function SectorMapScreen({
     try {
       setMapActionBusy(true);
       setMapActionError("");
-      const rpc = await client.rpc(session, "rpc_map_fields_start", JSON.stringify({ fieldId, fleet: fleetPayload }));
+      const rpc = await client.rpc(
+        session,
+        "rpc_map_fields_start",
+        JSON.stringify({ fieldId, fleet: fleetPayload, commandementEscadreLevel })
+      );
       const parsed = parseJsonObject((rpc as any)?.payload ?? rpc);
       const nested = parseJsonObject(parsed?.payload);
       const source = Object.keys(nested).length > 0 ? nested : parsed;
@@ -5437,11 +5941,41 @@ function SectorMapScreen({
           // noop
         }
       }
+      const detailLower = String(detail || "").toLowerCase();
+      if (detailLower.includes("resource field is already occupied")) {
+        detail = l(
+          "Ce champ est deja occupe. Choisissez un champ libre.",
+          "This field is already occupied. Choose a free field."
+        );
+      } else if (detailLower.includes("no harvestable resources unlocked for this field")) {
+        detail = l(
+          "Aucune ressource de ce champ n'est encore debloquee sur votre hyperstructure.",
+          "No resource in this field is unlocked on your hyperstructure yet."
+        );
+      } else if (detailLower.includes("active fleet slot limit reached")) {
+        detail = l(
+          "Nombre maximal de flottes actives atteint pour votre niveau de Commandement d'Escadre.",
+          "Maximum active fleet slots reached for your Squadron Command level."
+        );
+      }
       setMapActionError(
         detail
           ? `${l("Lancement de collecte impossible :", "Unable to launch harvesting:")} ${detail}`
           : l("Lancement de collecte impossible.", "Unable to launch harvesting.")
       );
+      try {
+        const rpcState = await client.rpc(
+          session,
+          "rpc_map_fields_state",
+          JSON.stringify({ commandementEscadreLevel })
+        );
+        const parsedState = parseJsonObject((rpcState as any)?.payload ?? rpcState);
+        const nestedState = parseJsonObject(parsedState?.payload);
+        const sourceState = Object.keys(nestedState).length > 0 ? nestedState : parsedState;
+        applyMapPayload(sourceState);
+      } catch {
+        // noop
+      }
       if (import.meta.env.DEV) {
         // eslint-disable-next-line no-console
         console.error("map harvest start error", err);
@@ -5452,12 +5986,16 @@ function SectorMapScreen({
     }
   };
 
-  const recallHarvestFleet = async () => {
+  const recallHarvestFleet = async (expeditionId?: string) => {
     if (!session) return;
     try {
       setMapActionBusy(true);
       setMapActionError("");
-      const rpc = await client.rpc(session, "rpc_map_fields_recall", "{}");
+      const rpc = await client.rpc(
+        session,
+        "rpc_map_fields_recall",
+        JSON.stringify(expeditionId ? { expeditionId } : {})
+      );
       const parsed = parseJsonObject((rpc as any)?.payload ?? rpc);
       const nested = parseJsonObject(parsed?.payload);
       const source = Object.keys(nested).length > 0 ? nested : parsed;
@@ -5529,8 +6067,13 @@ function SectorMapScreen({
     );
   }, [pan.x, pan.y, selfPlanetCoords.x, selfPlanetCoords.y, viewportSize.height, viewportSize.width, zoom]);
 
+  const dailyAvailableCount = useMemo(
+    () => dailyQuests.filter((quest) => !quest.claimed).length,
+    [dailyQuests]
+  );
+
   return (
-    <main className="sector-shell">
+    <main className={`sector-shell ${sidebarOpen ? "" : "sidebar-collapsed"}`}>
       <section
         ref={containerRef}
         className={`sector-viewport ${isDragging ? "dragging" : actionMode !== "none" ? "targeting" : ""}`}
@@ -5538,7 +6081,6 @@ function SectorMapScreen({
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseUp}
-        onWheel={handleWheel}
         onContextMenu={(e) => e.preventDefault()}
       >
         <div className="sector-stars layer-a" style={{ backgroundPosition: `${pan.x * 0.18}px ${pan.y * 0.18}px` }} />
@@ -5550,50 +6092,57 @@ function SectorMapScreen({
             onWheel={(e) => e.stopPropagation()}
             onMouseDown={(e) => e.stopPropagation()}
           >
-            <div className="sector-flight-head">
-              <Move size={14} />
-              <strong>{l("Flottes en vol", "Fleets in flight")}</strong>
-              <span>{inFlightRows.length}</span>
-            </div>
-            <div className="sector-flight-list">
-              {inFlightRows.length <= 0 ? (
-                <p className="sector-empty">{l("Aucune flotte en transit.", "No fleet currently in transit.")}</p>
-              ) : (
-                inFlightRows.map((row) => (
-                  <article key={row.id} className="sector-flight-item">
-                    <header>
-                      <strong>{row.title}</strong>
-                      {row.remainingSeconds == null ? <small>{row.detail}</small> : null}
-                    </header>
-                    <p>{row.route}</p>
-                    {row.remainingSeconds != null && row.etaTs != null ? (
-                      <div className="sector-flight-time-meta">
-                        <span>{l("Temps restant", "Time left")}</span>
-                        <strong className="sector-flight-time-value">{formatFlightCountdown(row.remainingSeconds)}</strong>
-                        <span>{l("Arrivée", "Arrival")}</span>
-                        <strong className="sector-flight-time-value">{formatFlightEtaClock(row.etaTs)}</strong>
+            <details className="sector-flight-spoiler" open>
+              <summary>
+                <span className="sector-flight-head">
+                  <Move size={14} />
+                  <strong>{l("Flottes en vol", "Fleets in flight")}</strong>
+                </span>
+                <span className="sector-flight-summary-right">
+                  <span>{inFlightRows.length}</span>
+                  <span className="sector-flight-summary-caret">▾</span>
+                </span>
+              </summary>
+              <div className="sector-flight-list">
+                {inFlightRows.length <= 0 ? (
+                  <p className="sector-empty">{l("Aucune flotte en transit.", "No fleet currently in transit.")}</p>
+                ) : (
+                  inFlightRows.map((row) => (
+                    <article key={row.id} className="sector-flight-item">
+                      <header>
+                        <strong>{row.title}</strong>
+                        {row.remainingSeconds == null ? <small>{row.detail}</small> : null}
+                      </header>
+                      <p>{row.route}</p>
+                      {row.remainingSeconds != null && row.etaTs != null ? (
+                        <div className="sector-flight-time-meta">
+                          <span>{l("Temps restant", "Time left")}</span>
+                          <strong className="sector-flight-time-value">{formatFlightCountdown(row.remainingSeconds)}</strong>
+                          <span>{l("Arrivée", "Arrival")}</span>
+                          <strong className="sector-flight-time-value">{formatFlightEtaClock(row.etaTs)}</strong>
+                        </div>
+                      ) : null}
+                      <div className="sector-flight-progress">
+                        <div style={{ width: `${Math.max(4, Math.min(100, Math.round(row.progress * 100)))}%` }} />
                       </div>
-                    ) : null}
-                    <div className="sector-flight-progress">
-                      <div style={{ width: `${Math.max(4, Math.min(100, Math.round(row.progress * 100)))}%` }} />
-                    </div>
-                    {row.canRecall ? (
-                      <button
-                        type="button"
-                        className="sector-flight-return-btn"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          void recallHarvestFleet();
-                        }}
-                        disabled={mapActionBusy}
-                      >
-                        {mapActionBusy ? l("Action...", "Processing...") : l("Retour", "Return")}
-                      </button>
-                    ) : null}
-                  </article>
-                ))
-              )}
-            </div>
+                      {row.canRecall ? (
+                        <button
+                          type="button"
+                          className="sector-flight-return-btn"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            void recallHarvestFleet(row.expeditionId);
+                          }}
+                          disabled={mapActionBusy}
+                        >
+                          {mapActionBusy ? l("Action...", "Processing...") : l("Retour", "Return")}
+                        </button>
+                      ) : null}
+                    </article>
+                  ))
+                )}
+              </div>
+            </details>
           </aside>
 
           <aside
@@ -5601,34 +6150,42 @@ function SectorMapScreen({
             onWheel={(e) => e.stopPropagation()}
             onMouseDown={(e) => e.stopPropagation()}
           >
-            <div className="sector-daily-head">
-              <Rocket size={14} />
-              <strong>{l("Missions quotidiennes", "Daily missions")}</strong>
-            </div>
-            <p className="sector-daily-reset">{l("Reset dans 13h 24m", "Reset in 13h 24m")}</p>
-            <div className="sector-daily-list">
-              {dailyQuests.map((quest) => {
-                const ratio = Math.min(100, Math.round((quest.progress / quest.target) * 100));
-                const complete = quest.progress >= quest.target;
-                return (
-                  <article key={`daily_overlay_${quest.id}`} className="sector-daily-item">
-                    <header>
-                      <strong>{l(quest.titleFr, quest.titleEn)}</strong>
-                      <span>{l(quest.rewardFr, quest.rewardEn)}</span>
-                    </header>
-                    <div className="sector-daily-progress">
-                      <div style={{ width: `${ratio}%` }} />
-                    </div>
-                    <footer>
-                      <small>{quest.progress.toLocaleString()} / {quest.target.toLocaleString()}</small>
-                      <button type="button" disabled={!complete || quest.claimed} onClick={() => claimQuest(quest.id)}>
-                        {quest.claimed ? l("Recupere", "Claimed") : complete ? l("Recuperer", "Claim") : l("En cours", "In progress")}
-                      </button>
-                    </footer>
-                  </article>
-                );
-              })}
-            </div>
+            <details className="sector-daily-spoiler">
+              <summary>
+                <span className="sector-daily-head">
+                  <Rocket size={14} />
+                  <strong>{l("Missions quotidiennes", "Daily missions")}</strong>
+                </span>
+                <span className="sector-daily-summary-right">
+                  <span className="sector-daily-badge">{dailyAvailableCount}</span>
+                  <span className="sector-daily-summary-caret">▾</span>
+                </span>
+              </summary>
+              <p className="sector-daily-reset">{l("Reset dans 13h 24m", "Reset in 13h 24m")}</p>
+              <div className="sector-daily-list">
+                {dailyQuests.map((quest) => {
+                  const ratio = Math.min(100, Math.round((quest.progress / quest.target) * 100));
+                  const complete = quest.progress >= quest.target;
+                  return (
+                    <article key={`daily_overlay_${quest.id}`} className="sector-daily-item">
+                      <header>
+                        <strong>{l(quest.titleFr, quest.titleEn)}</strong>
+                        <span>{l(quest.rewardFr, quest.rewardEn)}</span>
+                      </header>
+                      <div className="sector-daily-progress">
+                        <div style={{ width: `${ratio}%` }} />
+                      </div>
+                      <footer>
+                        <small>{quest.progress.toLocaleString()} / {quest.target.toLocaleString()}</small>
+                        <button type="button" disabled={!complete || quest.claimed} onClick={() => claimQuest(quest.id)}>
+                          {quest.claimed ? l("Recupere", "Claimed") : complete ? l("Recuperer", "Claim") : l("En cours", "In progress")}
+                        </button>
+                      </footer>
+                    </article>
+                  );
+                })}
+              </div>
+            </details>
           </aside>
         </div>
 
@@ -5807,51 +6364,69 @@ function SectorMapScreen({
         </div>
       </section>
 
-      <aside className="sector-sidebar">
-        <div className="sector-sidebar-tabs">
+      <aside className={`sector-sidebar ${sidebarOpen ? "open" : "collapsed"}`}>
+        <div className="sector-sidebar-toggle-row">
           <button
             type="button"
-            className={sidebarTab === "navigation" ? "active" : ""}
-            onClick={() => setSidebarTab("navigation")}
+            className="sector-sidebar-toggle-btn"
+            onClick={() => setSidebarOpen((prev) => !prev)}
           >
-            <Navigation size={14} /> {l("Navigation", "Navigation")}
+            {sidebarOpen ? l("Replier", "Collapse") : l("Ouvrir", "Open")}
           </button>
-          <button
-            type="button"
-            className={sidebarTab === "quests" ? "active" : ""}
-            onClick={() => setSidebarTab("quests")}
-          >
-            <Rocket size={14} /> {l("Quete", "Quest")}
-          </button>
+          {!sidebarOpen && dailyAvailableCount > 0 ? (
+            <span className="sector-sidebar-badge">{dailyAvailableCount > 99 ? "99+" : dailyAvailableCount}</span>
+          ) : null}
         </div>
 
-        {sidebarTab === "navigation" ? (
+        {sidebarOpen ? (
           <>
-            <div className="sector-panel">
+            <div className="sector-sidebar-tabs">
               <button
                 type="button"
-                className={`sector-home-btn ${isMyPlanetOutOfView ? "alert" : ""}`}
-                onClick={centerOnMyPosition}
+                className={sidebarTab === "navigation" ? "active" : ""}
+                onClick={() => setSidebarTab("navigation")}
               >
-                <MapPin size={14} /> {l("Ma position", "My position")}
+                <Navigation size={14} /> {l("Navigation", "Navigation")}
+              </button>
+              <button
+                type="button"
+                className={sidebarTab === "quests" ? "active" : ""}
+                onClick={() => setSidebarTab("quests")}
+              >
+                <Rocket size={14} /> {l("Quete", "Quest")}
+                {dailyAvailableCount > 0 ? (
+                  <span className="sector-sidebar-badge">{dailyAvailableCount > 99 ? "99+" : dailyAvailableCount}</span>
+                ) : null}
               </button>
             </div>
 
-            <div className="sector-panel">
-              <h3><Filter size={15} /> {l("Filtres cartographiques", "Map filters")}</h3>
-              <label>
-                <input type="checkbox" checked={filters.enemies} onChange={(e) => setFilters((prev) => ({ ...prev, enemies: e.target.checked }))} />
-                {l("Stations rivales", "Rival stations")}
-              </label>
-              <label>
-                <input type="checkbox" checked={filters.resources} onChange={(e) => setFilters((prev) => ({ ...prev, resources: e.target.checked }))} />
-                {l("Champs de ressources", "Resource fields")}
-              </label>
-              <label>
-                <input type="checkbox" checked={filters.missions} onChange={(e) => setFilters((prev) => ({ ...prev, missions: e.target.checked }))} />
-                {l("Mondes de mission", "Mission worlds")}
-              </label>
-            </div>
+            {sidebarTab === "navigation" ? (
+              <>
+                <div className="sector-panel">
+                  <button
+                    type="button"
+                    className={`sector-home-btn ${isMyPlanetOutOfView ? "alert" : ""}`}
+                    onClick={centerOnMyPosition}
+                  >
+                    <MapPin size={14} /> {l("Ma position", "My position")}
+                  </button>
+                </div>
+
+                <div className="sector-panel">
+                  <h3><Filter size={15} /> {l("Filtres cartographiques", "Map filters")}</h3>
+                  <label>
+                    <input type="checkbox" checked={filters.enemies} onChange={(e) => setFilters((prev) => ({ ...prev, enemies: e.target.checked }))} />
+                    {l("Stations rivales", "Rival stations")}
+                  </label>
+                  <label>
+                    <input type="checkbox" checked={filters.resources} onChange={(e) => setFilters((prev) => ({ ...prev, resources: e.target.checked }))} />
+                    {l("Champs de ressources", "Resource fields")}
+                  </label>
+                  <label>
+                    <input type="checkbox" checked={filters.missions} onChange={(e) => setFilters((prev) => ({ ...prev, missions: e.target.checked }))} />
+                    {l("Mondes de mission", "Mission worlds")}
+                  </label>
+                </div>
 
             <div className="sector-panel">
               <h3><Hourglass size={15} /> {l("Exploitation", "Harvesting")}</h3>
@@ -5950,53 +6525,60 @@ function SectorMapScreen({
                 ))}
               </div>
             </div>
-          </>
-        ) : (
-          <div className="sector-panel grow quest-panel">
-            <h3><Rocket size={15} /> {l("Quetes quotidiennes", "Daily quests")}</h3>
-            <p className="quest-reset">{l("Renouvellement dans 13h 24m", "Refresh in 13h 24m")}</p>
-            <div className="quest-list">
-              {dailyQuests.map((quest) => {
-                const ratio = Math.min(100, Math.round((quest.progress / quest.target) * 100));
-                const complete = quest.progress >= quest.target;
-                return (
-                  <article key={quest.id} className="quest-card">
-                    <header>
-                      <strong>{l(quest.titleFr, quest.titleEn)}</strong>
-                      <span>{l(quest.rewardFr, quest.rewardEn)}</span>
-                    </header>
-                    <p>{l(quest.descriptionFr, quest.descriptionEn)}</p>
-                    <div className="quest-progress">
-                      <div style={{ width: `${ratio}%` }} />
-                    </div>
-                    <div className="quest-foot">
-                      <small>{quest.progress.toLocaleString()} / {quest.target.toLocaleString()}</small>
-                      <button type="button" disabled={!complete || quest.claimed} onClick={() => claimQuest(quest.id)}>
-                        {quest.claimed ? l("Recupere", "Claimed") : complete ? l("Recuperer", "Claim") : l("En cours", "In progress")}
-                      </button>
-                    </div>
-                  </article>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
-        <div className="sector-panel details">
-          {selectedEntity ? (
-            <>
-              <div className="sector-detail-head">
-                <div>
-                  <h4>{sectorEntityDisplayName(selectedEntity, language)}</h4>
-                  <p>
-                    {entityTypeLabel(selectedEntity.type)}
-                    {selectedEntity.type === "station"
-                      ? ` • ${l("Proprietaire", "Owner")}: ${sectorStationOwnerDisplay(selectedEntity, language)}`
-                      : ""}
-                  </p>
-                </div>
-                <button type="button" onClick={() => { setSelectedEntity(null); setActionMode("none"); }}><X size={18} /></button>
+              </>
+            ) : (
+              <div className="sector-panel grow quest-panel">
+                <details className="quest-spoiler">
+                  <summary>
+                    <span className="quest-spoiler-title"><Rocket size={15} /> {l("Quetes quotidiennes", "Daily quests")}</span>
+                    {dailyAvailableCount > 0 ? (
+                      <span className="quest-badge">{dailyAvailableCount > 99 ? "99+" : dailyAvailableCount}</span>
+                    ) : null}
+                  </summary>
+                  <p className="quest-reset">{l("Renouvellement dans 13h 24m", "Refresh in 13h 24m")}</p>
+                  <div className="quest-list">
+                    {dailyQuests.map((quest) => {
+                      const ratio = Math.min(100, Math.round((quest.progress / quest.target) * 100));
+                      const complete = quest.progress >= quest.target;
+                      return (
+                        <article key={quest.id} className="quest-card">
+                          <header>
+                            <strong>{l(quest.titleFr, quest.titleEn)}</strong>
+                            <span>{l(quest.rewardFr, quest.rewardEn)}</span>
+                          </header>
+                          <p>{l(quest.descriptionFr, quest.descriptionEn)}</p>
+                          <div className="quest-progress">
+                            <div style={{ width: `${ratio}%` }} />
+                          </div>
+                          <div className="quest-foot">
+                            <small>{quest.progress.toLocaleString()} / {quest.target.toLocaleString()}</small>
+                            <button type="button" disabled={!complete || quest.claimed} onClick={() => claimQuest(quest.id)}>
+                              {quest.claimed ? l("Recupere", "Claimed") : complete ? l("Recuperer", "Claim") : l("En cours", "In progress")}
+                            </button>
+                          </div>
+                        </article>
+                      );
+                    })}
+                  </div>
+                </details>
               </div>
+            )}
+
+            <div className="sector-panel details">
+              {selectedEntity ? (
+                <>
+                  <div className="sector-detail-head">
+                    <div>
+                      <h4>{sectorEntityDisplayName(selectedEntity, language)}</h4>
+                      <p>
+                        {entityTypeLabel(selectedEntity.type)}
+                        {selectedEntity.type === "station"
+                          ? ` • ${l("Proprietaire", "Owner")}: ${sectorStationOwnerDisplay(selectedEntity, language)}`
+                          : ""}
+                      </p>
+                    </div>
+                    <button type="button" onClick={() => { setSelectedEntity(null); setActionMode("none"); }}><X size={18} /></button>
+                  </div>
 
               {selectedEntity.type === "station" ? (
                 <div className="sector-detail-list">
@@ -6063,50 +6645,83 @@ function SectorMapScreen({
                           <div><span>{l("Capacite cargo", "Cargo capacity")}</span><strong>{selectedFieldPlan.totalCapacity.toLocaleString()}</strong></div>
                         </>
                       ) : null}
-                      {selectedEntity.fieldId && !mapExpedition ? (
+                      {selectedEntity.fieldId && !selectedEntity.isOccupied ? (
                         <div className="sector-field-actions">
-                          <p>{l("Flotte de collecte", "Harvest fleet")}</p>
-                          {["argo", "pegase", "arche_spatiale"].map((unitId) => {
-                            const available = Math.max(0, Math.floor(Number(harvestAvailability[unitId] ?? 0)));
-                            const raw = fleetDraft[unitId] ?? "0";
-                            return (
-                              <label key={`fleet_${unitId}`}>
-                                <span>{hangarUnitDisplayName(unitId, unitId, language)} ({available})</span>
-                                <input
-                                  type="number"
-                                  min={0}
-                                  max={available}
-                                  value={raw}
-                                  onChange={(e) => {
-                                    const next = Math.max(0, Math.min(available, Math.floor(Number(e.target.value || 0))));
-                                    setFleetDraft((prev) => ({ ...prev, [unitId]: String(next) }));
-                                  }}
-                                />
-                              </label>
-                            );
-                          })}
+                          <div className="sector-field-actions-head">
+                            <p>{l("Flotte de collecte", "Harvest fleet")}</p>
+                            <span className="sector-field-slot-pill">
+                              {l("Slots", "Slots")} {mapActiveBlockingExpeditions}/{mapMaxActiveExpeditions}
+                            </span>
+                          </div>
+                          <div className="sector-field-grid">
+                            {["argo", "pegase", "arche_spatiale"].map((unitId) => {
+                              const available = Math.max(0, Math.floor(Number(harvestAvailability[unitId] ?? 0)));
+                              const raw = fleetDraft[unitId] ?? "0";
+                              return (
+                                <label key={`fleet_${unitId}`} className="sector-field-unit-row">
+                                  <span className="sector-field-unit-meta">
+                                    <strong>{hangarUnitDisplayName(unitId, unitId, language)}</strong>
+                                    <em>{l("Disponibles", "Available")}: {available}</em>
+                                  </span>
+                                  <input
+                                    type="number"
+                                    min={0}
+                                    max={available}
+                                    value={raw}
+                                    onChange={(e) => {
+                                      const next = Math.max(0, Math.min(available, Math.floor(Number(e.target.value || 0))));
+                                      setFleetDraft((prev) => ({ ...prev, [unitId]: String(next) }));
+                                    }}
+                                  />
+                                </label>
+                              );
+                            })}
+                          </div>
                           <button
                             type="button"
                             className="sector-war-btn"
                             onClick={() => void launchHarvestOnField(selectedEntity.fieldId!)}
                             disabled={
                               mapActionBusy ||
+                              !canLaunchAnotherMapExpedition ||
                               !hasValidHarvestFleetSelection
                             }
                           >
-                            {mapActionBusy ? l("Lancement...", "Launching...") : l("Lancer l'exploitation", "Start harvesting")}
+                            {mapActionBusy
+                              ? l("Lancement...", "Launching...")
+                              : !canLaunchAnotherMapExpedition
+                                ? l("Slots max atteints", "Slots full")
+                                : l("Lancer l'exploitation", "Start harvesting")}
                           </button>
+                          {!canLaunchAnotherMapExpedition ? (
+                            <p className="sector-empty">
+                              {l(
+                                "Nombre maximal de flottes actives atteint. Attendez un retour ou augmentez Commandement d'Escadre.",
+                                "Maximum active fleet slots reached. Wait for a fleet return or increase Squadron Command."
+                              )}
+                            </p>
+                          ) : null}
                         </div>
+                      ) : null}
+                      {selectedEntity.fieldId && selectedEntity.isOccupied ? (
+                        <p className="sector-empty">
+                          {l(
+                            "Ce champ est deja occupe. Choisissez un champ libre.",
+                            "This field is already occupied. Choose a free field."
+                          )}
+                        </p>
                       ) : null}
                     </>
                   )}
                 </div>
               ) : null}
-            </>
-          ) : (
-            <p className="sector-empty details-empty">{l("Selectionnez une entite pour afficher ses details tactiques.", "Select an entity to display tactical details.")}</p>
-          )}
-        </div>
+                </>
+              ) : (
+                <p className="sector-empty details-empty">{l("Selectionnez une entite pour afficher ses details tactiques.", "Select an entity to display tactical details.")}</p>
+              )}
+            </div>
+          </>
+        ) : null}
       </aside>
 
       {fieldPopupEntity ? (
@@ -6159,40 +6774,71 @@ function SectorMapScreen({
                       <div><span>{l("Capacite cargo", "Cargo capacity")}</span><strong>{selectedFieldPlan.totalCapacity.toLocaleString()}</strong></div>
                     </>
                   ) : null}
-                  {fieldPopupEntity.fieldId && !mapExpedition ? (
+                  {fieldPopupEntity.fieldId && !fieldPopupEntity.isOccupied ? (
                     <div className="sector-field-actions">
-                      <p>{l("Flotte de collecte", "Harvest fleet")}</p>
-                      {["argo", "pegase", "arche_spatiale"].map((unitId) => {
-                        const available = Math.max(0, Math.floor(Number(harvestAvailability[unitId] ?? 0)));
-                        const raw = fleetDraft[unitId] ?? "0";
-                        return (
-                          <label key={`fleet_modal_${unitId}`}>
-                            <span>{hangarUnitDisplayName(unitId, unitId, language)} ({available})</span>
-                            <input
-                              type="number"
-                              min={0}
-                              max={available}
-                              value={raw}
-                              onChange={(e) => {
-                                const next = Math.max(0, Math.min(available, Math.floor(Number(e.target.value || 0))));
-                                setFleetDraft((prev) => ({ ...prev, [unitId]: String(next) }));
-                              }}
-                            />
-                          </label>
-                        );
-                      })}
+                      <div className="sector-field-actions-head">
+                        <p>{l("Flotte de collecte", "Harvest fleet")}</p>
+                        <span className="sector-field-slot-pill">
+                          {l("Slots", "Slots")} {mapActiveBlockingExpeditions}/{mapMaxActiveExpeditions}
+                        </span>
+                      </div>
+                      <div className="sector-field-grid">
+                        {["argo", "pegase", "arche_spatiale"].map((unitId) => {
+                          const available = Math.max(0, Math.floor(Number(harvestAvailability[unitId] ?? 0)));
+                          const raw = fleetDraft[unitId] ?? "0";
+                          return (
+                            <label key={`fleet_modal_${unitId}`} className="sector-field-unit-row">
+                              <span className="sector-field-unit-meta">
+                                <strong>{hangarUnitDisplayName(unitId, unitId, language)}</strong>
+                                <em>{l("Disponibles", "Available")}: {available}</em>
+                              </span>
+                              <input
+                                type="number"
+                                min={0}
+                                max={available}
+                                value={raw}
+                                onChange={(e) => {
+                                  const next = Math.max(0, Math.min(available, Math.floor(Number(e.target.value || 0))));
+                                  setFleetDraft((prev) => ({ ...prev, [unitId]: String(next) }));
+                                }}
+                              />
+                            </label>
+                          );
+                        })}
+                      </div>
                       <button
                         type="button"
                         className="sector-war-btn"
                         onClick={() => void launchHarvestOnField(fieldPopupEntity.fieldId!)}
                         disabled={
                           mapActionBusy ||
+                          !canLaunchAnotherMapExpedition ||
                           !hasValidHarvestFleetSelection
                         }
                       >
-                        {mapActionBusy ? l("Lancement...", "Launching...") : l("Lancer l'exploitation", "Start harvesting")}
+                        {mapActionBusy
+                          ? l("Lancement...", "Launching...")
+                          : !canLaunchAnotherMapExpedition
+                            ? l("Slots max atteints", "Slots full")
+                            : l("Lancer l'exploitation", "Start harvesting")}
                       </button>
+                      {!canLaunchAnotherMapExpedition ? (
+                        <p className="sector-empty">
+                          {l(
+                            "Nombre maximal de flottes actives atteint. Attendez un retour ou augmentez Commandement d'Escadre.",
+                            "Maximum active fleet slots reached. Wait for a fleet return or increase Squadron Command."
+                          )}
+                        </p>
+                      ) : null}
                     </div>
+                  ) : null}
+                  {fieldPopupEntity.fieldId && fieldPopupEntity.isOccupied ? (
+                    <p className="sector-empty">
+                      {l(
+                        "Ce champ est deja occupe. Choisissez un champ libre.",
+                        "This field is already occupied. Choose a free field."
+                      )}
+                    </p>
                   ) : null}
                 </>
               )}
@@ -8630,6 +9276,8 @@ function WikiScreen({ language }: { language: UILanguage }) {
           <a href="#wiki-batiments">{l("2. Les Batiments", "2. Buildings")}</a>
           <a href="#wiki-vaisseaux">{l("3. Vaisseaux & Defenses", "3. Ships & Defenses")}</a>
           <a href="#wiki-technologies">{l("4. Les Technologies", "4. Technologies")}</a>
+          <a href="#wiki-champs">{l("5. Carte & Champs de ressources", "5. Map & Resource fields")}</a>
+          <a href="#wiki-inbox">{l("6. Messagerie & Recompenses", "6. Inbox & Rewards")}</a>
         </div>
       </nav>
 
@@ -9003,6 +9651,428 @@ Bonuses stack multiplicatively`
           </table>
         </div>
       </section>
+
+      <section id="wiki-champs" className="wiki-section">
+        <header className="wiki-section-head">
+          <h3>{l("5. Carte & Champs de ressources", "5. Map & Resource fields")}</h3>
+          <p>
+            {l(
+              "Les champs de ressources ajoutent une economie opportuniste: trajet court, exploitation longue, risque PvP et gains differes au retour.",
+              "Resource fields add an opportunistic economy: short travel, long extraction, PvP risk, and delayed rewards on return."
+            )}
+          </p>
+        </header>
+
+        <div className="wiki-note">
+          <strong>{l("Boucle de gameplay", "Gameplay loop")}</strong>
+          <span>
+            {l(
+              "Reperez un champ -> envoyez une flotte -> extrayez progressivement -> revenez avec ressources + bonus d'items.",
+              "Find a field -> send a fleet -> extract progressively -> return with resources + bonus items."
+            )}
+          </span>
+        </div>
+
+        <div className="wiki-info-grid">
+          <article className="wiki-info-card">
+            <strong>{l("Spawn dynamique", "Dynamic spawn")}</strong>
+            <span>
+              {l(
+                "Chaque champ a une rarete, une qualite et 1 a 4 ressources. Les positions evitent le chevauchement avec planetes et autres champs.",
+                "Each field has a rarity, a quality tier, and 1 to 4 resources. Positions avoid overlaps with planets and other fields."
+              )}
+            </span>
+          </article>
+          <article className="wiki-info-card">
+            <strong>{l("Exploitation en 3 phases", "3-phase extraction")}</strong>
+            <span>
+              {l(
+                "Aller, extraction sur site, puis retour. Les ressources ne sont creditees qu'au retour de la flotte.",
+                "Outbound, on-site extraction, then return. Resources are credited only when the fleet returns."
+              )}
+            </span>
+          </article>
+          <article className="wiki-info-card">
+            <strong>{l("Information partielle", "Partial intel")}</strong>
+            <span>
+              {l(
+                "Le proprietaire voit le contenu et le cumul en cours. Les rivaux voient seulement l'occupation et peuvent attaquer.",
+                "The owner sees field contents and live extraction totals. Rivals only see occupancy status and can engage."
+              )}
+            </span>
+          </article>
+        </div>
+
+        <h4>{l("Raretes de champs", "Field rarities")}</h4>
+        <div className="wiki-table-wrap">
+          <table className="wiki-table">
+            <thead>
+              <tr>
+                <th>{l("Rarete", "Rarity")}</th>
+                <th>{l("Probabilite", "Probability")}</th>
+                <th>{l("Multiplicateur quantite", "Quantity multiplier")}</th>
+                <th>{l("Types de ressources", "Resource types")}</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>{l("Commun", "Common")}</td>
+                <td>45%</td>
+                <td>x0.8</td>
+                <td>1-2</td>
+              </tr>
+              <tr>
+                <td>{l("Inhabituel", "Uncommon")}</td>
+                <td>28%</td>
+                <td>x1.0</td>
+                <td>2</td>
+              </tr>
+              <tr>
+                <td>{l("Rare", "Rare")}</td>
+                <td>16%</td>
+                <td>x1.25</td>
+                <td>2-3</td>
+              </tr>
+              <tr>
+                <td>{l("Epique", "Epic")}</td>
+                <td>8%</td>
+                <td>x1.6</td>
+                <td>3</td>
+              </tr>
+              <tr>
+                <td>{l("Legendaire", "Legendary")}</td>
+                <td>2.5%</td>
+                <td>x2.1</td>
+                <td>3-4</td>
+              </tr>
+              <tr>
+                <td>{l("Mythique", "Mythic")}</td>
+                <td>0.5%</td>
+                <td>x3.0</td>
+                <td>4</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h4>{l("Qualite interne du champ", "Field quality tiers")}</h4>
+        <div className="wiki-table-wrap">
+          <table className="wiki-table">
+            <thead>
+              <tr>
+                <th>{l("Qualite", "Quality")}</th>
+                <th>{l("Multiplicateur", "Multiplier")}</th>
+                <th>{l("Distribution", "Distribution")}</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>{l("Pauvre", "Poor")}</td>
+                <td>x0.70</td>
+                <td>20%</td>
+              </tr>
+              <tr>
+                <td>{l("Standard", "Standard")}</td>
+                <td>x1.00</td>
+                <td>50%</td>
+              </tr>
+              <tr>
+                <td>{l("Riche", "Rich")}</td>
+                <td>x1.40</td>
+                <td>25%</td>
+              </tr>
+              <tr>
+                <td>{l("Exceptionnel", "Exceptional")}</td>
+                <td>x2.00</td>
+                <td>5%</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <article className="wiki-checklist">
+          <h4>{l("Procedure recommandee", "Recommended procedure")}</h4>
+          <ul>
+            <li>{l("1) Ouvrir la carte puis cibler un champ avec un trajet court.", "1) Open the map and pick a field with short travel.")}</li>
+            <li>{l("2) Composer une flotte avec capacite transport + harvest speed suffisantes.", "2) Build a fleet with enough transport capacity + harvest speed.")}</li>
+            <li>{l("3) Lancer la collecte depuis la fenetre du champ.", "3) Start collection from the field popup.")}</li>
+            <li>{l("4) Surveiller la section Flottes en vol et le cumul visible sur le champ.", "4) Monitor In-flight fleets and live extraction shown on the field.")}</li>
+            <li>{l("5) Rappeler la flotte si risque militaire ou capacite atteinte.", "5) Recall early if military risk is high or cargo is near full.")}</li>
+            <li>{l("6) Recuperer les gains a l'arrivee via la messagerie de recompenses.", "6) Claim return gains through reward inbox messages.")}</li>
+          </ul>
+        </article>
+
+        <details className="wiki-spoiler">
+          <summary>{l("Formules de trajet/extraction", "Travel/extraction formulas")}</summary>
+          <pre>
+{`travelTime = max(120s, distance / fleetMapSpeed)
+extractionTime = clamp(totalWork / totalHarvestSpeed, 3600s, 7200s)
+collectedRatio = exploitedSeconds / extractionTime
+collectedAmount = fieldAmount * collectedRatio
+returnedAmount = min(collectedAmount, fleetTransportCapacity)`}
+          </pre>
+        </details>
+
+        <h4>{l("Guide de composition de flotte de recolte", "Harvest fleet composition guide")}</h4>
+        <div className="wiki-table-wrap">
+          <table className="wiki-table">
+            <thead>
+              <tr>
+                <th>{l("Profil", "Profile")}</th>
+                <th>{l("Composition type", "Typical composition")}</th>
+                <th>{l("Objectif", "Objective")}</th>
+                <th>{l("Quand l'utiliser", "When to use it")}</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>{l("Eco securisee", "Safe economy")}</td>
+                <td>
+                  {l(
+                    "Argo majoritaires + Pegase en support + 1-2 escadres d'escorte.",
+                    "Argo majority + Pegase support + 1-2 escort squads."
+                  )}
+                </td>
+                <td>
+                  {l(
+                    "Maximiser la capacite de retour avec un risque militaire modere.",
+                    "Maximize return cargo with moderate military risk."
+                  )}
+                </td>
+                <td>{l("Zones calmes ou heures creuses.", "Quiet zones or low-activity hours.")}</td>
+              </tr>
+              <tr>
+                <td>{l("Collecte rapide", "Fast collection")}</td>
+                <td>
+                  {l(
+                    "Pegase + Eclaireur Stellaire + petite escorte mobile.",
+                    "Pegase + Stellar Scout + small mobile escort."
+                  )}
+                </td>
+                <td>
+                  {l(
+                    "Arriver vite, extraire partiellement, recall avant contre-attaque.",
+                    "Arrive fast, extract partially, recall before counterattack."
+                  )}
+                </td>
+                <td>{l("Carte contestee, priorite au tempo.", "Contested map, tempo priority.")}</td>
+              </tr>
+              <tr>
+                <td>{l("Champ dispute", "Contested field")}</td>
+                <td>
+                  {l(
+                    "Arche Spatiale/Argo + Spectre/Tempest + noyau lourd (Titanide/Colosse).",
+                    "Space Ark/Argo + Spectre/Tempest + heavy core (Titanide/Colossus)."
+                  )}
+                </td>
+                <td>
+                  {l(
+                    "Tenue de position et protection du cargo pendant l'extraction.",
+                    "Hold position and protect cargo during extraction."
+                  )}
+                </td>
+                <td>{l("Secteurs hostiles ou cibles legendaires/mythiques.", "Hostile sectors or legendary/mythic targets.")}</td>
+              </tr>
+              <tr>
+                <td>{l("Opportuniste", "Opportunist")}</td>
+                <td>
+                  {l(
+                    "Petite flotte mixte orientee vitesse + capacite minimale rentable.",
+                    "Small mixed fleet focused on speed + minimum profitable cargo."
+                  )}
+                </td>
+                <td>
+                  {l(
+                    "Prendre plusieurs champs moyens plutot qu'un gros champ risqué.",
+                    "Chain multiple medium fields instead of one risky large field."
+                  )}
+                </td>
+                <td>{l("Sessions courtes et micro-management actif.", "Short sessions with active micro-management.")}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <article className="wiki-checklist">
+          <h4>{l("Regles de composition", "Composition rules")}</h4>
+          <ul>
+            <li>{l("Toujours valider la capacite transport avant le depart.", "Always validate transport capacity before launch.")}</li>
+            <li>{l("Ajuster la puissance d'escorte selon la valeur du champ.", "Scale escort strength with field value.")}</li>
+            <li>{l("Ne laissez pas une flotte lente sans couverture sur un champ riche.", "Do not leave a slow fleet uncovered on a rich field.")}</li>
+            <li>{l("Utiliser le rappel anticipe pour verrouiller les gains deja extraits.", "Use early recall to secure already extracted gains.")}</li>
+          </ul>
+        </article>
+
+        <details className="wiki-spoiler">
+          <summary>{l("FAQ avancee PvP carte", "Advanced map PvP FAQ")}</summary>
+          <div className="wiki-faq-list">
+            <article className="wiki-faq-item">
+              <strong>{l("Quand attaquer une flotte de collecte adverse ?", "When should I attack an enemy harvest fleet?")}</strong>
+              <span>
+                {l(
+                  "Le meilleur timing est pendant l'extraction: la flotte est immobilisee sur champ et exposee. Une victoire coupe la collecte et peut annuler ses gains.",
+                  "Best timing is during extraction: the fleet is stationary on the field and exposed. A win interrupts collection and can cancel its gains."
+                )}
+              </span>
+            </article>
+            <article className="wiki-faq-item">
+              <strong>{l("Comment limiter les pertes en zone hostile ?", "How do I limit losses in hostile sectors?")}</strong>
+              <span>
+                {l(
+                  "Preferez des cycles courts: extraction partielle + retour rapide. Le rendement theorique est plus faible, mais le rendement net est souvent meilleur.",
+                  "Prefer short cycles: partial extraction + fast return. Theoretical yield is lower, but net yield is often better."
+                )}
+              </span>
+            </article>
+            <article className="wiki-faq-item">
+              <strong>{l("Que voient les autres joueurs sur mon champ ?", "What do other players see on my field?")}</strong>
+              <span>
+                {l(
+                  "Ils voient qu'il est occupe et par qui, mais pas les ressources exactes ni les quantites restantes.",
+                  "They see that it is occupied and by whom, but not exact resources or remaining amounts."
+                )}
+              </span>
+            </article>
+            <article className="wiki-faq-item">
+              <strong>{l("Pourquoi je ne recois pas les ressources instantanement ?", "Why don't I get resources instantly?")}</strong>
+              <span>
+                {l(
+                  "Les ressources de champ sont creditees au retour de la flotte, via un message de recompense. C'est volontaire pour creer un vrai risque logistique.",
+                  "Field resources are credited when the fleet returns, through a reward message. This is intentional to create real logistic risk."
+                )}
+              </span>
+            </article>
+            <article className="wiki-faq-item">
+              <strong>{l("Cap entrepot plein: la collecte est-elle perdue ?", "Warehouse cap full: is harvesting lost?")}</strong>
+              <span>
+                {l(
+                  "Non. Comme pour les arrivages externes, le retour de flotte peut depasser le cap de production passive.",
+                  "No. As with external deliveries, fleet returns can exceed passive production cap."
+                )}
+              </span>
+            </article>
+          </div>
+        </details>
+      </section>
+
+      <section id="wiki-inbox" className="wiki-section">
+        <header className="wiki-section-head">
+          <h3>{l("6. Messagerie & Recompenses", "6. Inbox & Rewards")}</h3>
+          <p>
+            {l(
+              "La messagerie est persistante et separee du chat: rapports, recompenses, systeme et conversations joueurs.",
+              "Inbox is persistent and separate from chat: reports, rewards, system messages, and player conversations."
+            )}
+          </p>
+        </header>
+
+        <div className="wiki-note">
+          <strong>{l("Regle cle", "Key rule")}</strong>
+          <span>
+            {l(
+              "Les recompenses avec pieces jointes sont generees et validees cote serveur (claim idempotent).",
+              "Attachment rewards are generated and validated server-side (idempotent claim)."
+            )}
+          </span>
+        </div>
+
+        <h4>{l("Types de messages", "Message types")}</h4>
+        <div className="wiki-table-wrap">
+          <table className="wiki-table">
+            <thead>
+              <tr>
+                <th>{l("Type", "Type")}</th>
+                <th>{l("Contenu", "Content")}</th>
+                <th>{l("Action", "Action")}</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>{l("Recompense", "Reward")}</td>
+                <td>{l("Coffres, accelerateurs, butin de retour de flotte.", "Chests, accelerators, and fleet return loot.")}</td>
+                <td>{l("Reclamer", "Claim")}</td>
+              </tr>
+              <tr>
+                <td>{l("Combat", "Combat")}</td>
+                <td>{l("Rapports de bataille et de pertes.", "Battle and loss reports.")}</td>
+                <td>{l("Lire / archiver", "Read / archive")}</td>
+              </tr>
+              <tr>
+                <td>{l("Systeme", "System")}</td>
+                <td>{l("Annonces globales et evenements.", "Global announcements and events.")}</td>
+                <td>{l("Lire", "Read")}</td>
+              </tr>
+              <tr>
+                <td>{l("Joueur", "Player")}</td>
+                <td>{l("Messages asynchrones regroupes par discussion.", "Asynchronous messages grouped by conversation.")}</td>
+                <td>{l("Repondre", "Reply")}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h4>{l("Coffre quotidien de midi (heure serveur)", "Noon daily chest (server time)")}</h4>
+        <p>
+          {l(
+            "Chaque jour a 12:00 serveur, un message de recompense est envoye. Le bouton Ouvrir ajoute les items directement a l'inventaire.",
+            "Each day at 12:00 server time, a reward message is sent. The Open button adds items directly to inventory."
+          )}
+        </p>
+
+        <div className="wiki-table-wrap">
+          <table className="wiki-table">
+            <thead>
+              <tr>
+                <th>{l("Acceleration garantie (x1)", "Guaranteed accelerator (x1)")}</th>
+                <th>{l("Probabilite", "Probability")}</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td>{l("Faille Temporelle 1 min", "Time Rift 1 min")}</td><td>50%</td></tr>
+              <tr><td>{l("Faille Temporelle 5 min", "Time Rift 5 min")}</td><td>35%</td></tr>
+              <tr><td>{l("Faille Temporelle 1 h", "Time Rift 1 h")}</td><td>13%</td></tr>
+              <tr><td>{l("Faille Temporelle 3 h", "Time Rift 3 h")}</td><td>1.8%</td></tr>
+              <tr><td>{l("Faille Temporelle 12 h", "Time Rift 12 h")}</td><td>0.2%</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div className="wiki-table-wrap">
+          <table className="wiki-table">
+            <thead>
+              <tr>
+                <th>{l("Coffre de ressources garanti (x1)", "Guaranteed resource chest (x1)")}</th>
+                <th>{l("Probabilite", "Probability")}</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td>{l("Classique", "Classic")}</td><td>60%</td></tr>
+              <tr><td>{l("Inhabituel", "Uncommon")}</td><td>27%</td></tr>
+              <tr><td>{l("Rare", "Rare")}</td><td>10%</td></tr>
+              <tr><td>{l("Legendaire", "Legendary")}</td><td>2.7%</td></tr>
+              <tr><td>{l("Divin", "Divine")}</td><td>0.3%</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <details className="wiki-spoiler">
+          <summary>{l("Regles serveur (anti-abus)", "Server rules (anti-abuse)")}</summary>
+          <pre>
+{l(
+`- Un coffre quotidien max par joueur et par jour serveur
+- Contenu genere cote serveur au moment du claim
+- Claim idempotent: aucune double recompense possible
+- Expiration des messages de recompense apres 72h
+- +1 badge Inbox a reception, +1 badge Inventaire si item obtenu`,
+`- One daily chest max per player per server day
+- Content generated server-side at claim time
+- Idempotent claim: no double reward possible
+- Reward messages expire after 72h
+- +1 Inbox badge on arrival, +1 Inventory badge when item is granted`
+)}
+          </pre>
+        </details>
+      </section>
     </main>
   );
 }
@@ -9163,9 +10233,10 @@ function InventoryScreen({
   items,
   lastSyncAt,
   hasActiveQueue,
+  boostTargets,
   actionLoadingId,
-  onUseItem,
-  onRefresh
+  newItemNotifications,
+  onUseItem
 }: {
   language: UILanguage;
   loading: boolean;
@@ -9173,15 +10244,109 @@ function InventoryScreen({
   items: InventoryViewItem[];
   lastSyncAt: number | null;
   hasActiveQueue: boolean;
+  boostTargets: InventoryBoostTarget[];
   actionLoadingId: string;
-  onUseItem: (itemId: string, quantity?: number) => void;
-  onRefresh: () => void;
+  newItemNotifications: Record<string, number>;
+  onUseItem: (
+    itemId: string,
+    quantity?: number,
+    targetOverride?: "auto" | "building" | "hangar" | "research_local",
+    queueId?: string
+  ) => void;
 }) {
   const l = (fr: string, en: string) => (language === "en" ? en : fr);
   const totalStacks = items.length;
   const totalQuantity = items.reduce((sum, it) => sum + it.quantity, 0);
-  const hasTimeBoostItem = items.some((it) => it.category === "TIME_BOOST");
   const [quantitiesByItem, setQuantitiesByItem] = useState<Record<string, string>>({});
+  const [inventoryTab, setInventoryTab] = useState<"boosts" | "resources">("boosts");
+  const [boostPickerItemId, setBoostPickerItemId] = useState("");
+  const chestImageByType: Record<NonNullable<InventoryViewItem["chestType"]>, string> = {
+    CLASSIC: "/room-images/coffre-classique.png",
+    UNCOMMON: "/room-images/coffre-inhabituel.png",
+    RARE: "/room-images/coffre-rare.png",
+    LEGENDARY: "/room-images/coffre-legendaire.png",
+    DIVINE: "/room-images/coffre-divin.png"
+  };
+  const timeBoostImageBySeconds: Record<number, string> = {
+    60: "/room-images/Faille-Temporelle-1-min.png",
+    300: "/room-images/Faille-Temporelle-5-min.png",
+    3600: "/room-images/Faille-Temporelle-1-heure.png",
+    10800: "/room-images/Faille-Temporelle-3-heure.png",
+    43200: "/room-images/Faille-Temporelle-12-heure.png"
+  };
+
+  const resolveInventoryItemImage = (item: InventoryViewItem) => {
+    if (item.category === "RESOURCE_CRATE") {
+      const chestType = item.chestType ?? "CLASSIC";
+      return chestImageByType[chestType] ?? chestImageByType.CLASSIC;
+    }
+    if (item.category === "TIME_BOOST") {
+      const secs = Math.max(0, Math.floor(Number(item.durationSeconds ?? 0)));
+      return timeBoostImageBySeconds[secs] ?? TIME_BOOST_ITEM_IMAGE;
+    }
+    return "/room-images/item-acceleration.png";
+  };
+
+  const inventoryItemCategoryLabel = (item: InventoryViewItem) => {
+    if (item.category === "RESOURCE_CRATE") return l("Coffre", "Chest");
+    if (item.category === "TIME_BOOST") return l("Faille temporelle", "Time Rift");
+    if (item.category === "ATTACK_BOOST") return l("Boost attaque", "Attack boost");
+    return l("Objet", "Item");
+  };
+
+  const inventoryItemEffectLabel = (item: InventoryViewItem) => {
+    if (item.category === "RESOURCE_CRATE") {
+      const chestType = item.chestType ?? "CLASSIC";
+      const chestLabel =
+        chestType === "DIVINE"
+          ? l("Divin", "Divine")
+          : chestType === "LEGENDARY"
+            ? l("Legendaire", "Legendary")
+            : chestType === "RARE"
+              ? l("Rare", "Rare")
+              : chestType === "UNCOMMON"
+              ? l("Inhabituel", "Uncommon")
+              : l("Classique", "Classic");
+      return (
+        <>
+          {language === "en" ? "Opens a " : "Ouvre un "}
+          <span className="inventory-effect-highlight">
+            {language === "en" ? `${chestLabel} chest` : `coffre ${chestLabel}`}
+          </span>
+          {language === "en" ? " (random resources)." : " (ressources aleatoires)."}
+        </>
+      );
+    }
+    if (item.category === "TIME_BOOST") {
+      const secs = Math.max(0, Math.floor(Number(item.durationSeconds ?? 0)));
+      if (secs > 0) {
+        const durationLabel = formatBoostDurationLabel(secs);
+        return (
+          <>
+            {language === "en" ? "Reduces active queue by " : "Reduit la file active de "}
+            <span className="inventory-effect-highlight">{durationLabel}</span>
+            .
+          </>
+        );
+      }
+      return l("Reduction de temps sur file active.", "Time reduction on active queue.");
+    }
+    return l("Effet special.", "Special effect.");
+  };
+
+  const acceleratorItems = useMemo(() => items.filter((item) => item.category === "TIME_BOOST"), [items]);
+  const resourceItems = useMemo(() => items.filter((item) => item.category !== "TIME_BOOST"), [items]);
+  const visibleItems = inventoryTab === "boosts" ? acceleratorItems : resourceItems;
+
+  useEffect(() => {
+    if (inventoryTab === "boosts" && acceleratorItems.length <= 0 && resourceItems.length > 0) {
+      setInventoryTab("resources");
+      return;
+    }
+    if (inventoryTab === "resources" && resourceItems.length <= 0 && acceleratorItems.length > 0) {
+      setInventoryTab("boosts");
+    }
+  }, [acceleratorItems.length, inventoryTab, resourceItems.length]);
 
   return (
     <main className="inventory-shell">
@@ -9196,7 +10361,7 @@ function InventoryScreen({
         </article>
         <article className="inventory-pill">
           <strong>{l("Cible valide", "Valid target")}</strong>
-          <span>{hasActiveQueue ? l("Construction active", "Active construction") : l("Aucune", "None")}</span>
+          <span>{hasActiveQueue ? l("Batiment / Hangar / Recherche", "Building / Hangar / Research") : l("Aucune", "None")}</span>
         </article>
         <article className="inventory-pill">
           <strong>{l("Derniere sync", "Last sync")}</strong>
@@ -9206,51 +10371,77 @@ function InventoryScreen({
 
       <div className="inventory-head-row">
         <h2>{l("Objets compte", "Account-bound items")}</h2>
-        <button type="button" className="inventory-refresh-btn" onClick={onRefresh}>
-          <RefreshCw size={14} /> {l("Rafraichir", "Refresh")}
+      </div>
+
+      <div className="inventory-category-tabs">
+        <button
+          type="button"
+          className={inventoryTab === "boosts" ? "active" : ""}
+          onClick={() => setInventoryTab("boosts")}
+        >
+          {l("Accelerateurs", "Accelerators")}
+          <span>{acceleratorItems.length}</span>
+        </button>
+        <button
+          type="button"
+          className={inventoryTab === "resources" ? "active" : ""}
+          onClick={() => setInventoryTab("resources")}
+        >
+          {l("Ressources", "Resources")}
+          <span>{resourceItems.length}</span>
         </button>
       </div>
 
       {loading ? <p className="inventory-state">{l("Chargement inventaire...", "Loading inventory...")}</p> : null}
       {error ? <p className="inventory-error">{error}</p> : null}
-      {!hasActiveQueue && hasTimeBoostItem ? (
-        <p className="inventory-warning">
-          <Hourglass size={14} />
-          {l("Lancez une construction ou amelioration pour utiliser une Faille Temporelle.", "Start a build or upgrade to use a Time Rift.")}
-        </p>
-      ) : null}
-
       <section className="inventory-grid">
-        {items.length === 0 ? (
+        {visibleItems.length === 0 ? (
           <article className="inventory-empty">
             <Package size={16} />
-            <span>{l("Inventaire vide pour le moment.", "Inventory is currently empty.")}</span>
+            <span>
+              {inventoryTab === "boosts"
+                ? l("Aucun accelerateur disponible.", "No accelerator available.")
+                : l("Aucune ressource stockee dans cette categorie.", "No resource items in this category.")}
+            </span>
           </article>
         ) : (
-          items.map((item) => (
-            <article key={item.id} className="inventory-card">
-              <header>
-                <strong>{item.name}</strong>
-                <span>{item.id}</span>
-              </header>
-              <div className="inventory-meta-row">
-                <div>
-                  <small>{l("Quantite", "Quantity")}</small>
-                  <em>{item.quantity.toLocaleString()}</em>
+          visibleItems.map((item, itemIndex) => {
+            const itemUiKey = `${item.id}__${itemIndex}`;
+            const rawQty = Number(quantitiesByItem[itemUiKey] ?? 1);
+            const qty = Math.max(1, Math.min(item.quantity, Math.floor(Number.isFinite(rawQty) ? rawQty : 1)));
+            const newQty = Math.max(0, Math.floor(Number(newItemNotifications[item.id] ?? 0)));
+            const perItemSeconds =
+              item.category === "TIME_BOOST"
+                ? Math.max(0, Math.floor(Number(item.durationSeconds ?? 0)))
+                : 0;
+            const totalReductionSeconds = perItemSeconds * qty;
+            return (
+            <article key={itemUiKey} className={`inventory-card ${newQty > 0 ? "is-new" : ""}`}>
+              <div className="inventory-card-main">
+                <div className="inventory-item-visual-wrap">
+                  <img
+                    src={resolveInventoryItemImage(item)}
+                    alt={item.name}
+                    className="inventory-item-visual"
+                    loading="lazy"
+                    onError={(e) => {
+                      const img = e.currentTarget as HTMLImageElement;
+                      if (!img.src.endsWith(TIME_BOOST_ITEM_IMAGE)) {
+                        img.src = TIME_BOOST_ITEM_IMAGE;
+                      }
+                    }}
+                  />
+                  <span className="inventory-item-qty">x{item.quantity.toLocaleString()}</span>
+                  {newQty > 0 ? (
+                    <span className="inventory-item-new-badge">+{newQty.toLocaleString()}</span>
+                  ) : null}
                 </div>
-                <div>
-                  <small>{l("Categorie", "Category")}</small>
-                  <em>{item.category}</em>
-                </div>
-                <div>
-                  <small>{l("Effet", "Effect")}</small>
-                  <em>
-                    {item.category === "RESOURCE_CRATE"
-                      ? `Chest ${item.chestType ?? "CLASSIC"}`
-                      : item.durationSeconds
-                        ? `-${item.durationSeconds}s`
-                        : l("N/A", "N/A")}
-                  </em>
+                <div className="inventory-item-content">
+                  <header>
+                    <strong>{item.name}</strong>
+                    <span>{inventoryItemCategoryLabel(item)}</span>
+                  </header>
+                  <p className="inventory-item-effect">{inventoryItemEffectLabel(item)}</p>
                 </div>
               </div>
               <div className="inventory-action-row">
@@ -9260,11 +10451,11 @@ function InventoryScreen({
                     type="number"
                     min={1}
                     max={item.quantity}
-                    value={quantitiesByItem[item.id] ?? "1"}
+                    value={quantitiesByItem[itemUiKey] ?? "1"}
                     onChange={(e) =>
                       setQuantitiesByItem((prev) => ({
                         ...prev,
-                        [item.id]: e.target.value
+                        [itemUiKey]: e.target.value
                       }))
                     }
                   />
@@ -9278,8 +10469,10 @@ function InventoryScreen({
                     (item.category === "TIME_BOOST" && !hasActiveQueue)
                   }
                   onClick={() => {
-                    const rawQty = Number(quantitiesByItem[item.id] ?? 1);
-                    const qty = Math.max(1, Math.min(item.quantity, Math.floor(Number.isFinite(rawQty) ? rawQty : 1)));
+                    if (item.category === "TIME_BOOST") {
+                      setBoostPickerItemId((prev) => (prev === itemUiKey ? "" : itemUiKey));
+                      return;
+                    }
                     onUseItem(item.id, qty);
                   }}
                 >
@@ -9288,11 +10481,62 @@ function InventoryScreen({
                     ? l("Activation...", "Activating...")
                     : item.category === "RESOURCE_CRATE"
                       ? l("Ouvrir le coffre", "Open chest")
-                      : l("Utiliser sur la construction active", "Use on active construction")}
+                      : l("Utiliser", "Use")}
                 </button>
               </div>
+              {item.category === "TIME_BOOST" && boostPickerItemId === itemUiKey ? (
+                <div className="inventory-target-picker">
+                  <p className="inventory-target-picker-title">{l("Choisissez une file active", "Choose an active queue")}</p>
+                  {totalReductionSeconds > 0 ? (
+                    <p className="inventory-target-summary">
+                      {l("Temps reduit total", "Total reduced time")}:
+                      <strong>{formatBoostDurationLabel(totalReductionSeconds)}</strong>
+                    </p>
+                  ) : null}
+                  {boostTargets.length <= 0 ? (
+                    <p className="inventory-target-empty">
+                      {l(
+                        "Aucune cible disponible pour l'accelerateur.",
+                        "No available target for this accelerator."
+                      )}
+                    </p>
+                  ) : (
+                    boostTargets.map((target) => (
+                      <button
+                        key={`${itemUiKey}_${target.id}`}
+                        type="button"
+                        className="inventory-target-row"
+                        onClick={() => {
+                          onUseItem(item.id, qty, target.target, target.queueId);
+                          setBoostPickerItemId("");
+                        }}
+                        disabled={loading || actionLoadingId === item.id}
+                      >
+                        <span className="inventory-target-main">
+                          <strong>{target.label}</strong>
+                          <small>{target.detail}</small>
+                          {totalReductionSeconds > 0 ? (
+                            <small>
+                              {l("Apres application", "After apply")}: {formatDuration(Math.max(0, target.remainingSeconds - totalReductionSeconds))}
+                            </small>
+                          ) : null}
+                          {perItemSeconds > 0 ? (
+                            <small>
+                              {l("Necessaires pour terminer", "Needed to finish")}: {Math.max(1, Math.ceil(target.remainingSeconds / perItemSeconds))}
+                            </small>
+                          ) : null}
+                        </span>
+                        <span className="inventory-target-time">
+                          {l("Restant", "Remaining")} {formatDuration(target.remainingSeconds)}
+                        </span>
+                      </button>
+                    ))
+                  )}
+                </div>
+              ) : null}
             </article>
-          ))
+          );
+          })
         )}
       </section>
     </main>
@@ -9345,6 +10589,153 @@ function InboxScreen({
 
   const selectedMessage = useMemo(() => items.find((m) => m.id === selectedId) ?? null, [items, selectedId]);
   const currentUserId = session?.user_id || "";
+  const chestImageByType: Record<NonNullable<InventoryViewItem["chestType"]>, string> = {
+    CLASSIC: "/room-images/coffre-classique.png",
+    UNCOMMON: "/room-images/coffre-inhabituel.png",
+    RARE: "/room-images/coffre-rare.png",
+    LEGENDARY: "/room-images/coffre-legendaire.png",
+    DIVINE: "/room-images/coffre-divin.png"
+  };
+  const timeBoostImageBySeconds: Record<number, string> = {
+    60: "/room-images/Faille-Temporelle-1-min.png",
+    300: "/room-images/Faille-Temporelle-5-min.png",
+    3600: "/room-images/Faille-Temporelle-1-heure.png",
+    10800: "/room-images/Faille-Temporelle-3-heure.png",
+    43200: "/room-images/Faille-Temporelle-12-heure.png"
+  };
+
+  const chestTierLabel = (tier: NonNullable<InventoryViewItem["chestType"]>) => {
+    if (tier === "DIVINE") return l("Divin", "Divine");
+    if (tier === "LEGENDARY") return l("Legendaire", "Legendary");
+    if (tier === "RARE") return l("Rare", "Rare");
+    if (tier === "UNCOMMON") return l("Inhabituel", "Uncommon");
+    return l("Classique", "Classic");
+  };
+
+  const parseAttachmentItem = (itemId: string, quantity: number): InventoryViewItem => {
+    const safeId = String(itemId || "").trim();
+    const normalized = safeId.toUpperCase();
+    const qty = Math.max(1, Math.floor(Number(quantity || 0)));
+
+    if (normalized.startsWith("TIME_RIFT_")) {
+      const seconds = Math.max(0, Math.floor(Number(normalized.slice("TIME_RIFT_".length) || 0)));
+      return {
+        id: safeId,
+        name: l("Faille temporelle", "Time Rift"),
+        category: "TIME_BOOST",
+        quantity: qty,
+        durationSeconds: seconds
+      };
+    }
+
+    if (normalized.startsWith("RESOURCE_CHEST_")) {
+      const chestTypeRaw = normalized.slice("RESOURCE_CHEST_".length);
+      const chestType = (
+        chestTypeRaw === "DIVINE" ||
+        chestTypeRaw === "LEGENDARY" ||
+        chestTypeRaw === "RARE" ||
+        chestTypeRaw === "UNCOMMON" ||
+        chestTypeRaw === "CLASSIC"
+      ) ? chestTypeRaw : "CLASSIC";
+      return {
+        id: safeId,
+        name: l("Coffre de Ressources", "Resource Chest"),
+        category: "RESOURCE_CRATE",
+        quantity: qty,
+        chestType
+      };
+    }
+
+    return {
+      id: safeId,
+      name: safeId || l("Objet inconnu", "Unknown item"),
+      category: "OTHER",
+      quantity: qty
+    };
+  };
+
+  const selectedAttachmentInventoryItems = useMemo(() => {
+    if (!selectedMessage || !selectedMessage.hasAttachments) return [];
+    const merged = new Map<string, InventoryViewItem>();
+    const pushMerged = (item: InventoryViewItem) => {
+      const key = `${item.category}|${item.id}|${item.durationSeconds ?? 0}|${item.chestType ?? ""}`;
+      const existing = merged.get(key);
+      if (!existing) {
+        merged.set(key, { ...item });
+        return;
+      }
+      existing.quantity = Math.max(0, Math.floor(Number(existing.quantity || 0))) + Math.max(0, Math.floor(Number(item.quantity || 0)));
+    };
+
+    const items = Array.isArray(selectedMessage.attachments.items) ? selectedMessage.attachments.items : [];
+    for (const row of items) {
+      const parsed = parseAttachmentItem(String(row?.itemId || ""), Math.max(0, Math.floor(Number(row?.quantity ?? 0))));
+      if (parsed.quantity > 0) pushMerged(parsed);
+    }
+
+    const chests = Array.isArray(selectedMessage.attachments.chests) ? selectedMessage.attachments.chests : [];
+    for (const row of chests) {
+      const chestType = String(row?.chestType || "CLASSIC").toUpperCase();
+      const normalizedType: NonNullable<InventoryViewItem["chestType"]> =
+        chestType === "DIVINE" ||
+        chestType === "LEGENDARY" ||
+        chestType === "RARE" ||
+        chestType === "UNCOMMON" ||
+        chestType === "CLASSIC"
+          ? (chestType as NonNullable<InventoryViewItem["chestType"]>)
+          : "CLASSIC";
+      const qty = Math.max(0, Math.floor(Number(row?.quantity ?? 0)));
+      if (qty <= 0) continue;
+      pushMerged({
+        id: `RESOURCE_CHEST_${normalizedType}`,
+        name: l("Coffre de Ressources", "Resource Chest"),
+        category: "RESOURCE_CRATE",
+        quantity: qty,
+        chestType: normalizedType
+      });
+    }
+
+    return Array.from(merged.values()).sort((a, b) => String(a.name).localeCompare(String(b.name)));
+  }, [selectedMessage, language]);
+
+  const resolveAttachmentItemImage = (item: InventoryViewItem) => {
+    if (item.category === "RESOURCE_CRATE") {
+      const chestType = item.chestType ?? "CLASSIC";
+      return chestImageByType[chestType] ?? chestImageByType.CLASSIC;
+    }
+    if (item.category === "TIME_BOOST") {
+      const secs = Math.max(0, Math.floor(Number(item.durationSeconds ?? 0)));
+      return timeBoostImageBySeconds[secs] ?? TIME_BOOST_ITEM_IMAGE;
+    }
+    return "/room-images/item-acceleration.png";
+  };
+
+  const attachmentCategoryLabel = (item: InventoryViewItem) => {
+    if (item.category === "RESOURCE_CRATE") return l("Coffre", "Chest");
+    if (item.category === "TIME_BOOST") return l("Faille temporelle", "Time Rift");
+    if (item.category === "ATTACK_BOOST") return l("Boost attaque", "Attack boost");
+    return l("Objet", "Item");
+  };
+
+  const attachmentEffectLabel = (item: InventoryViewItem) => {
+    if (item.category === "RESOURCE_CRATE") {
+      const chestType = item.chestType ?? "CLASSIC";
+      const tierLabel = chestTierLabel(chestType);
+      return language === "en"
+        ? `Opens a ${tierLabel} chest (random resources).`
+        : `Ouvre un coffre ${tierLabel} (ressources aleatoires).`;
+    }
+    if (item.category === "TIME_BOOST") {
+      const secs = Math.max(0, Math.floor(Number(item.durationSeconds ?? 0)));
+      return secs > 0
+        ? (language === "en"
+          ? `Reduces active queue by ${formatBoostDurationLabel(secs)}.`
+          : `Reduit la file active de ${formatBoostDurationLabel(secs)}.`)
+        : l("Reduction de temps sur file active.", "Time reduction on active queue.");
+    }
+    return item.id || l("Effet special.", "Special effect.");
+  };
+
   const selectedMessageIsDailyNoonChest = useMemo(() => {
     if (!selectedMessage) return false;
     return (
@@ -10051,22 +11442,40 @@ function InboxScreen({
                     {selectedMessage.attachments.resources && Object.keys(selectedMessage.attachments.resources).length > 0 ? (
                       <ResourceCostDisplay cost={selectedMessage.attachments.resources as ResourceCost} available={{}} language={language} compact />
                     ) : null}
-                    {Array.isArray(selectedMessage.attachments.items) && selectedMessage.attachments.items.length > 0 ? (
-                      <ul>
-                        {selectedMessage.attachments.items.map((it) => (
-                          <li key={`${it.itemId}_${it.quantity}`}>{it.itemId} x{it.quantity}</li>
-                        ))}
-                      </ul>
+                    {selectedAttachmentInventoryItems.length > 0 ? (
+                      <div className="inbox-attachment-grid">
+                        {selectedAttachmentInventoryItems.map((item, index) => {
+                          const qty = Math.max(0, Math.floor(Number(item.quantity || 0)));
+                          const itemUiKey = `${item.id}_${item.category}_${item.durationSeconds ?? 0}_${item.chestType ?? ""}_${index}`;
+                          return (
+                            <article key={itemUiKey} className="inventory-card inbox-attachment-card">
+                              <div className="inventory-card-main">
+                                <div className="inventory-item-visual-wrap">
+                                  <img
+                                    src={resolveAttachmentItemImage(item)}
+                                    alt={item.name}
+                                    className="inventory-item-visual"
+                                    loading="lazy"
+                                  />
+                                  <span className="inventory-item-qty">x{qty.toLocaleString()}</span>
+                                </div>
+                                <div className="inventory-item-content">
+                                  <header>
+                                    <strong>{item.category === "RESOURCE_CRATE" && item.chestType ? chestTierLabel(item.chestType) : item.name}</strong>
+                                    <span>{attachmentCategoryLabel(item)}</span>
+                                  </header>
+                                  <p className="inventory-item-effect">{attachmentEffectLabel(item)}</p>
+                                </div>
+                              </div>
+                            </article>
+                          );
+                        })}
+                      </div>
                     ) : null}
                     {Number(selectedMessage.attachments.credits ?? 0) > 0 ? (
-                      <p>{l("Credits", "Credits")}: {Math.floor(Number(selectedMessage.attachments.credits ?? 0)).toLocaleString()}</p>
-                    ) : null}
-                    {Array.isArray(selectedMessage.attachments.chests) && selectedMessage.attachments.chests.length > 0 ? (
-                      <ul>
-                        {selectedMessage.attachments.chests.map((ch) => (
-                          <li key={`${ch.chestType}_${ch.quantity}`}>{ch.chestType} x{ch.quantity}</li>
-                        ))}
-                      </ul>
+                      <p className="inbox-attachment-credits">
+                        {l("Credits", "Credits")}: {Math.floor(Number(selectedMessage.attachments.credits ?? 0)).toLocaleString()}
+                      </p>
                     ) : null}
                   </>
                 )}
@@ -10226,6 +11635,7 @@ function ChatScreen({
   const globalChannelIdRef = useRef<string | null>(null);
   const privateChannelIdRef = useRef<string | null>(null);
   const currentPartnerRef = useRef<string>("");
+  const [chatLikeMetaByMessage, setChatLikeMetaByMessage] = useState<Record<string, { count: number; hasLiked: boolean }>>({});
 
   const upsertMessages = (list: ChatMessageItem[], item: ChatMessageItem) => {
     const idx = list.findIndex((m) => m.id === item.id);
@@ -10247,6 +11657,36 @@ function ChatScreen({
     }
     if (content && typeof content === "object") return content as Record<string, any>;
     return { message: "" };
+  };
+
+  const parseRpcPayload = (rpc: any): Record<string, any> => {
+    const payload = parseJsonObject(rpc?.payload);
+    return payload && typeof payload === "object" ? payload : {};
+  };
+
+  const hydrateLikesForMessages = async (channelId: string, messageIds: string[]) => {
+    if (!session) return;
+    const ids = [...new Set(messageIds.map((id) => String(id || "").trim()).filter(Boolean))].slice(0, 160);
+    if (ids.length <= 0) return;
+    try {
+      const rpc = await client.rpc(session, "rpc_chat_get_likes", JSON.stringify({ channelId, messageIds: ids }));
+      const payload = parseRpcPayload(rpc as any);
+      const rawMap = payload?.likesByMessage && typeof payload.likesByMessage === "object" ? payload.likesByMessage : {};
+      setChatLikeMetaByMessage((prev) => {
+        const next = { ...prev };
+        for (const id of ids) {
+          const row = rawMap[id];
+          const count = Number(row?.count ?? NaN);
+          const hasLiked = Boolean(row?.hasLiked);
+          if (Number.isFinite(count) && count >= 0) {
+            next[id] = { count: Math.max(0, Math.floor(count)), hasLiked };
+          }
+        }
+        return next;
+      });
+    } catch {
+      // noop: keep chat usable if likes RPC is unavailable.
+    }
   };
 
   const toMessage = (raw: any): ChatMessageItem => {
@@ -10377,6 +11817,7 @@ function ChatScreen({
       const history = await client.listChannelMessages(session, channel.id, 30, true);
       const mapped = (history.messages ?? []).map(toMessage).sort((a, b) => a.createdAt - b.createdAt);
       setPrivateMessages(mapped);
+      void hydrateLikesForMessages(channel.id, mapped.map((m) => m.id));
       await resolveUsersByIds(mapped.map((m) => m.senderId));
     } catch {
       setChatError(l("Impossible d'ouvrir la conversation privee. Verifiez le pseudo.", "Cannot open private conversation. Check the username."));
@@ -10465,6 +11906,12 @@ function ChatScreen({
       } else if (msg.channelId === privateChannelIdRef.current) {
         setPrivateMessages((prev) => prev.filter((m) => m.id !== msg.id));
       }
+      setChatLikeMetaByMessage((prev) => {
+        if (!Object.prototype.hasOwnProperty.call(prev, msg.id)) return prev;
+        const next = { ...prev };
+        delete next[msg.id];
+        return next;
+      });
       if (editingMessageId === msg.id) cancelEdit();
     } catch (err: any) {
       const detail = typeof err?.message === "string" ? err.message : "Erreur inconnue";
@@ -10472,27 +11919,73 @@ function ChatScreen({
     }
   };
 
+  const hasLikedMessage = (msg: ChatMessageItem) => {
+    if (!session?.user_id) return false;
+    const meta = chatLikeMetaByMessage[msg.id];
+    if (meta) return Boolean(meta.hasLiked);
+    return msg.likes.includes(session.user_id);
+  };
+
+  const likeCountForMessage = (msg: ChatMessageItem) => {
+    const meta = chatLikeMetaByMessage[msg.id];
+    if (meta) return Math.max(0, Math.floor(Number(meta.count || 0)));
+    return msg.likes.length;
+  };
+
   const toggleLike = async (msg: ChatMessageItem) => {
-    if (!socketRef.current || !session?.user_id) return;
-    const hasLiked = msg.likes.includes(session.user_id);
-    const nextLikes = hasLiked ? msg.likes.filter((id) => id !== session.user_id) : [...msg.likes, session.user_id];
+    if (!session?.user_id) return;
     try {
-      const payload = {
-        ...msg.rawPayload,
-        message: msg.content,
-        edited: msg.edited,
-        likes: nextLikes
-      };
-      await socketRef.current.updateChatMessage(msg.channelId, msg.id, payload);
-      const updated = { ...msg, likes: nextLikes, rawPayload: payload };
-      if (msg.channelId === globalChannelIdRef.current) {
-        setGlobalMessages((prev) => upsertMessages(prev, updated));
-      } else if (msg.channelId === privateChannelIdRef.current) {
-        setPrivateMessages((prev) => upsertMessages(prev, updated));
+      const rpc = await client.rpc(
+        session,
+        "rpc_chat_toggle_like",
+        JSON.stringify({ channelId: msg.channelId, messageId: msg.id })
+      );
+      const payload = parseRpcPayload(rpc as any);
+      const count = Number(payload?.count ?? NaN);
+      if (!Number.isFinite(count) || count < 0) {
+        await hydrateLikesForMessages(msg.channelId, [msg.id]);
+        return;
       }
+      setChatLikeMetaByMessage((prev) => ({
+        ...prev,
+        [msg.id]: {
+          count: Math.max(0, Math.floor(count)),
+          hasLiked: Boolean(payload?.hasLiked)
+        }
+      }));
     } catch (err: any) {
-      const detail = typeof err?.message === "string" ? err.message : "Erreur inconnue";
-      setChatError(`${l("Like impossible", "Like failed")}. (${detail})`);
+      const detail = typeof err?.message === "string" ? err.message : "";
+      const shouldFallbackLegacy =
+        !!socketRef.current &&
+        (detail.toLowerCase().includes("rpc_chat_toggle_like") ||
+          detail.toLowerCase().includes("rpc function not found") ||
+          detail.includes("404"));
+      if (shouldFallbackLegacy) {
+        try {
+          const hasLiked = msg.likes.includes(session.user_id);
+          const nextLikes = hasLiked ? msg.likes.filter((id) => id !== session.user_id) : [...msg.likes, session.user_id];
+          const payload = {
+            ...msg.rawPayload,
+            message: msg.content,
+            edited: msg.edited,
+            likes: nextLikes
+          };
+          await socketRef.current.updateChatMessage(msg.channelId, msg.id, payload);
+          const updated = { ...msg, likes: nextLikes, rawPayload: payload };
+          if (msg.channelId === globalChannelIdRef.current) {
+            setGlobalMessages((prev) => upsertMessages(prev, updated));
+          } else if (msg.channelId === privateChannelIdRef.current) {
+            setPrivateMessages((prev) => upsertMessages(prev, updated));
+          }
+          return;
+        } catch (legacyErr: any) {
+          const legacyDetail = typeof legacyErr?.message === "string" ? legacyErr.message : "Erreur inconnue";
+          setChatError(`${l("Like impossible", "Like failed")}. (${legacyDetail})`);
+          return;
+        }
+      }
+      const errDetail = detail || "Erreur inconnue";
+      setChatError(`${l("Like impossible", "Like failed")}. (${errDetail})`);
     }
   };
 
@@ -10518,6 +12011,7 @@ function ChatScreen({
           } else if (message.channel_id === privateChannelIdRef.current) {
             setPrivateMessages((prev) => upsertMessages(prev, mapped));
           }
+          void hydrateLikesForMessages(String(message.channel_id || ""), [mapped.id]);
           if (mapped.senderId) {
             void resolveUsersByIds([mapped.senderId]);
           }
@@ -10547,6 +12041,7 @@ function ChatScreen({
         const history = await client.listChannelMessages(session, globalChannel.id, 40, true);
         const mapped = (history.messages ?? []).map(toMessage).sort((a, b) => a.createdAt - b.createdAt);
         setGlobalMessages(mapped);
+        void hydrateLikesForMessages(globalChannel.id, mapped.map((m) => m.id));
         await resolveUsersByIds(mapped.map((m) => m.senderId));
       } catch {
         if (!cancelled) setChatError(l("Connexion chat Nakama echouee.", "Nakama chat connection failed."));
@@ -10564,6 +12059,7 @@ function ChatScreen({
       setPrivatePartner("");
       setPrivatePartnerId("");
       setPrivateMessages([]);
+      setChatLikeMetaByMessage({});
       if (socketRef.current) {
         try {
           socketRef.current.disconnect();
@@ -10655,10 +12151,10 @@ function ChatScreen({
               <div className="chat-msg-actions">
                 <button
                   type="button"
-                  className={session?.user_id && msg.likes.includes(session.user_id) ? "active-like" : ""}
+                  className={hasLikedMessage(msg) ? "active-like" : ""}
                   onClick={() => void toggleLike(msg)}
                 >
-                  <Heart size={12} /> {msg.likes.length}
+                  <Heart size={12} /> {likeCountForMessage(msg)}
                 </button>
                 {msg.edited ? <span className="edited-tag">{l("modifie", "edited")}</span> : null}
                 {(msg.senderId && msg.senderId === session?.user_id) || msg.sender === playerId ? (
@@ -10966,6 +12462,7 @@ function BuildModal({
   if (!buildSlot) return null;
 
   const free = getAvailableSpace(buildSlot.x, buildSlot.y);
+  const buildableTypes = BUILDABLE_ROOMS.filter((type) => !rooms.some((r) => r.type === type));
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
@@ -10976,13 +12473,12 @@ function BuildModal({
         </div>
 
         <div className="room-grid">
-          {BUILDABLE_ROOMS.map((type) => {
+          {buildableTypes.map((type) => {
             const cfg = ROOM_CONFIG[type];
-            const alreadyBuilt = rooms.some((r) => r.type === type);
             const cost = costForLevel(type, 1, buildingCostReductionFactor);
             const affordable = canAffordCost(resourceAmounts, cost);
             const fits = cfg.width <= free.width;
-            const disabled = !affordable || !fits || Boolean(constructionJob) || alreadyBuilt;
+            const disabled = !affordable || !fits || Boolean(constructionJob);
 
             return (
               <button key={type} className={`build-item ${disabled ? "disabled" : ""}`} disabled={disabled} onClick={() => onBuild(type)}>
@@ -10994,12 +12490,19 @@ function BuildModal({
                 </div>
                 <span>{l("Temps", "Time")} {formatDuration(buildSecondsForLevel(type, 1, buildingTimeReductionFactor))}</span>
                 {!fits && <em>{l("Espace horizontal insuffisant", "Not enough horizontal space")}</em>}
-                {alreadyBuilt && <em>{l("Deja construit", "Already built")}</em>}
                 {!affordable && <em>{l("Ressources insuffisantes", "Not enough resources")}</em>}
                 {constructionJob ? <em>{l("File de construction occupee", "Construction queue busy")}</em> : null}
               </button>
             );
           })}
+          {buildableTypes.length === 0 ? (
+            <p className="planner-empty">
+              {l(
+                "Tous les modules uniques constructibles ont deja ete deployes.",
+                "All unique buildable modules are already deployed."
+              )}
+            </p>
+          ) : null}
         </div>
       </div>
     </div>
