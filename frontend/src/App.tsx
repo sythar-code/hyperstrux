@@ -38,9 +38,10 @@ import {
   Hourglass,
   BookOpen,
   Heart,
-  Smile
+  Smile,
+  ChevronRight
 } from "lucide-react";
-import { CSSProperties, FormEvent, Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { CSSProperties, FormEvent, Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 type ResourceId =
   | "carbone"
@@ -54,7 +55,15 @@ type ResourceId =
   | "isotope7"
   | "singulite";
 
-type RoomType = ResourceId | "entrepot" | "entrance";
+type PopulationBuildingId =
+  | "quartiers_residentiels"
+  | "cantine_hydroponique"
+  | "centre_medical"
+  | "parc_orbital"
+  | "academie_technique"
+  | "universite_orbitale";
+
+type RoomType = ResourceId | PopulationBuildingId | "entrepot" | "entrance";
 
 interface Room {
   id: string;
@@ -145,6 +154,101 @@ type ResearchJob = {
   costPaid: ResourceCost;
 };
 
+type PopulationEventType = "festival_orbital" | "epidemie" | "greve_industrielle" | "decouverte_scientifique";
+type PopulationCrisisType = "emeute" | "sabotage" | "secession";
+
+type PopulationEventState = {
+  type: PopulationEventType;
+  startedAt: number;
+  endsAt: number;
+};
+
+type PopulationCrisisState = {
+  type: PopulationCrisisType;
+  startedAt: number;
+  endsAt: number;
+};
+
+type PopulationState = {
+  total: number;
+  foodStock: number;
+  stability: number;
+  isFamine: boolean;
+  onboardingProtectionUntil: number;
+  lastTickAt: number;
+  lastEventRollAt: number;
+  lastCrisisRollAt: number;
+  activeEvent: PopulationEventState | null;
+  activeCrisis: PopulationCrisisState | null;
+};
+
+type CivilizationTier = {
+  id: "colonie" | "station" | "cite_orbitale" | "metropole_spatiale" | "megastructure_vivante";
+  minPopulation: number;
+  nameFr: string;
+  nameEn: string;
+};
+
+type PopulationSnapshot = {
+  totalPopulation: number;
+  capacity: number;
+  growthPerHour: number;
+  migrationPerHour: number;
+  foodStock: number;
+  foodCapacity: number;
+  foodProductionPerHour: number;
+  foodConsumptionPerHour: number;
+  foodBalancePerHour: number;
+  stability: number;
+  workers: number;
+  engineers: number;
+  scientists: number;
+  requiredWorkers: number;
+  availableWorkers: number;
+  workforceMultiplier: number;
+  productionMultiplier: number;
+  constructionTimeFactor: number;
+  researchTimeFactor: number;
+  productionBonusPct: number;
+  constructionSpeedBonusPct: number;
+  researchSpeedBonusPct: number;
+  stabilityBand: "excellent" | "normal" | "warning" | "trouble" | "revolt";
+  isOverCapacity: boolean;
+  foodShortage: boolean;
+  housingScore: number;
+  healthScore: number;
+  leisureScore: number;
+  attractivity: number;
+  efficiencyPct: number;
+  civilizationTier: CivilizationTier;
+  activeEvent: PopulationEventState | null;
+  activeCrisis: PopulationCrisisState | null;
+  crisisPenaltyPct: number;
+  eventProductionPct: number;
+  eventResearchPct: number;
+  onboardingProtectionActive: boolean;
+  onboardingProtectionRemainingSec: number;
+};
+
+type MainMissionDefinition = {
+  id: string;
+  roomType: RoomType;
+  targetLevel: number;
+};
+
+type MainMissionState = {
+  activeMissionIds: string[];
+  nextIndex: number;
+  completedCount: number;
+  skippedCount: number;
+  totalRewardCredits: number;
+  lastRewardCredits: number;
+  lastRewardCount: number;
+  lastCompletedAt: number;
+  bootstrapped: boolean;
+  finished: boolean;
+};
+
 const GRID_WIDTH = 14;
 const CELL_WIDTH = 78;
 const CELL_HEIGHT = 96;
@@ -152,16 +256,41 @@ const BASE_ZOOM = 1.2;
 const MAX_ZOOM = BASE_ZOOM * 2;
 const STARTING_CREDITS = 0;
 const SAVE_KEY = "hsg_vault_state_v2";
+const SAVE_KEY_USER_PREFIX = "hsg_vault_state_v3";
+const SAVE_KEY_LEGACY_OWNER_KEY = "hsg_vault_state_v2_owner";
 const AUTH_SESSION_KEY = "hsg_nakama_session_v1";
 const UI_SCREEN_KEY = "hsg_ui_screen_v1";
 const PROFILE_EMAIL_DRAFT_KEY = "hsg_profile_email_draft_v1";
 const UI_LANG_KEY = "hsg_ui_lang_v1";
 const INVENTORY_UI_NOTIFS_KEY = "hsg_inventory_notifs_v1";
+const SCORE_DISPLAY_DIVISOR = 50000;
 const TIME_BOOST_ITEM_IMAGE = "/room-images/item-acceleration.png";
+const TIME_BOOST_IMAGE_BY_SECONDS: Record<number, string> = {
+  60: "/room-images/Faille-Temporelle-1-min.png",
+  300: "/room-images/Faille-Temporelle-5-min.png",
+  3600: "/room-images/Faille-Temporelle-1-heure.png",
+  10800: "/room-images/Faille-Temporelle-3-heure.png",
+  43200: "/room-images/Faille-Temporelle-12-heure.png"
+};
+
+const formatDisplayedScoreValue = (rawScore: number) => {
+  const safe = Math.max(0, Number(rawScore || 0));
+  if (safe <= 0) return 0;
+  return Math.max(1, Math.round(safe / SCORE_DISPLAY_DIVISOR));
+};
+
+function resolveTimeBoostImage(durationSeconds?: number | null) {
+  const secs = Math.max(0, Math.floor(Number(durationSeconds ?? 0)));
+  return TIME_BOOST_IMAGE_BY_SECONDS[secs] ?? TIME_BOOST_ITEM_IMAGE;
+}
+
+const vaultStorageKeyForUser = (userId?: string | null) =>
+  userId && userId.trim().length > 0 ? `${SAVE_KEY_USER_PREFIX}_${userId}` : SAVE_KEY;
 type UIScreen =
   | "home"
   | "game"
   | "hangar"
+  | "population"
   | "alliance"
   | "ranking"
   | "profile"
@@ -183,6 +312,7 @@ type RoomConfig = {
   maxLevel: number;
   baseCost: number;
   buildSecondsBase: number;
+  buildGroup: "core" | "production" | "population" | "infrastructure";
   resourceId?: ResourceId;
 };
 
@@ -195,7 +325,8 @@ const ROOM_CONFIG: Record<RoomType, RoomConfig> = {
     image: "/room-images/spatioport-principal.png",
     maxLevel: 1,
     baseCost: 0,
-    buildSecondsBase: 0
+    buildSecondsBase: 0,
+    buildGroup: "core"
   },
   carbone: {
     name: "Raffinerie de Carbone",
@@ -206,6 +337,7 @@ const ROOM_CONFIG: Record<RoomType, RoomConfig> = {
     maxLevel: 9999,
     baseCost: 120,
     buildSecondsBase: 60,
+    buildGroup: "production",
     resourceId: "carbone"
   },
   titane: {
@@ -217,6 +349,7 @@ const ROOM_CONFIG: Record<RoomType, RoomConfig> = {
     maxLevel: 9999,
     baseCost: 250,
     buildSecondsBase: 120,
+    buildGroup: "production",
     resourceId: "titane"
   },
   osmium: {
@@ -228,6 +361,7 @@ const ROOM_CONFIG: Record<RoomType, RoomConfig> = {
     maxLevel: 9999,
     baseCost: 540,
     buildSecondsBase: 240,
+    buildGroup: "production",
     resourceId: "osmium"
   },
   adamantium: {
@@ -239,6 +373,7 @@ const ROOM_CONFIG: Record<RoomType, RoomConfig> = {
     maxLevel: 9999,
     baseCost: 980,
     buildSecondsBase: 480,
+    buildGroup: "production",
     resourceId: "adamantium"
   },
   magmatite: {
@@ -250,6 +385,7 @@ const ROOM_CONFIG: Record<RoomType, RoomConfig> = {
     maxLevel: 9999,
     baseCost: 1800,
     buildSecondsBase: 900,
+    buildGroup: "production",
     resourceId: "magmatite"
   },
   neodyme: {
@@ -261,6 +397,7 @@ const ROOM_CONFIG: Record<RoomType, RoomConfig> = {
     maxLevel: 9999,
     baseCost: 2600,
     buildSecondsBase: 1200,
+    buildGroup: "production",
     resourceId: "neodyme"
   },
   chronium: {
@@ -272,6 +409,7 @@ const ROOM_CONFIG: Record<RoomType, RoomConfig> = {
     maxLevel: 9999,
     baseCost: 4200,
     buildSecondsBase: 1800,
+    buildGroup: "production",
     resourceId: "chronium"
   },
   aetherium: {
@@ -283,6 +421,7 @@ const ROOM_CONFIG: Record<RoomType, RoomConfig> = {
     maxLevel: 9999,
     baseCost: 6400,
     buildSecondsBase: 2700,
+    buildGroup: "production",
     resourceId: "aetherium"
   },
   isotope7: {
@@ -294,6 +433,7 @@ const ROOM_CONFIG: Record<RoomType, RoomConfig> = {
     maxLevel: 9999,
     baseCost: 9200,
     buildSecondsBase: 3600,
+    buildGroup: "production",
     resourceId: "isotope7"
   },
   singulite: {
@@ -305,7 +445,74 @@ const ROOM_CONFIG: Record<RoomType, RoomConfig> = {
     maxLevel: 9999,
     baseCost: 14500,
     buildSecondsBase: 5400,
+    buildGroup: "production",
     resourceId: "singulite"
+  },
+  quartiers_residentiels: {
+    name: "Quartiers residentiels",
+    width: 3,
+    color: "room-living",
+    icon: <Users size={20} />,
+    image: "/room-images/habitat-orbital.png",
+    maxLevel: 99,
+    baseCost: 4200,
+    buildSecondsBase: 720,
+    buildGroup: "population"
+  },
+  cantine_hydroponique: {
+    name: "Cantine hydroponique",
+    width: 3,
+    color: "room-food",
+    icon: <Utensils size={20} />,
+    image: "/room-images/bioforge-alimentaire.png",
+    maxLevel: 99,
+    baseCost: 3600,
+    buildSecondsBase: 660,
+    buildGroup: "population"
+  },
+  centre_medical: {
+    name: "Centre medical",
+    width: 2,
+    color: "room-water",
+    icon: <Shield size={20} />,
+    image: "/room-images/cyclateur-hydrique.png",
+    maxLevel: 80,
+    baseCost: 5600,
+    buildSecondsBase: 960,
+    buildGroup: "population"
+  },
+  parc_orbital: {
+    name: "Parc orbital",
+    width: 2,
+    color: "room-living",
+    icon: <Gem size={20} />,
+    image: "/room-images/accueil.png",
+    maxLevel: 80,
+    baseCost: 4800,
+    buildSecondsBase: 900,
+    buildGroup: "population"
+  },
+  academie_technique: {
+    name: "Academie technique",
+    width: 3,
+    color: "room-power",
+    icon: <BookOpen size={20} />,
+    image: "/room-images/reacteur-fusion.png",
+    maxLevel: 60,
+    baseCost: 9200,
+    buildSecondsBase: 1200,
+    buildGroup: "population"
+  },
+  universite_orbitale: {
+    name: "Universite orbitale",
+    width: 3,
+    color: "room-entrance",
+    icon: <Hexagon size={20} />,
+    image: "/room-images/spatioport-principal2.png",
+    maxLevel: 60,
+    baseCost: 13500,
+    buildSecondsBase: 1500,
+    buildGroup: "population"
   },
   entrepot: {
     name: "Entrepot Orbital",
@@ -315,7 +522,8 @@ const ROOM_CONFIG: Record<RoomType, RoomConfig> = {
     image: "/room-images/entrepot.png",
     maxLevel: 9999,
     baseCost: 300,
-    buildSecondsBase: 120
+    buildSecondsBase: 120,
+    buildGroup: "infrastructure"
   }
 };
 
@@ -331,6 +539,12 @@ const ROOM_NAME_EN: Record<RoomType, string> = {
   aetherium: "Aetherium Condenser",
   isotope7: "Isotope-7 Centrifuge",
   singulite: "Singulite Forge",
+  quartiers_residentiels: "Residential Quarters",
+  cantine_hydroponique: "Hydroponic Canteen",
+  centre_medical: "Medical Center",
+  parc_orbital: "Orbital Park",
+  academie_technique: "Technical Academy",
+  universite_orbitale: "Orbital University",
   entrepot: "Orbital Warehouse"
 };
 
@@ -382,8 +596,94 @@ const BUILDABLE_ROOMS: RoomType[] = [
   "aetherium",
   "isotope7",
   "singulite",
+  "quartiers_residentiels",
+  "cantine_hydroponique",
+  "centre_medical",
+  "parc_orbital",
+  "academie_technique",
+  "universite_orbitale",
   "entrepot"
 ];
+
+const MAIN_MISSION_TARGET_LEVEL = 50;
+const MAIN_MISSION_REWARD_MIN = 50;
+const MAIN_MISSION_REWARD_MAX = 500;
+
+const MAIN_MISSION_ROOM_ORDER: RoomType[] = [
+  "carbone",
+  "titane",
+  "entrepot",
+  "quartiers_residentiels",
+  "cantine_hydroponique",
+  "osmium",
+  "adamantium",
+  "magmatite",
+  "neodyme",
+  "centre_medical",
+  "parc_orbital",
+  "chronium",
+  "aetherium",
+  "academie_technique",
+  "isotope7",
+  "universite_orbitale",
+  "singulite"
+];
+
+const MAIN_MISSION_START_LEVEL: Partial<Record<RoomType, number>> = {
+  carbone: 2,
+  titane: 2,
+  entrepot: 1,
+  quartiers_residentiels: 1,
+  cantine_hydroponique: 1,
+  osmium: 1,
+  adamantium: 1,
+  magmatite: 1,
+  neodyme: 1,
+  centre_medical: 1,
+  parc_orbital: 1,
+  chronium: 1,
+  aetherium: 1,
+  academie_technique: 1,
+  isotope7: 1,
+  universite_orbitale: 1,
+  singulite: 1
+};
+
+const MAIN_MISSION_PLAN: MainMissionDefinition[] = (() => {
+  const plan: MainMissionDefinition[] = [];
+  let order = 0;
+  for (let targetLevel = 1; targetLevel <= MAIN_MISSION_TARGET_LEVEL; targetLevel += 1) {
+    for (const roomType of MAIN_MISSION_ROOM_ORDER) {
+      const startLevel = MAIN_MISSION_START_LEVEL[roomType] ?? 1;
+      if (targetLevel < startLevel) continue;
+      plan.push({
+        id: `main_mission_${order}_${roomType}_${targetLevel}`,
+        roomType,
+        targetLevel
+      });
+      order += 1;
+    }
+  }
+  return plan;
+})();
+
+const MAIN_MISSION_BY_ID: Record<string, MainMissionDefinition> = MAIN_MISSION_PLAN.reduce((acc, mission) => {
+  acc[mission.id] = mission;
+  return acc;
+}, {} as Record<string, MainMissionDefinition>);
+
+const defaultMainMissionState = (): MainMissionState => ({
+  activeMissionIds: [],
+  nextIndex: 0,
+  completedCount: 0,
+  skippedCount: 0,
+  totalRewardCredits: 0,
+  lastRewardCredits: 0,
+  lastRewardCount: 0,
+  lastCompletedAt: 0,
+  bootstrapped: false,
+  finished: false
+});
 
 const RESOURCE_BASE_PRODUCTION: Record<ResourceId, number> = {
   carbone: 3.0,
@@ -407,8 +707,466 @@ const STORAGE_BASE = 10000;
 const STORAGE_MULTIPLIER = 1.6;
 const PRODUCTION_BONUS = 0;
 
+const POPULATION_BASE_GROWTH_RATE_PER_HOUR = 0.004;
+const POPULATION_MIN_VALUE = 120;
+const POPULATION_MAX_VALUE = 2500000;
+const POPULATION_BASE_CAPACITY = 3000;
+const POPULATION_BASE_FOOD_PER_HOUR = 900;
+const POPULATION_BASE_FOOD_CAPACITY = 1800;
+const POPULATION_EVENT_ROLL_INTERVAL_MS = 15 * 60 * 1000;
+const POPULATION_CRISIS_ROLL_INTERVAL_MS = 10 * 60 * 1000;
+const POPULATION_ONBOARDING_PROTECTION_DAYS = 60;
+const POPULATION_ONBOARDING_PROTECTION_MS = POPULATION_ONBOARDING_PROTECTION_DAYS * 24 * 60 * 60 * 1000;
+const POPULATION_ONBOARDING_START_TOTAL = 3000;
+const POPULATION_ONBOARDING_START_FOOD = 18000;
+const POPULATION_ONBOARDING_START_STABILITY = 88;
+const POPULATION_ONBOARDING_CAPACITY_BUFFER = 800;
+const POPULATION_ONBOARDING_FREE_WORKFORCE_SHARE = 0.28;
+
+const POPULATION_DEFAULT_EVENT_DURATION_SEC: Record<PopulationEventType, number> = {
+  festival_orbital: 2 * 60 * 60,
+  epidemie: 90 * 60,
+  greve_industrielle: 70 * 60,
+  decouverte_scientifique: 2 * 60 * 60
+};
+
+const POPULATION_DEFAULT_CRISIS_DURATION_SEC: Record<PopulationCrisisType, number> = {
+  emeute: 45 * 60,
+  sabotage: 35 * 60,
+  secession: 30 * 60
+};
+
+const POPULATION_CIVILIZATION_TIERS: CivilizationTier[] = [
+  { id: "colonie", minPopulation: 0, nameFr: "Colonie", nameEn: "Colony" },
+  { id: "station", minPopulation: 500, nameFr: "Station", nameEn: "Station" },
+  { id: "cite_orbitale", minPopulation: 2000, nameFr: "Cite orbitale", nameEn: "Orbital City" },
+  { id: "metropole_spatiale", minPopulation: 8000, nameFr: "Metropole spatiale", nameEn: "Space Metropolis" },
+  { id: "megastructure_vivante", minPopulation: 20000, nameFr: "Megastructure vivante", nameEn: "Living Megastructure" }
+];
+
+const POPULATION_BUILDING_EFFECTS: Partial<
+  Record<
+    PopulationBuildingId,
+    {
+      housingCapPerLevel?: number;
+      foodPerHourPerLevel?: number;
+      growthBonusPerLevel?: number;
+      stabilityPerLevel?: number;
+      leisurePerLevel?: number;
+      healthPerLevel?: number;
+      attractivityPerLevel?: number;
+      engineerSharePerLevel?: number;
+      scientistSharePerLevel?: number;
+    }
+  >
+> = {
+  quartiers_residentiels: { housingCapPerLevel: 1400, stabilityPerLevel: 0.4, attractivityPerLevel: 0.0025 },
+  cantine_hydroponique: { foodPerHourPerLevel: 980, stabilityPerLevel: 0.35, attractivityPerLevel: 0.0015 },
+  centre_medical: { growthBonusPerLevel: 0.04, stabilityPerLevel: 0.45, healthPerLevel: 0.08 },
+  parc_orbital: { stabilityPerLevel: 0.9, leisurePerLevel: 0.12, attractivityPerLevel: 0.0045 },
+  academie_technique: { engineerSharePerLevel: 0.008, attractivityPerLevel: 0.0018 },
+  universite_orbitale: { scientistSharePerLevel: 0.007, attractivityPerLevel: 0.0022 }
+};
+
+const POPULATION_WORKFORCE_REQUIREMENTS: Partial<Record<ResourceId, number>> = {
+  carbone: 50,
+  titane: 60,
+  osmium: 80,
+  adamantium: 120,
+  magmatite: 145,
+  neodyme: 155,
+  chronium: 185,
+  aetherium: 225,
+  isotope7: 270,
+  singulite: 330
+};
+
+const POPULATION_SHIP_CREW_REQUIREMENTS: Record<string, number> = {
+  eclaireur_stellaire: 5,
+  foudroyant: 8,
+  aurore: 11,
+  spectre: 15,
+  tempest: 22,
+  titanide: 30,
+  colosse: 80,
+  pegase: 3,
+  argo: 6,
+  arche_spatiale: 16
+};
+
+const POPULATION_BUILD_UNLOCK_MIN: Partial<Record<PopulationBuildingId, number>> = {
+  quartiers_residentiels: 0,
+  cantine_hydroponique: 0,
+  centre_medical: 500,
+  parc_orbital: 500,
+  academie_technique: 2000,
+  universite_orbitale: 8000
+};
+
+const clampNumber = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
+const randomIntBetween = (min: number, max: number) => {
+  const lo = Math.ceil(Math.min(min, max));
+  const hi = Math.floor(Math.max(min, max));
+  return Math.floor(Math.random() * (hi - lo + 1)) + lo;
+};
+
+const populationTierForValue = (population: number): CivilizationTier => {
+  const safe = Math.max(0, Math.floor(Number(population || 0)));
+  let current = POPULATION_CIVILIZATION_TIERS[0];
+  for (const tier of POPULATION_CIVILIZATION_TIERS) {
+    if (safe >= tier.minPopulation) current = tier;
+  }
+  return current;
+};
+
+const isPopulationBuildingUnlocked = (roomType: RoomType, population: number): boolean => {
+  if (!(roomType in POPULATION_BUILD_UNLOCK_MIN)) return true;
+  const minPopulation = POPULATION_BUILD_UNLOCK_MIN[roomType as PopulationBuildingId] ?? 0;
+  return Math.max(0, Math.floor(Number(population || 0))) >= minPopulation;
+};
+
+const defaultPopulationState = (): PopulationState => {
+  const now = Date.now();
+  return {
+    total: POPULATION_ONBOARDING_START_TOTAL,
+    foodStock: POPULATION_ONBOARDING_START_FOOD,
+    stability: POPULATION_ONBOARDING_START_STABILITY,
+    isFamine: false,
+    onboardingProtectionUntil: now + POPULATION_ONBOARDING_PROTECTION_MS,
+    lastTickAt: now,
+    lastEventRollAt: now,
+    lastCrisisRollAt: now,
+    activeEvent: null,
+    activeCrisis: null
+  };
+};
+
 const computeProductionPerSecond = (resourceId: ResourceId, level: number, bonusTotal = PRODUCTION_BONUS) =>
   RESOURCE_BASE_PRODUCTION[resourceId] * Math.pow(Math.max(1, level), LEVEL_EXPONENT) * (1 + bonusTotal);
+
+const buildRoomLevelMap = (rooms: Room[]): Partial<Record<RoomType, number>> => {
+  const out: Partial<Record<RoomType, number>> = {};
+  for (const room of rooms) {
+    out[room.type] = Math.max(out[room.type] ?? 0, room.level);
+  }
+  return out;
+};
+
+const getPopulationSnapshot = (
+  rooms: Room[],
+  state: PopulationState,
+  unlockedResourceCount: number,
+  baseProductionRates: Record<string, number>
+): PopulationSnapshot => {
+  const nowMs = Date.now();
+  const onboardingProtectionUntil = Math.max(0, Math.floor(Number(state.onboardingProtectionUntil || 0)));
+  const onboardingProtectionActive = onboardingProtectionUntil > nowMs;
+  const onboardingProtectionRemainingSec = onboardingProtectionActive
+    ? Math.max(0, Math.floor((onboardingProtectionUntil - nowMs) / 1000))
+    : 0;
+  const seededPopulation = onboardingProtectionActive
+    ? Math.max(Math.floor(Number(state.total || 0)), POPULATION_ONBOARDING_START_TOTAL)
+    : Math.floor(Number(state.total || 0));
+  const nowTotalPopulation = clampNumber(seededPopulation, POPULATION_MIN_VALUE, POPULATION_MAX_VALUE);
+  const roomLevels = buildRoomLevelMap(rooms);
+  const popEffects = {
+    housingCap: 0,
+    foodPerHour: 0,
+    growthBonus: 0,
+    stability: 0,
+    leisure: 0,
+    health: 0,
+    attractivity: 0,
+    engineerShareBonus: 0,
+    scientistShareBonus: 0
+  };
+
+  for (const [roomType, levelRaw] of Object.entries(roomLevels)) {
+    const level = Math.max(0, Math.floor(Number(levelRaw || 0)));
+    if (level <= 0) continue;
+    const effects = POPULATION_BUILDING_EFFECTS[roomType as PopulationBuildingId];
+    if (!effects) continue;
+    popEffects.housingCap += (effects.housingCapPerLevel ?? 0) * level;
+    popEffects.foodPerHour += (effects.foodPerHourPerLevel ?? 0) * level;
+    popEffects.growthBonus += (effects.growthBonusPerLevel ?? 0) * level;
+    popEffects.stability += (effects.stabilityPerLevel ?? 0) * level;
+    popEffects.leisure += (effects.leisurePerLevel ?? 0) * level;
+    popEffects.health += (effects.healthPerLevel ?? 0) * level;
+    popEffects.attractivity += (effects.attractivityPerLevel ?? 0) * level;
+    popEffects.engineerShareBonus += (effects.engineerSharePerLevel ?? 0) * level;
+    popEffects.scientistShareBonus += (effects.scientistSharePerLevel ?? 0) * level;
+  }
+
+  const baseHousingCapacity = Math.max(
+    POPULATION_BASE_CAPACITY,
+    Math.floor(POPULATION_BASE_CAPACITY + popEffects.housingCap + (roomLevels.entrepot ?? 0) * 260)
+  );
+  const housingCapacity = onboardingProtectionActive
+    ? Math.max(baseHousingCapacity, nowTotalPopulation + POPULATION_ONBOARDING_CAPACITY_BUFFER)
+    : baseHousingCapacity;
+  const baseFoodCapacity = Math.max(
+    POPULATION_BASE_FOOD_CAPACITY,
+    Math.floor(
+      POPULATION_BASE_FOOD_CAPACITY +
+        (roomLevels.cantine_hydroponique ?? 0) * 1900 +
+        (roomLevels.quartiers_residentiels ?? 0) * 220
+    )
+  );
+  const foodCapacity = onboardingProtectionActive
+    ? Math.max(baseFoodCapacity, Math.floor(nowTotalPopulation * 8))
+    : baseFoodCapacity;
+  const onboardingFoodSupportPerHour = onboardingProtectionActive ? Math.floor(nowTotalPopulation * 1.05) : 0;
+  const foodProductionPerHour = Math.max(0, POPULATION_BASE_FOOD_PER_HOUR + popEffects.foodPerHour + onboardingFoodSupportPerHour);
+  const foodConsumptionPerHour = Math.max(0, nowTotalPopulation);
+  const foodBalancePerHour = foodProductionPerHour - foodConsumptionPerHour;
+  const foodShortage = !onboardingProtectionActive && state.foodStock <= 0 && foodBalancePerHour < 0;
+  const isOverCapacity = nowTotalPopulation > housingCapacity;
+
+  const engineerShareBase = 0.2 + popEffects.engineerShareBonus;
+  const scientistShareBase = 0.1 + popEffects.scientistShareBonus;
+  const specialistMax = 0.58;
+  let engineerShare = Math.max(0.12, engineerShareBase);
+  let scientistShare = Math.max(0.08, scientistShareBase);
+  const specialistSum = engineerShare + scientistShare;
+  if (specialistSum > specialistMax) {
+    const scale = specialistMax / specialistSum;
+    engineerShare *= scale;
+    scientistShare *= scale;
+  }
+  let workerShare = Math.max(0.35, 1 - engineerShare - scientistShare);
+  const shareSum = workerShare + engineerShare + scientistShare;
+  workerShare /= shareSum;
+  engineerShare /= shareSum;
+  scientistShare /= shareSum;
+
+  const engineers = Math.floor(nowTotalPopulation * engineerShare);
+  const scientists = Math.floor(nowTotalPopulation * scientistShare);
+  const workers = Math.max(0, nowTotalPopulation - engineers - scientists);
+
+  let requiredWorkersRaw = 0;
+  for (const resourceId of Object.keys(POPULATION_WORKFORCE_REQUIREMENTS) as ResourceId[]) {
+    const roomLevel = Math.max(0, Math.floor(Number(roomLevels[resourceId] || 0)));
+    if (roomLevel <= 0) continue;
+    const baseReq = POPULATION_WORKFORCE_REQUIREMENTS[resourceId] ?? 0;
+    if (baseReq <= 0) continue;
+    const scaled = baseReq * (1 + (roomLevel - 1) * 0.15);
+    requiredWorkersRaw += Math.max(0, Math.floor(scaled));
+  }
+  const softRequiredCap = Math.max(0, Math.floor(workers * (1 - POPULATION_ONBOARDING_FREE_WORKFORCE_SHARE)));
+  const requiredWorkers = onboardingProtectionActive ? Math.min(requiredWorkersRaw, softRequiredCap) : requiredWorkersRaw;
+  const availableWorkers = Math.max(0, workers - requiredWorkers);
+  const workforceMultiplier =
+    requiredWorkersRaw <= 0 || onboardingProtectionActive
+      ? 1
+      : clampNumber(workers / Math.max(1, requiredWorkersRaw), 0.12, 1);
+
+  const popProductionBonusPct = Math.floor(nowTotalPopulation / 1000) * 0.01;
+  const constructionSpeedBonusPct = Math.floor(engineers / 500) * 0.01;
+  const researchSpeedBonusPct = Math.floor(scientists / 300) * 0.01;
+
+  const baseStabilityValue = clampNumber(Number(state.stability || 0), 0, 100);
+  const stabilityValue = onboardingProtectionActive
+    ? Math.max(baseStabilityValue, POPULATION_ONBOARDING_START_STABILITY)
+    : baseStabilityValue;
+  let stabilityBand: PopulationSnapshot["stabilityBand"] = "normal";
+  let stabilityProductionPct = 0;
+  if (stabilityValue >= 90) {
+    stabilityBand = "excellent";
+    stabilityProductionPct = 0.08;
+  } else if (stabilityValue >= 70) {
+    stabilityBand = "normal";
+    stabilityProductionPct = 0;
+  } else if (stabilityValue >= 50) {
+    stabilityBand = "warning";
+    stabilityProductionPct = -0.06;
+  } else if (stabilityValue >= 30) {
+    stabilityBand = "trouble";
+    stabilityProductionPct = -0.15;
+  } else {
+    stabilityBand = "revolt";
+    stabilityProductionPct = -0.34;
+  }
+
+  let eventProductionPct = 0;
+  let eventResearchPct = 0;
+  if (state.activeEvent) {
+    if (state.activeEvent.type === "festival_orbital") {
+      eventProductionPct += 0.05;
+    } else if (state.activeEvent.type === "decouverte_scientifique") {
+      eventResearchPct += 0.15;
+    } else if (!onboardingProtectionActive && state.activeEvent.type === "epidemie") {
+      eventProductionPct -= 0.08;
+    } else if (!onboardingProtectionActive && state.activeEvent.type === "greve_industrielle") {
+      eventProductionPct -= 0.2;
+    }
+  }
+
+  let crisisPenaltyPct = 0;
+  let crisisConstructionPenalty = 0;
+  if (state.activeCrisis && !onboardingProtectionActive) {
+    if (state.activeCrisis.type === "emeute") {
+      crisisPenaltyPct -= 0.35;
+      crisisConstructionPenalty += 0.08;
+    } else if (state.activeCrisis.type === "sabotage") {
+      crisisPenaltyPct -= 0.5;
+      crisisConstructionPenalty += 0.12;
+    } else if (state.activeCrisis.type === "secession") {
+      crisisPenaltyPct -= 0.22;
+      crisisConstructionPenalty += 0.05;
+    }
+  }
+
+  const overCapacityPenaltyPct = onboardingProtectionActive ? 0 : isOverCapacity ? -0.25 : 0;
+  const faminePenaltyPct = onboardingProtectionActive ? 0 : foodShortage ? -0.18 : 0;
+  const productionMultiplier = clampNumber(
+    (1 +
+      popProductionBonusPct +
+      stabilityProductionPct +
+      eventProductionPct +
+      crisisPenaltyPct +
+      overCapacityPenaltyPct +
+      faminePenaltyPct) *
+      workforceMultiplier,
+    0.02,
+    3
+  );
+
+  const constructionTimeFactor = clampNumber(
+    1 - constructionSpeedBonusPct + crisisConstructionPenalty,
+    0.45,
+    1.65
+  );
+  const researchTimeFactor = clampNumber(
+    1 / Math.max(0.2, 1 + researchSpeedBonusPct + eventResearchPct),
+    0.4,
+    1.8
+  );
+
+  const housingScore = clampNumber((housingCapacity - nowTotalPopulation) / Math.max(1, housingCapacity), -1, 1);
+  const healthScore = clampNumber(popEffects.health, -1, 2);
+  const leisureScore = clampNumber(popEffects.leisure, -1, 2.5);
+  const baseProductionTotal = Object.values(baseProductionRates).reduce((sum, val) => sum + (Number(val) || 0), 0);
+  const richnessScore = clampNumber(baseProductionTotal / 180, 0, 1.5);
+  const attractivity = clampNumber(
+    ((stabilityValue - 55) / 100) * 0.02 + leisureScore * 0.004 + healthScore * 0.003 + richnessScore * 0.003 + popEffects.attractivity,
+    -0.01,
+    0.06
+  );
+  const migrationPerHour = Math.max(0, nowTotalPopulation * Math.max(0, attractivity));
+
+  const growthBasePerHour = nowTotalPopulation * POPULATION_BASE_GROWTH_RATE_PER_HOUR;
+  let growthPerHour = 0;
+  if (onboardingProtectionActive || (!isOverCapacity && !foodShortage)) {
+    const stabilityGrowthFactor = clampNumber(0.55 + stabilityValue / 100, 0.2, 1.65);
+    growthPerHour =
+      growthBasePerHour * (1 + popEffects.growthBonus + healthScore * 0.2 + leisureScore * 0.1) * stabilityGrowthFactor +
+      migrationPerHour;
+  }
+
+  return {
+    totalPopulation: nowTotalPopulation,
+    capacity: housingCapacity,
+    growthPerHour: Math.max(0, growthPerHour),
+    migrationPerHour,
+    foodStock: clampNumber(Number(state.foodStock || 0), 0, foodCapacity),
+    foodCapacity,
+    foodProductionPerHour,
+    foodConsumptionPerHour,
+    foodBalancePerHour,
+    stability: stabilityValue,
+    workers,
+    engineers,
+    scientists,
+    requiredWorkers,
+    availableWorkers,
+    workforceMultiplier,
+    productionMultiplier,
+    constructionTimeFactor,
+    researchTimeFactor,
+    productionBonusPct: (productionMultiplier - 1) * 100,
+    constructionSpeedBonusPct: constructionSpeedBonusPct * 100,
+    researchSpeedBonusPct: (1 / researchTimeFactor - 1) * 100,
+    stabilityBand,
+    isOverCapacity,
+    foodShortage,
+    housingScore,
+    healthScore,
+    leisureScore,
+    attractivity,
+    efficiencyPct: (productionMultiplier - 1) * 100,
+    civilizationTier: populationTierForValue(nowTotalPopulation),
+    activeEvent: state.activeEvent,
+    activeCrisis: onboardingProtectionActive ? null : state.activeCrisis,
+    crisisPenaltyPct: crisisPenaltyPct * 100,
+    eventProductionPct: eventProductionPct * 100,
+    eventResearchPct: eventResearchPct * 100,
+    onboardingProtectionActive,
+    onboardingProtectionRemainingSec
+  };
+};
+
+const pickWeighted = <T,>(rows: Array<{ value: T; weight: number }>): T => {
+  const safe = rows.filter((row) => Number.isFinite(row.weight) && row.weight > 0);
+  if (safe.length <= 0) return rows[0].value;
+  const total = safe.reduce((sum, row) => sum + row.weight, 0);
+  let roll = Math.random() * total;
+  for (const row of safe) {
+    roll -= row.weight;
+    if (roll <= 0) return row.value;
+  }
+  return safe[safe.length - 1].value;
+};
+
+const nextPopulationEvent = (nowMs: number): PopulationEventState => {
+  const type = pickWeighted<PopulationEventType>([
+    { value: "festival_orbital", weight: 28 },
+    { value: "epidemie", weight: 17 },
+    { value: "greve_industrielle", weight: 21 },
+    { value: "decouverte_scientifique", weight: 14 }
+  ]);
+  const durationSec = POPULATION_DEFAULT_EVENT_DURATION_SEC[type] ?? 3600;
+  return { type, startedAt: nowMs, endsAt: nowMs + durationSec * 1000 };
+};
+
+const nextPopulationCrisis = (nowMs: number): PopulationCrisisState => {
+  const type = pickWeighted<PopulationCrisisType>([
+    { value: "emeute", weight: 45 },
+    { value: "sabotage", weight: 35 },
+    { value: "secession", weight: 20 }
+  ]);
+  const durationSec = POPULATION_DEFAULT_CRISIS_DURATION_SEC[type] ?? 1800;
+  return { type, startedAt: nowMs, endsAt: nowMs + durationSec * 1000 };
+};
+
+const populationEventLabel = (eventType: PopulationEventType, language: UILanguage) => {
+  const map: Record<PopulationEventType, { fr: string; en: string }> = {
+    festival_orbital: { fr: "Festival orbital", en: "Orbital Festival" },
+    epidemie: { fr: "Epidemie", en: "Epidemic" },
+    greve_industrielle: { fr: "Greve industrielle", en: "Industrial Strike" },
+    decouverte_scientifique: { fr: "Decouverte scientifique", en: "Scientific Breakthrough" }
+  };
+  return language === "en" ? map[eventType].en : map[eventType].fr;
+};
+
+const populationCrisisLabel = (crisisType: PopulationCrisisType, language: UILanguage) => {
+  const map: Record<PopulationCrisisType, { fr: string; en: string }> = {
+    emeute: { fr: "Emeute", en: "Riot" },
+    sabotage: { fr: "Sabotage", en: "Sabotage" },
+    secession: { fr: "Secession", en: "Secession" }
+  };
+  return language === "en" ? map[crisisType].en : map[crisisType].fr;
+};
+
+const populationStabilityBandLabel = (band: PopulationSnapshot["stabilityBand"], language: UILanguage) => {
+  const map: Record<PopulationSnapshot["stabilityBand"], { fr: string; en: string }> = {
+    excellent: { fr: "Excellent", en: "Excellent" },
+    normal: { fr: "Stable", en: "Stable" },
+    warning: { fr: "Fragile", en: "Fragile" },
+    trouble: { fr: "Troubles", en: "Unrest" },
+    revolt: { fr: "Revolte", en: "Revolt" }
+  };
+  return language === "en" ? map[band].en : map[band].fr;
+};
 
 type ResourceCost = Partial<Record<ResourceId, number>>;
 
@@ -812,6 +1570,12 @@ const BASE_BUILDING_RESOURCE_COSTS: Record<RoomType, ResourceCost> = {
   aetherium: { carbone: 80000, titane: 30000, osmium: 10000 },
   isotope7: { carbone: 150000, titane: 60000, osmium: 20000 },
   singulite: { carbone: 300000, titane: 120000, osmium: 50000, adamantium: 5000 },
+  quartiers_residentiels: { carbone: 3000, titane: 1200 },
+  cantine_hydroponique: { carbone: 2500, titane: 1100 },
+  centre_medical: { carbone: 3800, titane: 1500, osmium: 300 },
+  parc_orbital: { carbone: 3200, titane: 1300, osmium: 200 },
+  academie_technique: { carbone: 6200, titane: 2400, osmium: 600 },
+  universite_orbitale: { carbone: 9000, titane: 3200, osmium: 1200, adamantium: 100 },
   entrepot: { carbone: 1000, titane: 500 }
 };
 
@@ -1196,7 +1960,7 @@ const defaultTechnologyLevels = (): Record<TechnologyId, number> => {
 
 const costForLevel = (type: RoomType, level: number, globalFactor = 1): ResourceCost => {
   const factor = Math.pow(BUILD_COST_MULTIPLIER, Math.max(0, level - 1));
-  const base = BASE_BUILDING_RESOURCE_COSTS[type];
+  const base = BASE_BUILDING_RESOURCE_COSTS[type] ?? {};
   const out: ResourceCost = {};
   for (const key of Object.keys(base) as ResourceId[]) {
     const amount = base[key] ?? 0;
@@ -1375,6 +2139,12 @@ const isRoomType = (value: string): value is RoomType =>
   value === "aetherium" ||
   value === "isotope7" ||
   value === "singulite" ||
+  value === "quartiers_residentiels" ||
+  value === "cantine_hydroponique" ||
+  value === "centre_medical" ||
+  value === "parc_orbital" ||
+  value === "academie_technique" ||
+  value === "universite_orbitale" ||
   value === "entrepot";
 
 const defaultRooms = (): Room[] => [
@@ -1586,6 +2356,8 @@ type MapExpeditionDto = {
   extractionSeconds: number;
   totalHarvestSpeed: number;
   totalTransportCapacity: number;
+  playerScore: number;
+  scoreBonus: number;
   fleet: Array<{ unitId: string; quantity: number }>;
   snapshotResources: Partial<Record<ResourceId, number>>;
   collectedResources: Partial<Record<ResourceId, number>>;
@@ -1597,6 +2369,194 @@ type MapHarvestShipRow = {
   harvestSpeed: number;
   harvestCapacity: number;
   mapSpeed: number;
+};
+
+type MapDailyHarvestQuestState = {
+  cycleKey: string;
+  extractionBestSeconds: number;
+  extractionClaimed: boolean;
+  collectedResources: number;
+  collectionClaimed: boolean;
+  processedReportIds: string[];
+};
+
+type DerivedMapExpeditionTimeline = {
+  status: "travel_to_field" | "extracting" | "returning";
+  startAt: number;
+  endAt: number;
+  progress: number;
+  completed: boolean;
+};
+
+const deriveMapExpeditionTimeline = (
+  expedition: MapExpeditionDto,
+  nowTs: number
+): DerivedMapExpeditionTimeline => {
+  const fallbackStatus = String(expedition.status || "travel_to_field").trim().toLowerCase();
+  const departureAt = Math.max(0, Math.floor(Number(expedition.departureAt ?? 0)));
+  const travelSeconds = Math.max(0, Math.floor(Number(expedition.travelSeconds ?? 0)));
+  const extractionSeconds = Math.max(0, Math.floor(Number(expedition.extractionSeconds ?? 0)));
+  const arrivalAt =
+    Math.max(0, Math.floor(Number(expedition.arrivalAt ?? 0))) ||
+    (departureAt > 0 ? departureAt + travelSeconds : 0);
+  const extractionStartAt =
+    Math.max(0, Math.floor(Number(expedition.extractionStartAt ?? 0))) ||
+    arrivalAt;
+  const extractionEndAt =
+    Math.max(0, Math.floor(Number(expedition.extractionEndAt ?? 0))) ||
+    (extractionStartAt > 0 ? extractionStartAt + extractionSeconds : 0);
+  const explicitReturnStartAt = Math.max(0, Math.floor(Number(expedition.returnStartAt ?? 0)));
+  const explicitReturnEndAt = Math.max(0, Math.floor(Number(expedition.returnEndAt ?? 0)));
+  const hasExplicitReturn =
+    fallbackStatus === "returning" || explicitReturnStartAt > 0 || explicitReturnEndAt > 0;
+
+  if (hasExplicitReturn) {
+    const normalizedReturnStart =
+      explicitReturnStartAt > 0
+        ? explicitReturnStartAt
+        : explicitReturnEndAt > 0
+          ? Math.max(0, explicitReturnEndAt - travelSeconds)
+          : Math.max(0, nowTs);
+    const normalizedReturnEnd =
+      explicitReturnEndAt > 0
+        ? explicitReturnEndAt
+        : normalizedReturnStart + Math.max(1, travelSeconds);
+    if (normalizedReturnEnd > 0 && nowTs >= normalizedReturnEnd) {
+      return {
+        status: "returning",
+        startAt: normalizedReturnStart,
+        endAt: normalizedReturnEnd,
+        progress: 1,
+        completed: true
+      };
+    }
+    const total = Math.max(1, normalizedReturnEnd - normalizedReturnStart);
+    return {
+      status: "returning",
+      startAt: normalizedReturnStart,
+      endAt: normalizedReturnEnd,
+      progress: Math.max(0, Math.min(1, (nowTs - normalizedReturnStart) / total)),
+      completed: false
+    };
+  }
+
+  if (
+    extractionStartAt > 0 &&
+    extractionEndAt > 0 &&
+    nowTs >= extractionStartAt &&
+    nowTs < extractionEndAt
+  ) {
+    const total = Math.max(1, extractionEndAt - extractionStartAt);
+    return {
+      status: "extracting",
+      startAt: extractionStartAt,
+      endAt: extractionEndAt,
+      progress: Math.max(0, Math.min(1, (nowTs - extractionStartAt) / total)),
+      completed: false
+    };
+  }
+
+  if (arrivalAt > 0 && nowTs < arrivalAt) {
+    const total = Math.max(1, arrivalAt - departureAt);
+    return {
+      status: "travel_to_field",
+      startAt: departureAt,
+      endAt: arrivalAt,
+      progress: Math.max(0, Math.min(1, (nowTs - departureAt) / total)),
+      completed: false
+    };
+  }
+
+  if (fallbackStatus === "extracting") {
+    return {
+      status: "extracting",
+      startAt: extractionStartAt,
+      endAt: extractionEndAt,
+      progress: 0,
+      completed: false
+    };
+  }
+  return {
+    status: "travel_to_field",
+    startAt: departureAt,
+    endAt: arrivalAt,
+    progress: 0,
+    completed: false
+  };
+};
+
+const calculateMapHarvestScoreBonus = (playerScore: number, explicitScoreBonus?: number): number => {
+  const provided = Number(explicitScoreBonus ?? 0);
+  if (Number.isFinite(provided) && provided > 0) {
+    return Math.max(1, Math.min(2, provided));
+  }
+  const safeScore = Math.max(1, Math.floor(Number(playerScore || 0)));
+  return Math.max(1, Math.min(2, 1 + Math.log10(safeScore) * 0.05));
+};
+
+const calculateFleetTransportCapacity = (fleetRows: Array<{ unitId: string; quantity: number }>): number => {
+  let totalTransportCapacity = 0;
+  for (const row of Array.isArray(fleetRows) ? fleetRows : []) {
+    const unitId = String(row?.unitId || "").trim();
+    const quantity = Math.max(0, Math.floor(Number(row?.quantity || 0)));
+    if (!unitId || quantity <= 0) continue;
+    const stats = MAP_HARVEST_UNIT_STATS[unitId];
+    if (!stats) continue;
+    totalTransportCapacity += Math.max(0, Math.floor(Number(stats.harvestCapacity || 0))) * quantity;
+  }
+  return totalTransportCapacity;
+};
+
+const estimateMapExpeditionCollected = (
+  expedition: MapExpeditionDto,
+  snapshotOverride: Partial<Record<ResourceId, number>> | null,
+  nowTs: number
+): Partial<Record<ResourceId, number>> => {
+  const timeline = deriveMapExpeditionTimeline(expedition, nowTs);
+  const snapshot = snapshotOverride && typeof snapshotOverride === "object"
+    ? snapshotOverride
+    : expedition.snapshotResources && typeof expedition.snapshotResources === "object"
+      ? expedition.snapshotResources
+      : {};
+  if (timeline.status !== "extracting") return {};
+  const elapsed = Math.max(0, Math.floor(nowTs - timeline.startAt));
+  const fleetHarvestSpeed = Math.max(0, Math.floor(Number(expedition.totalHarvestSpeed || 0)));
+  const totalTransportCapacity = Math.max(
+    0,
+    Math.max(
+      Math.floor(Number(expedition.totalTransportCapacity || 0)),
+      calculateFleetTransportCapacity(expedition.fleet)
+    )
+  );
+  const scoreBonus = calculateMapHarvestScoreBonus(expedition.playerScore, expedition.scoreBonus);
+  if (elapsed <= 0 || fleetHarvestSpeed <= 0) return {};
+
+  const harvestedByResource: Partial<Record<ResourceId, number>> = {};
+  for (const [ridRaw, amountRaw] of Object.entries(snapshot)) {
+    const rid = String(ridRaw || "").trim() as ResourceId;
+    const maxAmount = Math.max(0, Math.floor(Number(amountRaw || 0)));
+    if (maxAmount <= 0) continue;
+    const rarity = Math.max(1, Math.floor(Number(RESOURCE_DEFS.find((row) => row.id === rid)?.rarity ?? 100)));
+    const coefficient = 1 / rarity;
+    const harvested = Math.max(0, Math.min(maxAmount, Math.floor(elapsed * fleetHarvestSpeed * scoreBonus * coefficient)));
+    if (harvested > 0) harvestedByResource[rid] = harvested;
+  }
+
+  const totalPotential = Object.values(harvestedByResource).reduce(
+    (sum, value) => sum + Math.max(0, Math.floor(Number(value || 0))),
+    0
+  );
+  const scale = totalTransportCapacity > 0 && totalPotential > totalTransportCapacity
+    ? totalTransportCapacity / totalPotential
+    : 1;
+
+  const collected: Partial<Record<ResourceId, number>> = {};
+  for (const [ridRaw, amountRaw] of Object.entries(harvestedByResource)) {
+    const rid = String(ridRaw || "").trim() as ResourceId;
+    const value = Math.max(0, Math.floor(Number(amountRaw || 0) * scale));
+    if (value > 0) collected[rid] = value;
+  }
+  return collected;
 };
 
 const SECTOR_MAP_SIZE = 10000;
@@ -1683,16 +2643,16 @@ const MAP_FIELD_QUALITY_LABEL_EN: Record<string, string> = {
 };
 
 const MAP_HARVEST_UNIT_STATS: Record<string, { harvestSpeed: number; harvestCapacity: number; mapSpeed: number }> = {
-  pegase: { harvestSpeed: 120, harvestCapacity: 50, mapSpeed: 160 },
-  argo: { harvestSpeed: 320, harvestCapacity: 200, mapSpeed: 140 },
-  arche_spatiale: { harvestSpeed: 700, harvestCapacity: 500, mapSpeed: 110 },
-  eclaireur_stellaire: { harvestSpeed: 10, harvestCapacity: 10, mapSpeed: 300 },
-  foudroyant: { harvestSpeed: 5, harvestCapacity: 12, mapSpeed: 350 },
-  aurore: { harvestSpeed: 8, harvestCapacity: 7, mapSpeed: 420 },
-  spectre: { harvestSpeed: 12, harvestCapacity: 5, mapSpeed: 470 },
-  tempest: { harvestSpeed: 15, harvestCapacity: 4, mapSpeed: 500 },
-  titanide: { harvestSpeed: 18, harvestCapacity: 8, mapSpeed: 360 },
-  colosse: { harvestSpeed: 20, harvestCapacity: 12, mapSpeed: 300 }
+  pegase: { harvestSpeed: 120, harvestCapacity: 50_000, mapSpeed: 160 },
+  argo: { harvestSpeed: 320, harvestCapacity: 200_000, mapSpeed: 140 },
+  arche_spatiale: { harvestSpeed: 700, harvestCapacity: 500_000, mapSpeed: 110 },
+  eclaireur_stellaire: { harvestSpeed: 10, harvestCapacity: 10_000, mapSpeed: 300 },
+  foudroyant: { harvestSpeed: 5, harvestCapacity: 12_000, mapSpeed: 350 },
+  aurore: { harvestSpeed: 8, harvestCapacity: 7_000, mapSpeed: 420 },
+  spectre: { harvestSpeed: 12, harvestCapacity: 5_000, mapSpeed: 470 },
+  tempest: { harvestSpeed: 15, harvestCapacity: 4_000, mapSpeed: 500 },
+  titanide: { harvestSpeed: 18, harvestCapacity: 8_000, mapSpeed: 360 },
+  colosse: { harvestSpeed: 20, harvestCapacity: 12_000, mapSpeed: 300 }
 };
 
 const MAP_TRAVEL_TIME_FACTOR = 42;
@@ -1751,26 +2711,9 @@ const mapPlayerToSectorPlanet = (
   player: { userId: string; username: string },
   currentUserId: string
 ): SectorMapPlayer => {
-  const padding = 360;
-  const range = Math.max(1, SECTOR_MAP_SIZE - padding * 2);
-  const hashX = hashString32(`${player.userId}|x`);
-  const hashY = hashString32(`${player.userId}|y`);
+  const { x, y } = mapPlayerToPlanetCoordinates(player.userId);
   const hashType = hashString32(`${player.userId}|w`);
-  let x = padding + (hashX % range);
-  let y = padding + (hashY % range);
   const isSelf = player.userId === currentUserId;
-
-  if (isSelf) {
-    // Keep the local player always visible near the starting camera.
-    x = 5000;
-    y = 5600;
-  }
-
-  // Keep the center area readable around the main station.
-  if (Math.abs(x - 5000) < 420 && Math.abs(y - 5000) < 420) {
-    x = Math.min(SECTOR_MAP_SIZE - padding, x + 520);
-    y = Math.min(SECTOR_MAP_SIZE - padding, y + 300);
-  }
 
   return {
     userId: player.userId,
@@ -2191,6 +3134,7 @@ const getResourceMenuSpriteStyle = (resourceId: string): CSSProperties => {
 
 const RESOURCE_STORAGE_COLLECTION = "hyperstructure";
 const RESOURCE_STORAGE_KEY = "resources_state_v1";
+const PENDING_BUILD_ROOM_ID = "__pending_build__";
 const BASE_UNLOCKED_RESOURCE_IDS = ["carbone", "titane"];
 
 const createClient = () => {
@@ -2205,7 +3149,8 @@ const createClient = () => {
     throw new Error("Missing VITE_NAKAMA_SERVER_KEY in production environment.");
   }
   const serverKey = configuredServerKey ?? "defaultkey";
-  return new Client(serverKey, host, port, ssl);
+  // Use a longer timeout to absorb occasional heavy authoritative RPC cycles.
+  return new Client(serverKey, host, port, ssl, 20000);
 };
 
 const saveSession = (session: Session) => {
@@ -2437,11 +3382,17 @@ const isUnauthorizedError = (err: unknown): boolean => {
   return message.includes("401") || message.includes("unauthorized");
 };
 
+const isRequestTimeoutError = (err: unknown): boolean => {
+  const message = extractRpcErrorMessage(err).toLowerCase();
+  return message.includes("timed out") || message.includes("timeout");
+};
+
 export default function App() {
   const [screen, setScreen] = useState<UIScreen>(() => {
     const raw = localStorage.getItem(UI_SCREEN_KEY);
     return raw === "game" ||
       raw === "hangar" ||
+      raw === "population" ||
       raw === "alliance" ||
       raw === "ranking" ||
       raw === "profile" ||
@@ -2538,20 +3489,30 @@ export default function App() {
   const [serverClockOffsetMs, setServerClockOffsetMs] = useState<number>(0);
   const [constructionFxRoomId, setConstructionFxRoomId] = useState<string>("");
   const [vaultHydrated, setVaultHydrated] = useState<boolean>(false);
+  const [vaultHydratedUserId, setVaultHydratedUserId] = useState<string>("");
+  const [populationState, setPopulationState] = useState<PopulationState>(() => defaultPopulationState());
+  const [mainMissionState, setMainMissionState] = useState<MainMissionState>(() => defaultMainMissionState());
   const processedMapSyncReportIdsRef = useRef<Record<string, boolean>>({});
 
   const client = useMemo(() => createClient(), []);
   const transformRef = useRef<HTMLDivElement>(null);
   const previousScreenRef = useRef<UIScreen>(screen);
+  const rankingRpcInFlightRef = useRef(false);
+  const rankingRpcBackoffUntilRef = useRef(0);
   const l = (fr: string, en: string) => (uiLanguage === "en" ? en : fr);
   const inventoryMenuBadgeCount = Math.max(0, inventoryServerBadgeCount + inventoryInboxBadgeCount);
+  const mapWarmCommandementEscadreLevel = Math.max(0, Math.floor(Number(technologyLevels.commandement_escadre ?? 0)));
+  const mapWarmCacheKey = useMemo(
+    () => (session?.user_id ? `hsg_map_cache_v1_${String(session.user_id)}` : ""),
+    [session?.user_id]
+  );
   const roomByType = useMemo(() => {
     const map: Partial<Record<RoomType, Room>> = {};
     for (const room of rooms) map[room.type] = room;
     return map;
   }, [rooms]);
 
-  const invalidateSession = () => {
+  const invalidateSession = useCallback(() => {
     clearSavedSession();
     setSession(null);
     setPlayerId("");
@@ -2562,7 +3523,7 @@ export default function App() {
     setShowAuth(false);
     setAuthChecking(false);
     processedMapSyncReportIdsRef.current = {};
-  };
+  }, []);
   const entrepotLevel = roomByType.entrepot?.level ?? 1;
   const productionBonusesByResource = useMemo(() => technologyProductionBonuses(technologyLevels), [technologyLevels]);
   const buildingCostReductionFactor = useMemo(() => {
@@ -2570,13 +3531,13 @@ export default function App() {
     const reduction = Math.min(0.3, lvl * 0.02);
     return 1 - reduction;
   }, [technologyLevels]);
-  const buildingTimeReductionFactor = useMemo(() => {
+  const buildingTimeReductionFactorFromTech = useMemo(() => {
     const lvl = techLevelValue(technologyLevels, "optimisation_logistique");
     const reduction = Math.min(0.3, lvl * 0.02);
     return 1 - reduction;
   }, [technologyLevels]);
   const storageCapacity = useMemo(() => computeStorageCapacity(entrepotLevel), [entrepotLevel]);
-  const resourceRates = useMemo(() => {
+  const baseResourceRates = useMemo(() => {
     const map: Record<string, number> = {};
     for (const r of RESOURCE_DEFS) {
       const room = roomByType[r.id as RoomType];
@@ -2585,11 +3546,32 @@ export default function App() {
     }
     return map;
   }, [productionBonusesByResource, roomByType]);
+  const populationSnapshot = useMemo(
+    () => getPopulationSnapshot(rooms, populationState, unlockedResourceIds.length, baseResourceRates),
+    [baseResourceRates, populationState, rooms, unlockedResourceIds.length]
+  );
+  const buildingTimeReductionFactor = useMemo(
+    () => clampNumber(buildingTimeReductionFactorFromTech * populationSnapshot.constructionTimeFactor, 0.4, 2.2),
+    [buildingTimeReductionFactorFromTech, populationSnapshot.constructionTimeFactor]
+  );
+  const researchTimeFactor = useMemo(
+    () => clampNumber(populationSnapshot.researchTimeFactor, 0.4, 2.2),
+    [populationSnapshot.researchTimeFactor]
+  );
+  const resourceRates = useMemo(() => {
+    const map: Record<string, number> = {};
+    for (const r of RESOURCE_DEFS) {
+      const baseRate = Number(baseResourceRates[r.id] ?? 0);
+      map[r.id] = Math.max(0, baseRate * populationSnapshot.productionMultiplier);
+    }
+    return map;
+  }, [baseResourceRates, populationSnapshot.productionMultiplier]);
   const resourceAmountsRef = useRef<Record<string, number>>({});
   const resourceUnlockedRef = useRef<string[]>(BASE_UNLOCKED_RESOURCE_IDS);
   const resourceTickRef = useRef<number>(Date.now());
   const resourceRatesRef = useRef<Record<string, number>>({});
   const storageCapacityRef = useRef<number>(storageCapacity);
+  const populationStateRef = useRef<PopulationState>(defaultPopulationState());
   const avatarOptions = useMemo(
     () => [
       "/avatars/avatar-01.png",
@@ -2617,6 +3599,64 @@ export default function App() {
     setProfileEmail(email);
     setProfileServerEmail(account.email ?? "");
   };
+
+  const grantCreditsToServer = useCallback(
+    async (amount: number, claimId?: string) => {
+      const delta = Math.max(0, Math.floor(Number(amount || 0)));
+      if (delta <= 0 || !session) return;
+      try {
+        const rpc = await client.rpc(
+          session,
+          "economy_grant_credits",
+          JSON.stringify({
+            amount: delta,
+            claimId: String(claimId || "").trim()
+          })
+        );
+        const parsed = parseJsonObject((rpc as any)?.payload ?? rpc);
+        const nested = parseJsonObject(parsed?.payload);
+        const source = Object.keys(nested).length > 0 ? nested : parsed;
+        const nextCredits = Number(source?.credits ?? source?.state?.premiumCredits ?? NaN);
+        if (Number.isFinite(nextCredits) && nextCredits >= 0) {
+          setCredits(Math.floor(nextCredits));
+        }
+      } catch (err) {
+        if (isUnauthorizedError(err)) {
+          invalidateSession();
+          return;
+        }
+        setCredits((prev) => prev + delta);
+        if (import.meta.env.DEV) {
+          // eslint-disable-next-line no-console
+          console.error("credit grant sync error", err);
+        }
+      }
+    },
+    [client, invalidateSession, session]
+  );
+
+  const loadCreditsFromServer = useCallback(async () => {
+    if (!session) return;
+    try {
+      const rpc = await client.rpc(session, "economy_get_state", "{}");
+      const parsed = parseJsonObject((rpc as any)?.payload ?? rpc);
+      const nested = parseJsonObject(parsed?.payload);
+      const source = Object.keys(nested).length > 0 ? nested : parsed;
+      const nextCredits = Number(source?.state?.premiumCredits ?? source?.premiumCredits ?? NaN);
+      if (Number.isFinite(nextCredits) && nextCredits >= 0) {
+        setCredits(Math.floor(nextCredits));
+      }
+    } catch (err) {
+      if (isUnauthorizedError(err)) {
+        invalidateSession();
+        return;
+      }
+      if (import.meta.env.DEV) {
+        // eslint-disable-next-line no-console
+        console.error("credit load error", err);
+      }
+    }
+  }, [client, invalidateSession, session]);
 
   const applyResourceProduction = (base: Record<string, number>, seconds: number, unlocked: string[]) => {
     if (seconds <= 0) return base;
@@ -2777,8 +3817,13 @@ export default function App() {
       return;
     }
 
+    const now = Date.now();
+    if (rankingRpcInFlightRef.current) return;
+    if (now < rankingRpcBackoffUntilRef.current) return;
+
     if (!silent) setRankingLoading(true);
     setRankingError("");
+    rankingRpcInFlightRef.current = true;
     try {
       const clientProgress = {
         rooms: rooms.map((room) => ({
@@ -2803,12 +3848,18 @@ export default function App() {
         invalidateSession();
         return;
       }
-      setRankingError(l("Impossible de charger le classement.", "Unable to load ranking."));
+      const details = extractRpcErrorMessage(err);
+      if (isRequestTimeoutError(err)) {
+        rankingRpcBackoffUntilRef.current = Date.now() + 12000;
+      }
+      const baseMsg = l("Impossible de charger le classement.", "Unable to load ranking.");
+      setRankingError(details ? `${baseMsg} (${details})` : baseMsg);
       if (import.meta.env.DEV) {
         // eslint-disable-next-line no-console
         console.error("ranking load error", err);
       }
     } finally {
+      rankingRpcInFlightRef.current = false;
       if (!silent) setRankingLoading(false);
     }
   };
@@ -2843,12 +3894,59 @@ export default function App() {
   };
 
   useEffect(() => {
+    if (!session?.user_id) return;
+    void loadCreditsFromServer();
+  }, [loadCreditsFromServer, session?.user_id]);
+
+  useEffect(() => {
+    const resetToDefaults = () => {
+      setRooms(defaultRooms());
+      setConstructionJob(null);
+      setCredits(STARTING_CREDITS);
+      setZoom(BASE_ZOOM);
+      setPan({ x: 0, y: 200 });
+      setBuildSlot(null);
+      setActiveRoom(null);
+      setDraggedRoom(null);
+      setTechnologyLevels(defaultTechnologyLevels());
+      setResearchJob(null);
+      setPopulationState(defaultPopulationState());
+      setMainMissionState(defaultMainMissionState());
+      setUnlockedResourceIds(BASE_UNLOCKED_RESOURCE_IDS);
+    };
+
+    setVaultHydrated(false);
+    setVaultHydratedUserId("");
+    resetToDefaults();
+
+    const userId = session?.user_id ?? "";
+    if (!userId) {
+      setVaultHydrated(true);
+      setVaultHydratedUserId("");
+      return;
+    }
+
+    const scopedSaveKey = vaultStorageKeyForUser(userId);
     try {
-      const raw = localStorage.getItem(SAVE_KEY);
+      let raw = localStorage.getItem(scopedSaveKey);
+
+      if (!raw) {
+        const legacyRaw = localStorage.getItem(SAVE_KEY);
+        if (legacyRaw) {
+          const legacyOwner = localStorage.getItem(SAVE_KEY_LEGACY_OWNER_KEY);
+          if (!legacyOwner || legacyOwner === userId) {
+            localStorage.setItem(SAVE_KEY_LEGACY_OWNER_KEY, userId);
+            localStorage.setItem(scopedSaveKey, legacyRaw);
+            raw = legacyRaw;
+          }
+        }
+      }
+
       if (!raw) {
         setVaultHydrated(true);
         return;
       }
+
       const parsed = JSON.parse(raw) as {
         rooms?: Array<Omit<Room, "type"> & { type: string }>;
         credits?: number;
@@ -2858,6 +3956,8 @@ export default function App() {
         constructionJob?: ConstructionJob | null;
         technologyLevels?: Partial<Record<TechnologyId, number>>;
         researchJob?: ResearchJob | null;
+        populationState?: Partial<PopulationState>;
+        mainMissionState?: Partial<MainMissionState>;
       };
 
       if (parsed.technologyLevels && typeof parsed.technologyLevels === "object") {
@@ -2909,7 +4009,7 @@ export default function App() {
             }
             restoredJob = null;
             localStorage.setItem(
-              SAVE_KEY,
+              scopedSaveKey,
               JSON.stringify({
                 rooms: restoredRooms,
                 credits: typeof parsed.credits === "number" ? parsed.credits : typeof parsed.caps === "number" ? parsed.caps : STARTING_CREDITS,
@@ -2917,7 +4017,9 @@ export default function App() {
                 pan: parsed.pan && typeof parsed.pan.x === "number" && typeof parsed.pan.y === "number" ? parsed.pan : { x: 0, y: 200 },
                 constructionJob: null,
                 technologyLevels: parsed.technologyLevels ?? defaultTechnologyLevels(),
-                researchJob: parsed.researchJob ?? null
+                researchJob: parsed.researchJob ?? null,
+                populationState: parsed.populationState ?? defaultPopulationState(),
+                mainMissionState: parsed.mainMissionState ?? defaultMainMissionState()
               })
             );
           }
@@ -2934,6 +4036,110 @@ export default function App() {
         }
       }
 
+      if (parsed.populationState && typeof parsed.populationState === "object") {
+        const fallback = defaultPopulationState();
+        const hasOnboardingProtectionUntil =
+          typeof parsed.populationState.onboardingProtectionUntil === "number" &&
+          Number.isFinite(parsed.populationState.onboardingProtectionUntil) &&
+          parsed.populationState.onboardingProtectionUntil > 0;
+        const onboardingProtectionUntil = hasOnboardingProtectionUntil
+          ? Math.max(0, Math.floor(Number(parsed.populationState.onboardingProtectionUntil)))
+          : Date.now() + POPULATION_ONBOARDING_PROTECTION_MS;
+        const legacySeed = !hasOnboardingProtectionUntil;
+        const rawPopulation = Math.floor(Number(parsed.populationState.total ?? fallback.total));
+        const seededPopulation = legacySeed
+          ? Math.max(rawPopulation, POPULATION_ONBOARDING_START_TOTAL)
+          : rawPopulation;
+        const rawFoodStock = Math.max(0, Number(parsed.populationState.foodStock ?? fallback.foodStock));
+        const seededFoodStock = legacySeed
+          ? Math.max(rawFoodStock, POPULATION_ONBOARDING_START_FOOD)
+          : rawFoodStock;
+        const rawStability = clampNumber(Number(parsed.populationState.stability ?? fallback.stability), 0, 100);
+        const seededStability = legacySeed
+          ? Math.max(rawStability, POPULATION_ONBOARDING_START_STABILITY)
+          : rawStability;
+        const nextPopulation: PopulationState = {
+          total: clampNumber(
+            seededPopulation,
+            POPULATION_MIN_VALUE,
+            POPULATION_MAX_VALUE
+          ),
+          foodStock: seededFoodStock,
+          stability: seededStability,
+          isFamine: Boolean(parsed.populationState.isFamine ?? fallback.isFamine),
+          onboardingProtectionUntil,
+          lastTickAt: Math.max(0, Math.floor(Number(parsed.populationState.lastTickAt ?? fallback.lastTickAt))),
+          lastEventRollAt: Math.max(0, Math.floor(Number(parsed.populationState.lastEventRollAt ?? fallback.lastEventRollAt))),
+          lastCrisisRollAt: Math.max(0, Math.floor(Number(parsed.populationState.lastCrisisRollAt ?? fallback.lastCrisisRollAt))),
+          activeEvent:
+            parsed.populationState.activeEvent &&
+            typeof parsed.populationState.activeEvent === "object" &&
+            typeof parsed.populationState.activeEvent.type === "string" &&
+            typeof parsed.populationState.activeEvent.endsAt === "number"
+              ? {
+                  type: parsed.populationState.activeEvent.type as PopulationEventType,
+                  startedAt: Math.max(0, Math.floor(Number(parsed.populationState.activeEvent.startedAt ?? Date.now()))),
+                  endsAt: Math.max(0, Math.floor(Number(parsed.populationState.activeEvent.endsAt)))
+                }
+              : null,
+          activeCrisis:
+            parsed.populationState.activeCrisis &&
+            typeof parsed.populationState.activeCrisis === "object" &&
+            typeof parsed.populationState.activeCrisis.type === "string" &&
+            typeof parsed.populationState.activeCrisis.endsAt === "number"
+              ? {
+                  type: parsed.populationState.activeCrisis.type as PopulationCrisisType,
+                  startedAt: Math.max(0, Math.floor(Number(parsed.populationState.activeCrisis.startedAt ?? Date.now()))),
+                  endsAt: Math.max(0, Math.floor(Number(parsed.populationState.activeCrisis.endsAt)))
+                }
+              : null
+        };
+        setPopulationState(nextPopulation);
+      }
+
+      if (parsed.mainMissionState && typeof parsed.mainMissionState === "object") {
+        const fallback = defaultMainMissionState();
+        const rawActive = Array.isArray(parsed.mainMissionState.activeMissionIds)
+          ? parsed.mainMissionState.activeMissionIds
+          : [];
+        const activeMissionIds = rawActive
+          .map((id) => String(id))
+          .filter((id) => Boolean(MAIN_MISSION_BY_ID[id]))
+          .slice(0, 2);
+        const planLength = MAIN_MISSION_PLAN.length;
+        const nextIndex = clampNumber(
+          Math.max(0, Math.floor(Number(parsed.mainMissionState.nextIndex ?? fallback.nextIndex))),
+          0,
+          planLength
+        );
+        const completedCount = clampNumber(
+          Math.max(0, Math.floor(Number(parsed.mainMissionState.completedCount ?? fallback.completedCount))),
+          0,
+          planLength
+        );
+        const skippedCount = Math.max(0, Math.floor(Number(parsed.mainMissionState.skippedCount ?? fallback.skippedCount)));
+        const totalRewardCredits = Math.max(0, Math.floor(Number(parsed.mainMissionState.totalRewardCredits ?? fallback.totalRewardCredits)));
+        const lastRewardCredits = Math.max(0, Math.floor(Number(parsed.mainMissionState.lastRewardCredits ?? fallback.lastRewardCredits)));
+        const lastRewardCount = Math.max(0, Math.floor(Number(parsed.mainMissionState.lastRewardCount ?? fallback.lastRewardCount)));
+        const lastCompletedAt = Math.max(0, Math.floor(Number(parsed.mainMissionState.lastCompletedAt ?? fallback.lastCompletedAt)));
+        const finished = Boolean(parsed.mainMissionState.finished) || (nextIndex >= planLength && activeMissionIds.length <= 0);
+        const bootstrappedRaw = Boolean(parsed.mainMissionState.bootstrapped);
+        const needsRefill = bootstrappedRaw && !finished && activeMissionIds.length <= 0 && nextIndex < planLength;
+        const bootstrapped = needsRefill ? false : bootstrappedRaw;
+        setMainMissionState({
+          activeMissionIds,
+          nextIndex,
+          completedCount,
+          skippedCount,
+          totalRewardCredits,
+          lastRewardCredits,
+          lastRewardCount,
+          lastCompletedAt,
+          bootstrapped,
+          finished
+        });
+      }
+
       if (typeof parsed.credits === "number") setCredits(parsed.credits);
       else if (typeof parsed.caps === "number") setCredits(parsed.caps);
       if (typeof parsed.zoom === "number") setZoom(parsed.zoom);
@@ -2943,13 +4149,20 @@ export default function App() {
       // ignore malformed local save
     } finally {
       setVaultHydrated(true);
+      setVaultHydratedUserId(userId);
     }
-  }, []);
+  }, [session?.user_id]);
 
   useEffect(() => {
     if (!vaultHydrated) return;
-    localStorage.setItem(SAVE_KEY, JSON.stringify({ rooms, credits, zoom, pan, constructionJob, technologyLevels, researchJob }));
-  }, [rooms, credits, zoom, pan, constructionJob, technologyLevels, researchJob, vaultHydrated]);
+    if (!session?.user_id) return;
+    if (vaultHydratedUserId !== session.user_id) return;
+    const scopedSaveKey = vaultStorageKeyForUser(session.user_id);
+    localStorage.setItem(
+      scopedSaveKey,
+      JSON.stringify({ rooms, credits, zoom, pan, constructionJob, technologyLevels, researchJob, populationState, mainMissionState })
+    );
+  }, [rooms, credits, zoom, pan, constructionJob, technologyLevels, researchJob, populationState, mainMissionState, vaultHydrated, vaultHydratedUserId, session?.user_id]);
 
   useEffect(() => {
     localStorage.setItem(UI_SCREEN_KEY, screen);
@@ -2978,9 +4191,107 @@ export default function App() {
   }, [rooms]);
 
   useEffect(() => {
+    const userId = session?.user_id ?? "";
+    if (!userId) return;
+    if (!vaultHydrated || vaultHydratedUserId !== userId) return;
+    setMainMissionState((prev) => {
+      if (prev.bootstrapped) return prev;
+      const roomLevels = buildRoomLevelMap(rooms);
+      const activeMissionIds: string[] = [];
+      let nextIndex = 0;
+      let skippedCount = 0;
+      while (activeMissionIds.length < 2 && nextIndex < MAIN_MISSION_PLAN.length) {
+        const mission = MAIN_MISSION_PLAN[nextIndex];
+        nextIndex += 1;
+        const currentLevel = Math.max(0, Math.floor(Number(roomLevels[mission.roomType] ?? 0)));
+        if (currentLevel >= mission.targetLevel) {
+          skippedCount += 1;
+          continue;
+        }
+        activeMissionIds.push(mission.id);
+      }
+      const finished = activeMissionIds.length <= 0 && nextIndex >= MAIN_MISSION_PLAN.length;
+      return {
+        ...prev,
+        activeMissionIds,
+        nextIndex,
+        completedCount: 0,
+        skippedCount,
+        totalRewardCredits: 0,
+        lastRewardCredits: 0,
+        lastRewardCount: 0,
+        lastCompletedAt: 0,
+        bootstrapped: true,
+        finished
+      };
+    });
+  }, [rooms, session?.user_id, vaultHydrated, vaultHydratedUserId]);
+
+  useEffect(() => {
+    const userId = session?.user_id ?? "";
+    if (!userId) return;
+    if (!vaultHydrated || vaultHydratedUserId !== userId) return;
+    if (!mainMissionState.bootstrapped || mainMissionState.finished) return;
+    if (mainMissionState.activeMissionIds.length <= 0) return;
+
+    const roomLevels = buildRoomLevelMap(rooms);
+    const completedNow = mainMissionState.activeMissionIds
+      .map((missionId) => MAIN_MISSION_BY_ID[missionId])
+      .filter((mission): mission is MainMissionDefinition => Boolean(mission))
+      .filter((mission) => Math.max(0, Math.floor(Number(roomLevels[mission.roomType] ?? 0))) >= mission.targetLevel);
+
+    if (completedNow.length <= 0) return;
+
+    const completedIds = new Set(completedNow.map((mission) => mission.id));
+    let rewardCredits = 0;
+    for (const _mission of completedNow) {
+      rewardCredits += randomIntBetween(MAIN_MISSION_REWARD_MIN, MAIN_MISSION_REWARD_MAX);
+    }
+
+    setMainMissionState((prev) => {
+      if (!prev.bootstrapped) return prev;
+      const stillActive = prev.activeMissionIds.filter((id) => !completedIds.has(id));
+      let nextIndex = prev.nextIndex;
+      let skippedCount = 0;
+      while (stillActive.length < 2 && nextIndex < MAIN_MISSION_PLAN.length) {
+        const mission = MAIN_MISSION_PLAN[nextIndex];
+        nextIndex += 1;
+        const currentLevel = Math.max(0, Math.floor(Number(roomLevels[mission.roomType] ?? 0)));
+        if (currentLevel >= mission.targetLevel) {
+          skippedCount += 1;
+          continue;
+        }
+        stillActive.push(mission.id);
+      }
+      const finished = stillActive.length <= 0 && nextIndex >= MAIN_MISSION_PLAN.length;
+      return {
+        ...prev,
+        activeMissionIds: stillActive,
+        nextIndex,
+        completedCount: prev.completedCount + completedNow.length,
+        skippedCount: prev.skippedCount + skippedCount,
+        totalRewardCredits: prev.totalRewardCredits + rewardCredits,
+        lastRewardCredits: rewardCredits,
+        lastRewardCount: completedNow.length,
+        lastCompletedAt: Date.now(),
+        finished
+      };
+    });
+
+    if (rewardCredits > 0) {
+      const claimId = `main_mission_${completedNow.map((mission) => mission.id).sort().join("_")}`;
+      void grantCreditsToServer(rewardCredits, claimId);
+    }
+  }, [grantCreditsToServer, rooms, session?.user_id, mainMissionState, vaultHydrated, vaultHydratedUserId]);
+
+  useEffect(() => {
     resourceRatesRef.current = resourceRates;
     storageCapacityRef.current = storageCapacity;
   }, [resourceRates, storageCapacity]);
+
+  useEffect(() => {
+    populationStateRef.current = populationState;
+  }, [populationState]);
 
   useEffect(() => {
     if (!session) {
@@ -3097,13 +4408,14 @@ export default function App() {
       setRankingError("");
       return;
     }
-    void loadRankingState();
+    void loadRankingState(screen !== "ranking");
+    const pollEveryMs = screen === "ranking" ? 15000 : 45000;
     const interval = setInterval(() => {
       void loadRankingState(true);
-    }, 15000);
+    }, pollEveryMs);
     return () => clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session]);
+  }, [screen, session]);
 
   useEffect(() => {
     if (!session) {
@@ -3180,11 +4492,92 @@ export default function App() {
     const interval = setInterval(() => {
       const now = Date.now();
       const elapsed = Math.max(1, Math.floor((now - resourceTickRef.current) / 1000));
+      setPopulationState((prev) => {
+        const snapshot = getPopulationSnapshot(rooms, prev, unlockedResourceIds.length, baseResourceRates);
+        const stepSeconds = Math.max(1, Math.min(300, Math.floor((now - Math.max(0, prev.lastTickAt || 0)) / 1000) || elapsed));
+        const next: PopulationState = {
+          ...prev,
+          total: clampNumber(Math.floor(Number(prev.total || 0)), POPULATION_MIN_VALUE, POPULATION_MAX_VALUE),
+          foodStock: Math.max(0, Number(prev.foodStock || 0)),
+          stability: clampNumber(Number(prev.stability || 0), 0, 100),
+          onboardingProtectionUntil:
+            typeof prev.onboardingProtectionUntil === "number" &&
+            Number.isFinite(prev.onboardingProtectionUntil) &&
+            prev.onboardingProtectionUntil > 0
+              ? Math.max(0, Math.floor(prev.onboardingProtectionUntil))
+              : now + POPULATION_ONBOARDING_PROTECTION_MS,
+          lastTickAt: now
+        };
+        const onboardingProtectionActive = next.onboardingProtectionUntil > now;
+
+        if (next.activeEvent && next.activeEvent.endsAt <= now) next.activeEvent = null;
+        if (next.activeCrisis && next.activeCrisis.endsAt <= now) next.activeCrisis = null;
+        if (onboardingProtectionActive) {
+          if (next.activeEvent?.type === "epidemie" || next.activeEvent?.type === "greve_industrielle") {
+            next.activeEvent = null;
+          }
+          next.activeCrisis = null;
+        }
+
+        const foodDelta = snapshot.foodBalancePerHour * (stepSeconds / 3600);
+        next.foodStock = clampNumber(next.foodStock + foodDelta, 0, snapshot.foodCapacity);
+        const foodShortageNow = next.foodStock <= 0 && snapshot.foodBalancePerHour < 0;
+        if (foodShortageNow && !onboardingProtectionActive && !next.isFamine) {
+          next.stability = clampNumber(next.stability - 20, 0, 100);
+          next.isFamine = true;
+        } else if ((!foodShortageNow || onboardingProtectionActive) && next.isFamine) {
+          next.isFamine = false;
+        }
+
+        const isOverCapacityNow = next.total > snapshot.capacity;
+        let growth = snapshot.growthPerHour * (stepSeconds / 3600);
+        if (!onboardingProtectionActive && (isOverCapacityNow || foodShortageNow)) growth = 0;
+        const freeCapacity = Math.max(0, snapshot.capacity - next.total);
+        next.total = clampNumber(Math.floor(next.total + Math.min(growth, freeCapacity)), POPULATION_MIN_VALUE, POPULATION_MAX_VALUE);
+
+        let stabilityDriftPerHour = 0;
+        stabilityDriftPerHour += snapshot.housingScore >= 0 ? 1.2 + snapshot.housingScore * 1.8 : snapshot.housingScore * 4.2;
+        stabilityDriftPerHour += snapshot.foodBalancePerHour >= 0 ? 0.9 : -5.4;
+        stabilityDriftPerHour += snapshot.leisureScore * 1.35;
+        stabilityDriftPerHour += snapshot.healthScore * 1.1;
+        if (!onboardingProtectionActive && isOverCapacityNow) stabilityDriftPerHour -= 4.2;
+        if (!onboardingProtectionActive && foodShortageNow) stabilityDriftPerHour -= 6.2;
+        if (next.activeEvent?.type === "festival_orbital") stabilityDriftPerHour += 2.4;
+        if (!onboardingProtectionActive && next.activeEvent?.type === "epidemie") stabilityDriftPerHour -= 3.2;
+        if (!onboardingProtectionActive && next.activeEvent?.type === "greve_industrielle") stabilityDriftPerHour -= 1.8;
+        if (!onboardingProtectionActive && next.activeCrisis) stabilityDriftPerHour -= 4.8;
+        next.stability = clampNumber(next.stability + stabilityDriftPerHour * (stepSeconds / 3600), 0, 100);
+
+        if (!onboardingProtectionActive && now - next.lastEventRollAt >= POPULATION_EVENT_ROLL_INTERVAL_MS) {
+          next.lastEventRollAt = now;
+          if (!next.activeEvent && Math.random() < 0.28) {
+            next.activeEvent = nextPopulationEvent(now);
+          }
+        }
+
+        if (next.activeCrisis && next.activeCrisis.endsAt <= now) next.activeCrisis = null;
+        if (
+          !onboardingProtectionActive &&
+          now - next.lastCrisisRollAt >= POPULATION_CRISIS_ROLL_INTERVAL_MS &&
+          next.stability < 40
+        ) {
+          next.lastCrisisRollAt = now;
+          const chance = clampNumber((40 - next.stability) / 60, 0.08, 0.55);
+          if (!next.activeCrisis && Math.random() < chance) {
+            const crisis = nextPopulationCrisis(now);
+            next.activeCrisis = crisis;
+            if (crisis.type === "secession") {
+              next.total = clampNumber(Math.floor(next.total * 0.95), POPULATION_MIN_VALUE, POPULATION_MAX_VALUE);
+            }
+          }
+        }
+        return next;
+      });
       setResourceAmounts((prev) => applyResourceProduction(prev, elapsed, resourceUnlockedRef.current));
       resourceTickRef.current = now;
     }, 1000);
     return () => clearInterval(interval);
-  }, [resourceLoading, session]);
+  }, [baseResourceRates, resourceLoading, rooms, session, unlockedResourceIds.length]);
 
   useEffect(() => {
     if (!session?.user_id) return;
@@ -3279,9 +4672,165 @@ export default function App() {
   }, [authChecking, screen, session]);
 
   useEffect(() => {
+    if (!session) return;
+    let cancelled = false;
+    let refreshing = false;
+
+    const ensureSessionFresh = async () => {
+      if (refreshing) return;
+      const now = Math.floor(Date.now() / 1000);
+      if (!session.isexpired(now)) return;
+      if (session.isrefreshexpired(now)) {
+        if (!cancelled) invalidateSession();
+        return;
+      }
+      refreshing = true;
+      try {
+        const refreshed = await client.sessionRefresh(session);
+        if (cancelled) return;
+        setSession(refreshed);
+        saveSession(refreshed);
+        setNakamaStatus("online");
+      } catch {
+        if (!cancelled) invalidateSession();
+      } finally {
+        refreshing = false;
+      }
+    };
+
+    void ensureSessionFresh();
+    const interval = window.setInterval(() => {
+      void ensureSessionFresh();
+    }, 15000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [client, session?.token, session?.refresh_token]);
+
+  useEffect(() => {
     const timer = setInterval(() => setNowMs(Date.now()), 1000);
     return () => clearInterval(timer);
   }, []);
+
+  useEffect(() => {
+    if (!session || !session.user_id || !mapWarmCacheKey) return;
+    let cancelled = false;
+    let playersInFlight = false;
+    let stateInFlight = false;
+    let lastPlayersWarmAt = 0;
+
+    const writeMapWarmCache = (patch: Record<string, any>) => {
+      try {
+        const previous = parseJsonObject(sessionStorage.getItem(mapWarmCacheKey));
+        const next = {
+          ...previous,
+          ...patch,
+          cachedAtMs: Date.now()
+        } as Record<string, any>;
+        const serverNowTs = Number(next.serverNowTs ?? previous.serverNowTs ?? 0);
+        if (Number.isFinite(serverNowTs) && serverNowTs > 0) {
+          next.serverNowTs = Math.max(0, Math.floor(serverNowTs));
+        }
+        sessionStorage.setItem(mapWarmCacheKey, JSON.stringify(next));
+      } catch {
+        // ignore sessionStorage failures
+      }
+    };
+
+    const warmPlayers = async (force = false) => {
+      if (playersInFlight) return;
+      const now = Date.now();
+      if (!force && now - lastPlayersWarmAt < 30000) return;
+      playersInFlight = true;
+      try {
+        const rpc = await client.rpc(session, "rpc_map_players", JSON.stringify({ limit: 2000 }));
+        if (cancelled) return;
+        const parsed = parseJsonObject((rpc as any)?.payload ?? rpc);
+        const nested = parseJsonObject(parsed?.payload);
+        const source = Object.keys(nested).length > 0 ? nested : parsed;
+        const rowsRaw = Array.isArray(source?.players) ? source.players : [];
+        const rows = rowsRaw
+          .map((row: any) => ({
+            userId: String(row?.userId || "").trim(),
+            username: String(row?.username || "").trim()
+          }))
+          .filter((row: { userId: string; username: string }) => row.userId.length > 0)
+          .map((row: { userId: string; username: string }) => ({
+            ...row,
+            username: row.username || row.userId.slice(0, 8)
+          }));
+        writeMapWarmCache({ players: rows });
+        lastPlayersWarmAt = now;
+      } catch (err) {
+        if (isUnauthorizedError(err) && !cancelled) {
+          invalidateSession();
+        }
+      } finally {
+        playersInFlight = false;
+      }
+    };
+
+    const warmMapState = async () => {
+      if (stateInFlight) return;
+      stateInFlight = true;
+      try {
+        const rpc = await client.rpc(
+          session,
+          "rpc_map_fields_state",
+          JSON.stringify({ commandementEscadreLevel: mapWarmCommandementEscadreLevel })
+        );
+        if (cancelled) return;
+        const parsed = parseJsonObject((rpc as any)?.payload ?? rpc);
+        const nested = parseJsonObject(parsed?.payload);
+        const source = Object.keys(nested).length > 0 ? nested : parsed;
+
+        const expeditionsRaw = Array.isArray(source?.expeditions) ? source.expeditions : [];
+        const fallbackExpedition = parseJsonObject(source?.expedition);
+        let serverNowTs = 0;
+        for (const row of expeditionsRaw) {
+          const expedition = parseJsonObject(row);
+          serverNowTs = Math.max(serverNowTs, Math.max(0, Math.floor(Number(expedition?.serverNowTs ?? 0))));
+        }
+        if (serverNowTs <= 0 && Object.keys(fallbackExpedition).length > 0) {
+          serverNowTs = Math.max(0, Math.floor(Number(fallbackExpedition?.serverNowTs ?? 0)));
+        }
+        if (serverNowTs <= 0) {
+          serverNowTs = Math.floor(Date.now() / 1000);
+        }
+
+        writeMapWarmCache({
+          fields: Array.isArray(source?.fields) ? source.fields : [],
+          expedition: source?.expedition ?? null,
+          expeditions: expeditionsRaw,
+          reports: Array.isArray(source?.reports) ? source.reports : [],
+          harvestInventory: Array.isArray(source?.harvestInventory) ? source.harvestInventory : [],
+          maxActiveExpeditions: Math.max(1, Math.floor(Number(source?.maxActiveExpeditions ?? 1))),
+          serverNowTs
+        });
+      } catch (err) {
+        if (isUnauthorizedError(err) && !cancelled) {
+          invalidateSession();
+        }
+      } finally {
+        stateInFlight = false;
+      }
+    };
+
+    void warmPlayers(true);
+    void warmMapState();
+
+    const interval = window.setInterval(() => {
+      void warmPlayers(screen === "starmap");
+      void warmMapState();
+    }, screen === "starmap" ? 6000 : 15000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [client, invalidateSession, mapWarmCacheKey, mapWarmCommandementEscadreLevel, screen, session]);
 
   useEffect(() => {
     if (!constructionJob) return;
@@ -3360,7 +4909,7 @@ export default function App() {
     e.preventDefault();
     setAuthError("");
 
-    const email = authEmail.trim();
+    const email = authEmail.trim().toLowerCase();
     const password = authPassword;
     const username = authUsername.trim();
     const language = authLanguage;
@@ -3396,11 +4945,35 @@ export default function App() {
       setShowAuth(false);
       setUiLanguage(language);
       setScreen("game");
-    } catch {
+    } catch (err) {
       setNakamaStatus("offline");
-      setAuthError(authMode === "signup"
-        ? l("Inscription impossible. Email peut-etre deja utilise.", "Sign-up failed. Email may already be in use.")
-        : l("Connexion refusee. Verifie email/mot de passe.", "Login failed. Check email/password."));
+      const status = getErrorStatusCode(err);
+      const rawDetails = extractRpcErrorMessage(err);
+      const details =
+        typeof rawDetails === "string" && rawDetails.trim().length > 0
+          ? rawDetails.trim().replace(/\s+/g, " ").slice(0, 160)
+          : "";
+      if (import.meta.env.DEV) {
+        // eslint-disable-next-line no-console
+        console.error("auth submit error", { status, details, err });
+      }
+      if (authMode === "signup") {
+        if (status === 409 || details.toLowerCase().includes("already")) {
+          setAuthError(l("Inscription impossible: email deja utilise.", "Sign-up failed: email already in use."));
+        } else if (details) {
+          setAuthError(l(`Inscription impossible (${details}).`, `Sign-up failed (${details}).`));
+        } else {
+          setAuthError(l("Inscription impossible. Reessaie dans quelques secondes.", "Sign-up failed. Try again in a few seconds."));
+        }
+      } else if (status === 401) {
+        setAuthError(l("Connexion refusee. Verifie ton email (pas le pseudo) et ton mot de passe.", "Login denied. Check your email (not username) and password."));
+      } else if (status >= 500) {
+        setAuthError(l("Serveur indisponible temporairement. Reessaie.", "Server temporarily unavailable. Try again."));
+      } else if (details) {
+        setAuthError(l(`Connexion impossible (${details}).`, `Login failed (${details}).`));
+      } else {
+        setAuthError(l("Connexion refusee. Verifie email/mot de passe.", "Login failed. Check email/password."));
+      }
     } finally {
       setAuthLoading(false);
     }
@@ -3503,6 +5076,7 @@ export default function App() {
     if (!session) return;
     if (constructionJob) return;
     if (rooms.some((room) => room.type === type)) return;
+    if (!isPopulationBuildingUnlocked(type, populationSnapshot.totalPopulation)) return;
 
     const cost = costForLevel(type, 1, buildingCostReductionFactor);
     if (!canAffordCost(resourceAmountsRef.current, cost)) return;
@@ -3598,6 +5172,7 @@ export default function App() {
 
   const onBuild = (type: RoomType) => {
     if (!buildSlot) return;
+    if (!isPopulationBuildingUnlocked(type, populationSnapshot.totalPopulation)) return;
     startBuildAt(type, buildSlot);
     setBuildSlot(null);
   };
@@ -3649,7 +5224,16 @@ export default function App() {
   };
 
   const resetAll = () => {
-    localStorage.removeItem(SAVE_KEY);
+    if (session?.user_id) {
+      localStorage.removeItem(vaultStorageKeyForUser(session.user_id));
+      const legacyOwner = localStorage.getItem(SAVE_KEY_LEGACY_OWNER_KEY);
+      if (legacyOwner === session.user_id) {
+        localStorage.removeItem(SAVE_KEY);
+        localStorage.removeItem(SAVE_KEY_LEGACY_OWNER_KEY);
+      }
+    } else {
+      localStorage.removeItem(SAVE_KEY);
+    }
     setRooms(defaultRooms());
     setCredits(STARTING_CREDITS);
     setZoom(BASE_ZOOM);
@@ -3663,6 +5247,8 @@ export default function App() {
     setHangarQueue([]);
     setHangarInventory({});
     setHangarServerResources(null);
+    setPopulationState(defaultPopulationState());
+    setMainMissionState(defaultMainMissionState());
     setUnlockedResourceIds(BASE_UNLOCKED_RESOURCE_IDS);
     const resetAmounts: Record<string, number> = {};
     for (const r of RESOURCE_DEFS) resetAmounts[r.id] = 0;
@@ -3688,6 +5274,7 @@ export default function App() {
     for (const type of BUILDABLE_ROOMS) {
       const exists = rooms.some((r) => r.type === type);
       if (exists) continue;
+      if (!isPopulationBuildingUnlocked(type, populationSnapshot.totalPopulation)) continue;
       const hasSlot = Boolean(findAutoBuildSlot(type));
       if (!hasSlot) continue;
       const cost = costForLevel(type, 1, buildingCostReductionFactor);
@@ -3723,7 +5310,14 @@ export default function App() {
     }
 
     return items.slice(0, 14);
-  }, [buildingCostReductionFactor, buildingTimeReductionFactor, resourceAmounts, rooms, uiLanguage]);
+  }, [
+    buildingCostReductionFactor,
+    buildingTimeReductionFactor,
+    populationSnapshot.totalPopulation,
+    resourceAmounts,
+    rooms,
+    uiLanguage
+  ]);
 
   const onPlannerLaunch = (item: {
     mode: "construction" | "amelioration";
@@ -3732,6 +5326,7 @@ export default function App() {
   }) => {
     if (constructionJob) return;
     if (item.mode === "construction") {
+      if (!isPopulationBuildingUnlocked(item.roomType, populationSnapshot.totalPopulation)) return;
       const slot = findAutoBuildSlot(item.roomType);
       if (!slot) return;
       startBuildAt(item.roomType, slot);
@@ -3742,6 +5337,23 @@ export default function App() {
     if (!room) return;
     onUpgrade(room);
   };
+
+  const activeMainMissions = useMemo(
+    () =>
+      mainMissionState.activeMissionIds
+        .map((missionId) => MAIN_MISSION_BY_ID[missionId])
+        .filter((mission): mission is MainMissionDefinition => Boolean(mission)),
+    [mainMissionState.activeMissionIds]
+  );
+  const missionMainProgressPct = Math.max(
+    0,
+    Math.min(
+      100,
+      Math.round(
+        ((mainMissionState.completedCount + mainMissionState.skippedCount) / Math.max(1, MAIN_MISSION_PLAN.length)) * 100
+      )
+    )
+  );
 
   const launchResearch = (techId: TechnologyId) => {
     if (!session) return;
@@ -3755,7 +5367,8 @@ export default function App() {
     const targetLevel = currentLevel + 1;
     const cost = technologyCostForLevel(def, targetLevel);
     if (!canAffordCost(resourceAmountsRef.current, cost)) return;
-    const durationSec = technologyTimeForLevel(def, targetLevel);
+    const baseDurationSec = technologyTimeForLevel(def, targetLevel);
+    const durationSec = Math.max(1, Math.floor(baseDurationSec * researchTimeFactor));
 
     setResourceAmounts((prev) => applyCostDelta(prev, cost, -1));
     setResearchJob({
@@ -3769,7 +5382,24 @@ export default function App() {
   };
 
   const researchRemainingSeconds = researchJob ? Math.max(0, Math.floor((researchJob.endAt - nowMs) / 1000)) : 0;
-  const displayedScorePoints = Math.max(0, Math.floor(Number(playerScorePoints || 0)));
+  const displayedScorePoints = formatDisplayedScoreValue(playerScorePoints);
+  const populationFillPct = clampNumber(
+    (populationSnapshot.totalPopulation / Math.max(1, populationSnapshot.capacity)) * 100,
+    0,
+    100
+  );
+  const populationFoodFillPct = clampNumber(
+    (populationSnapshot.foodStock / Math.max(1, populationSnapshot.foodCapacity)) * 100,
+    0,
+    100
+  );
+  const populationGrowthPctPerHour =
+    populationSnapshot.totalPopulation > 0
+      ? (populationSnapshot.growthPerHour / Math.max(1, populationSnapshot.totalPopulation)) * 100
+      : 0;
+  const populationProtectionDaysLeft = populationSnapshot.onboardingProtectionActive
+    ? Math.max(1, Math.ceil(populationSnapshot.onboardingProtectionRemainingSec / 86400))
+    : 0;
   const inventoryBoostTargets = useMemo<InventoryBoostTarget[]>(() => {
     const rows: InventoryBoostTarget[] = [];
     if (constructionJob) {
@@ -3959,12 +5589,45 @@ export default function App() {
     }
   };
 
+  const hangarCrewState = useMemo(() => {
+    const crewUsedByInventory = Object.entries(hangarInventory).reduce((sum, [unitId, qtyRaw]) => {
+      const qty = Math.max(0, Math.floor(Number(qtyRaw ?? 0)));
+      if (qty <= 0) return sum;
+      const crewPerUnit = Math.max(0, Math.floor(Number(POPULATION_SHIP_CREW_REQUIREMENTS[unitId] ?? 0)));
+      if (crewPerUnit <= 0) return sum;
+      return sum + crewPerUnit * qty;
+    }, 0);
+    const crewUsedByQueue = hangarQueue.reduce((sum, item) => {
+      const qty = Math.max(0, Math.floor(Number(item.quantity ?? 0)));
+      const crewPerUnit = Math.max(0, Math.floor(Number(POPULATION_SHIP_CREW_REQUIREMENTS[item.unitId] ?? 0)));
+      if (qty <= 0 || crewPerUnit <= 0) return sum;
+      return sum + crewPerUnit * qty;
+    }, 0);
+    const crewPool = Math.max(0, Math.floor(Number(populationSnapshot.availableWorkers ?? 0)));
+    const used = Math.max(0, crewUsedByInventory + crewUsedByQueue);
+    const free = Math.max(0, crewPool - used);
+    return { crewPool, used, free };
+  }, [hangarInventory, hangarQueue, populationSnapshot.availableWorkers]);
+
   const launchHangarProduction = async (unitId: string, quantity: number) => {
     if (!session) {
       setHangarError(l("Connexion requise.", "You must be signed in."));
       return;
     }
     const qty = Math.max(1, Math.floor(Number(quantity) || 1));
+    const crewPerUnit = Math.max(0, Math.floor(Number(POPULATION_SHIP_CREW_REQUIREMENTS[unitId] ?? 0)));
+    if (crewPerUnit > 0) {
+      const crewRequired = crewPerUnit * qty;
+      if (crewRequired > hangarCrewState.free) {
+        setHangarError(
+          l(
+            `Equipage insuffisant (${crewRequired.toLocaleString()} requis, ${hangarCrewState.free.toLocaleString()} disponibles).`,
+            `Not enough crew (${crewRequired.toLocaleString()} required, ${hangarCrewState.free.toLocaleString()} available).`
+          )
+        );
+        return;
+      }
+    }
     setHangarActionBusy(true);
     setHangarError("");
     try {
@@ -4029,6 +5692,19 @@ export default function App() {
     }
   };
 
+  const pendingBuildRoom = useMemo<Room | null>(() => {
+    if (!constructionJob || constructionJob.mode !== "build") return null;
+    const cfg = ROOM_CONFIG[constructionJob.roomType];
+    return {
+      id: PENDING_BUILD_ROOM_ID,
+      x: constructionJob.x,
+      y: constructionJob.y,
+      width: cfg.width,
+      type: constructionJob.roomType,
+      level: 0
+    };
+  }, [constructionJob]);
+
   const occupied = Array.from({ length: gridHeight }, () => Array.from({ length: GRID_WIDTH }, () => false));
   for (const room of rooms) {
     if (room.id === draggedRoom?.id) continue;
@@ -4036,11 +5712,19 @@ export default function App() {
       if (room.y < gridHeight && room.x + i < GRID_WIDTH) occupied[room.y][room.x + i] = true;
     }
   }
+  if (pendingBuildRoom) {
+    for (let i = 0; i < pendingBuildRoom.width; i += 1) {
+      if (pendingBuildRoom.y < gridHeight && pendingBuildRoom.x + i < GRID_WIDTH) {
+        occupied[pendingBuildRoom.y][pendingBuildRoom.x + i] = true;
+      }
+    }
+  }
 
   const renderUnifiedMenu = () => (
     <div className="status-wrap">
       <button className="ghost-btn" onClick={() => setScreen("game")}><Play size={15} /> {l("Jeu", "Game")}</button>
       <button className="ghost-btn" onClick={() => setScreen("hangar")}><Swords size={15} /> {l("Hangar", "Hangar")}</button>
+      <button className="ghost-btn" onClick={() => setScreen("population")}><Users size={15} /> {l("Population", "Population")}</button>
       <button className="ghost-btn" onClick={() => setScreen("starmap")}><Navigation size={15} /> {l("Carte", "Map")}</button>
       <button className="ghost-btn" onClick={() => setScreen("resources")}><Coins size={15} /> {l("Ressources", "Resources")}</button>
       <button className="ghost-btn" onClick={() => setScreen("technology")}><Hexagon size={15} /> {l("Technologie", "Technology")}</button>
@@ -4106,12 +5790,16 @@ export default function App() {
       </div>
       <div className="topbar-resources">
         <div className="top-resource-strip">
-          {RESOURCE_DEFS.filter((r) => unlockedResourceIds.includes(r.id)).map((r) => {
+          {RESOURCE_DEFS.filter(
+            (r) =>
+              unlockedResourceIds.includes(r.id) ||
+              Number(resourceAmounts[r.id] ?? 0) > 0 ||
+              Number(resourceRates[r.id] ?? 0) > 0
+          ).map((r) => {
             const amount = Math.floor(resourceAmounts[r.id] ?? 0);
             const cap = Math.max(1, storageCapacity);
             const storageState = getResourceStorageState(r.id, resourceAmounts);
             const isBlocked = storageState.state === "blocked";
-            const overflowFromExternal = amount > cap && Number(resourceRates[r.id] ?? 0) > 0;
             const resourceName = resourceDisplayName(r.id, uiLanguage);
             return (
               <span key={r.id} className="top-resource-item" title={resourceName}>
@@ -4125,12 +5813,14 @@ export default function App() {
                     {isBlocked ? (
                       <span className="top-resource-blocked" aria-label={l("Entrepot plein", "Storage full")} tabIndex={0}>
                         <AlertCircle size={12} />
-                        <span className="top-resource-blocked-tooltip">{l("Entrepot plein", "Storage full")}</span>
-                      </span>
-                    ) : null}
-                    {overflowFromExternal ? (
-                      <span className="top-resource-overcap-badge" title={l("Arrivage externe: coffre/flotte", "External delivery: chest/fleet")}>
-                        {l("+coffre", "+chest")}
+                        <span className="top-resource-blocked-tooltip">
+                          <strong>{l("Entrepot plein", "Storage full")}</strong>
+                          <span>
+                            {uiLanguage === "fr"
+                              ? `La production de ${resourceName} est bloquee, mais tu peux encore en acheminer, ou en ajouter via l'inventaire.`
+                              : `${resourceName} production is blocked, but you can still ship more in or add it from inventory.`}
+                          </span>
+                        </span>
                       </span>
                     ) : null}
                   </span>
@@ -4203,8 +5893,13 @@ export default function App() {
             client={client}
             session={session}
             currentUserId={session?.user_id ?? ""}
+            currentUsername={profileUsername || playerId || ""}
             hangarInventory={hangarInventory}
             technologyLevels={technologyLevels}
+            carbonProductionPerSec={Number(resourceRates.carbone ?? 0)}
+            onGrantCredits={(amount, claimId) => {
+              void grantCreditsToServer(amount, claimId);
+            }}
             onMapStateSync={(payload) => {
               const nextResources = payload?.resources;
               if (nextResources && typeof nextResources === "object") {
@@ -4254,11 +5949,25 @@ export default function App() {
             amounts={resourceAmounts}
             unlockedIds={unlockedResourceIds}
             rates={resourceRates}
+            populationSnapshot={populationSnapshot}
             technologyLevels={technologyLevels}
             loading={resourceLoading}
             error={resourceError}
             offlineSeconds={resourceOfflineSeconds}
             lastSavedAt={resourceLastSavedAt}
+          />
+        </>
+      ) : screen === "population" ? (
+        <>
+          {renderUnifiedHeader()}
+          <PopulationScreen
+            language={uiLanguage}
+            snapshot={populationSnapshot}
+            rooms={rooms}
+            resourceAmounts={resourceAmounts}
+            buildingCostReductionFactor={buildingCostReductionFactor}
+            buildingTimeReductionFactor={buildingTimeReductionFactor}
+            onNavigate={(target) => setScreen(target)}
           />
         </>
       ) : screen === "technology" ? (
@@ -4270,6 +5979,7 @@ export default function App() {
             technologyLevels={technologyLevels}
             researchJob={researchJob}
             researchRemainingSeconds={researchRemainingSeconds}
+            researchTimeFactor={researchTimeFactor}
             resourceAmounts={resourceAmounts}
             inventoryItems={inventoryItems}
             inventoryLoading={inventoryLoading}
@@ -4403,18 +6113,114 @@ export default function App() {
           <main className="game-layout">
             <aside className="left-panel">
               <h2>{l("Stats Hyperstructure", "Hyperstructure Stats")}</h2>
-              <StatLine icon={<Users size={16} />} label={l("Batiments actifs", "Active buildings")} value={stats.buildings} />
-              <StatLine icon={<Gem size={16} />} label={l("Ressources debloquees", "Unlocked resources")} value={stats.unlocked} />
-              <StatLine icon={<Zap size={16} />} label={l("Production totale/s", "Total production/s")} value={Number(stats.totalProduction.toFixed(3))} />
-              <StatLine icon={<Shield size={16} />} label={l("Capacite entrepot", "Storage capacity")} value={stats.storageCapacity} />
-              <StatLine icon={<RefreshCw size={16} />} label={l("File construction", "Construction queue")} value={stats.queueBusy ? 1 : 0} />
+              <div className="hyperstats-panel">
+                <StatLine icon={<Users size={16} />} label={l("Batiments actifs", "Active buildings")} value={stats.buildings} />
+                <StatLine icon={<Gem size={16} />} label={l("Ressources debloquees", "Unlocked resources")} value={stats.unlocked} />
+                <StatLine icon={<Zap size={16} />} label={l("Production totale/s", "Total production/s")} value={Number(stats.totalProduction.toFixed(3))} />
+                <StatLine icon={<Shield size={16} />} label={l("Capacite entrepot", "Storage capacity")} value={stats.storageCapacity} />
+                <StatLine icon={<RefreshCw size={16} />} label={l("File construction", "Construction queue")} value={stats.queueBusy ? 1 : 0} />
+              </div>
 
-              <div className="hint-box">
-                <p><strong>{l("Commandes", "Controls")}</strong></p>
-                <p>{l("Drag gauche: deplacer module", "Left drag: move module")}</p>
-                <p>{l("Molette: zoom", "Mouse wheel: zoom")}</p>
-                <p>{l("Drag droit: deplacer la camera", "Right drag: move camera")}</p>
-                <p>{l("Mobile: activer Pan Mode", "Mobile: enable Pan Mode")}</p>
+              <div className="population-panel">
+                <div className="population-panel-head">
+                  <strong>{l("Stats population", "Population stats")}</strong>
+                  <span className={`population-band ${populationSnapshot.stabilityBand}`}>
+                    {populationStabilityBandLabel(populationSnapshot.stabilityBand, uiLanguage)}
+                  </span>
+                </div>
+
+                <div className="population-meter">
+                  <div className="population-meter-track">
+                    <div style={{ width: `${populationFillPct}%` }} />
+                  </div>
+                  <p>
+                    {populationSnapshot.totalPopulation.toLocaleString()} / {populationSnapshot.capacity.toLocaleString()}
+                  </p>
+                </div>
+
+                <div className="population-grid">
+                  <div>
+                    <span>{l("Croissance", "Growth")}</span>
+                    <strong className={`population-metric-value ${populationGrowthPctPerHour >= 0 ? "good" : "bad"}`}>
+                      {populationGrowthPctPerHour >= 0 ? "+" : ""}{populationGrowthPctPerHour.toFixed(2)}%/h
+                    </strong>
+                  </div>
+                  <div>
+                    <span>{l("Stabilite", "Stability")}</span>
+                    <strong>{populationSnapshot.stability.toFixed(1)}%</strong>
+                  </div>
+                  <div>
+                    <span>{l("Travailleurs", "Workers")}</span>
+                    <strong>{populationSnapshot.workers.toLocaleString()}</strong>
+                  </div>
+                  <div>
+                    <span>{l("Ingenieurs", "Engineers")}</span>
+                    <strong>{populationSnapshot.engineers.toLocaleString()}</strong>
+                  </div>
+                  <div>
+                    <span>{l("Scientifiques", "Scientists")}</span>
+                    <strong>{populationSnapshot.scientists.toLocaleString()}</strong>
+                  </div>
+                  <div>
+                    <span>{l("Efficacite", "Efficiency")}</span>
+                    <strong className={`population-metric-value ${populationSnapshot.efficiencyPct >= 0 ? "good" : "bad"}`}>
+                      {populationSnapshot.efficiencyPct >= 0 ? "+" : ""}{populationSnapshot.efficiencyPct.toFixed(1)}%
+                    </strong>
+                  </div>
+                </div>
+
+                <div className="population-food">
+                  <div className="population-food-track">
+                    <div style={{ width: `${populationFoodFillPct}%` }} />
+                  </div>
+                  <p>
+                    {l("Nourriture", "Food")}: {Math.floor(populationSnapshot.foodStock).toLocaleString()} / {populationSnapshot.foodCapacity.toLocaleString()}{" "}
+                    ({populationSnapshot.foodBalancePerHour >= 0 ? "+" : ""}{populationSnapshot.foodBalancePerHour.toFixed(0)}/h)
+                  </p>
+                </div>
+
+                <div className="population-meta">
+                  {populationSnapshot.onboardingProtectionActive ? (
+                    <p className="population-protection">
+                      {l("Phase academie active", "Academy phase active")}:{" "}
+                      <strong>
+                        {populationProtectionDaysLeft.toLocaleString()} {l("jours restants", "days remaining")}
+                      </strong>
+                    </p>
+                  ) : null}
+                  <p>
+                    {l("Niveau civilisation", "Civilization tier")}:{" "}
+                    <strong>{l(populationSnapshot.civilizationTier.nameFr, populationSnapshot.civilizationTier.nameEn)}</strong>
+                  </p>
+                  <p>
+                    {l("Equipage disponible", "Available crew")}:{" "}
+                    <strong>{hangarCrewState.free.toLocaleString()}</strong>
+                    {" / "}
+                    {hangarCrewState.crewPool.toLocaleString()}
+                  </p>
+                  {populationSnapshot.activeEvent ? (
+                    <p>
+                      {l("Evenement", "Event")}:{" "}
+                      <strong>{populationEventLabel(populationSnapshot.activeEvent.type, uiLanguage)}</strong>
+                    </p>
+                  ) : null}
+                  {populationSnapshot.activeCrisis ? (
+                    <p className="population-alert">
+                      {l("Crise", "Crisis")}:{" "}
+                      <strong>{populationCrisisLabel(populationSnapshot.activeCrisis.type, uiLanguage)}</strong>
+                    </p>
+                  ) : null}
+                  {populationSnapshot.isOverCapacity ? (
+                    <p className="population-alert">
+                      {l("Surpopulation: production -25%", "Overcapacity: production -25%")}
+                    </p>
+                  ) : null}
+                  {populationSnapshot.foodShortage ? (
+                    <p className="population-alert">
+                      {l("Famine: croissance arretee", "Famine: growth halted")}
+                    </p>
+                  ) : null}
+                </div>
               </div>
             </aside>
 
@@ -4442,72 +6248,157 @@ export default function App() {
                 <button className={panMode ? "active" : ""} onClick={() => setPanMode((v) => !v)}><Move size={16} /></button>
               </div>
 
-              {constructionJob ? (
-                <div className="construction-banner">
-                  <div className="construction-head">
-                    <strong>{l("Construction en cours", "Construction in progress")}</strong>
-                    <div className="construction-head-actions">
-                      <span>{constructionJob.mode === "build" ? l("Nouveau batiment", "New building") : l("Amelioration", "Upgrade")}</span>
-                      <button
-                        type="button"
-                        className="construction-cancel-btn"
-                        title={l("Annuler et rembourser", "Cancel and refund")}
-                        onClick={onCancelConstruction}
-                      >
-                        <X size={14} />
-                      </button>
+              <div className="construction-stack">
+                <details className="main-mission-spoiler">
+                  <summary>
+                    <span className="main-mission-summary-title">
+                      {l("Mission principale", "Main mission")}
+                    </span>
+                    <span className="main-mission-summary-right">
+                      {!mainMissionState.finished && activeMainMissions.length > 0 ? (
+                        <span className="main-mission-badge">{activeMainMissions.length}</span>
+                      ) : null}
+                      <span>{missionMainProgressPct}%</span>
+                    </span>
+                  </summary>
+                  <div className="main-mission-content">
+                    <div className="main-mission-progress-bar">
+                      <div style={{ width: `${missionMainProgressPct}%` }} />
                     </div>
+                    <p className="main-mission-meta">
+                      {l("Objectifs valides", "Validated objectives")}:{" "}
+                      {(mainMissionState.completedCount + mainMissionState.skippedCount).toLocaleString()} / {MAIN_MISSION_PLAN.length.toLocaleString()}
+                      {" • "}
+                      {l("Credits gagnes", "Credits earned")}: {mainMissionState.totalRewardCredits.toLocaleString()}
+                    </p>
+                    {mainMissionState.finished ? (
+                      <p className="main-mission-finished">
+                        {l("Mission principale terminee: tous les batiments cibles sont au niveau 50.", "Main mission completed: all target buildings reached level 50.")}
+                      </p>
+                    ) : (
+                      <div className="main-mission-list">
+                        {activeMainMissions.map((mission) => {
+                          const currentLevel = Math.max(0, Math.floor(Number(roomByType[mission.roomType]?.level ?? 0)));
+                          const ratio = Math.max(0, Math.min(100, Math.round((currentLevel / Math.max(1, mission.targetLevel)) * 100)));
+                          const completed = currentLevel >= mission.targetLevel;
+                          const isPopulationMission = mission.roomType in POPULATION_BUILD_UNLOCK_MIN;
+                          const populationRequired = isPopulationMission
+                            ? (POPULATION_BUILD_UNLOCK_MIN[mission.roomType as PopulationBuildingId] ?? 0)
+                            : 0;
+                          const lockedByPopulation = isPopulationMission && !isPopulationBuildingUnlocked(mission.roomType, populationSnapshot.totalPopulation);
+                          return (
+                            <article
+                              key={`main_mission_card_${mission.id}`}
+                              className={`main-mission-item ${completed ? "done" : ""} ${lockedByPopulation ? "locked" : ""}`}
+                            >
+                              <header>
+                                <strong>
+                                  {roomDisplayName(mission.roomType, uiLanguage)} • Lv.{mission.targetLevel}
+                                </strong>
+                                <span>{MAIN_MISSION_REWARD_MIN} - {MAIN_MISSION_REWARD_MAX} Credits</span>
+                              </header>
+                              <p>
+                                {completed
+                                  ? l("Objectif atteint, validation en cours...", "Objective reached, validating...")
+                                  : currentLevel <= 0
+                                    ? `${l("Construire", "Build")} ${roomDisplayName(mission.roomType, uiLanguage)} ${l("niveau", "level")} ${mission.targetLevel}.`
+                                    : `${l("Ameliorer", "Upgrade")} ${roomDisplayName(mission.roomType, uiLanguage)} ${l("jusqu'au niveau", "to level")} ${mission.targetLevel}.`}
+                              </p>
+                              <div className="main-mission-progress-bar compact">
+                                <div style={{ width: `${ratio}%` }} />
+                              </div>
+                              <footer>
+                                <small>
+                                  {l("Progression", "Progress")}: {Math.min(currentLevel, mission.targetLevel).toLocaleString()} / {mission.targetLevel.toLocaleString()}
+                                </small>
+                                <small>{completed ? l("Termine", "Completed") : l("En cours", "In progress")}</small>
+                              </footer>
+                              {lockedByPopulation ? (
+                                <p className="main-mission-lock">
+                                  {l("Population requise", "Population required")}: {populationRequired.toLocaleString()}
+                                </p>
+                              ) : null}
+                            </article>
+                          );
+                        })}
+                      </div>
+                    )}
+                    {mainMissionState.lastRewardCredits > 0 ? (
+                      <p className="main-mission-reward-line">
+                        +{mainMissionState.lastRewardCredits.toLocaleString()} Credits{" "}
+                        ({mainMissionState.lastRewardCount.toLocaleString()} {mainMissionState.lastRewardCount > 1 ? l("missions", "missions") : l("mission", "mission")})
+                      </p>
+                    ) : null}
                   </div>
-                  <p className="construction-name">{roomDisplayName(constructionJob.roomType, uiLanguage)}</p>
-                  <p className="construction-subline">{l("Niveau cible", "Target level")}: {constructionJob.targetLevel}</p>
-                  <p
-                    className={`construction-time ${
-                      constructionRemainingSeconds <= 60 ? "danger" : constructionRemainingSeconds <= 300 ? "warn" : "ok"
-                    }`}
-                  >
-                    {l("Temps restant", "Time left")}: {formatDuration(constructionRemainingSeconds)}
-                  </p>
-                </div>
-              ) : (
-                <div
-                  className="construction-banner planner-banner"
-                  onWheel={(e) => {
-                    e.stopPropagation();
-                  }}
-                >
-                  <details className="planner-spoiler">
-                    <summary>{l("Planificateur de modules", "Module planner")}</summary>
-                    <div
-                      className="planner-list"
-                      onWheel={(e) => {
-                        e.stopPropagation();
-                      }}
-                    >
-                      {plannerItems.length === 0 ? (
-                        <p className="planner-empty">{l("Aucun module disponible pour le moment.", "No module available at the moment.")}</p>
-                      ) : (
-                        plannerItems.map((item) => (
-                          <article key={item.key} className="planner-item">
-                            <header>
-                              <strong>{item.name}</strong>
-                              <span>{item.mode === "construction" ? l("Construction", "Construction") : l("Amelioration", "Upgrade")} N{item.targetLevel}</span>
-                            </header>
-                            <div className="planner-item-cost">
-                              <ResourceCostDisplay cost={item.cost} available={resourceAmounts} language={uiLanguage} compact />
-                            </div>
-                            <div className="planner-row">
-                              <small>{l("Temps", "Time")}: {formatDuration(item.etaSec)}</small>
-                              <button type="button" className="planner-action-btn" onClick={() => onPlannerLaunch(item)}>
-                                {item.mode === "construction" ? l("Construire", "Build") : l("Ameliorer", "Upgrade")}
-                              </button>
-                            </div>
-                          </article>
-                        ))
-                      )}
+                </details>
+
+                {constructionJob ? (
+                  <div className="construction-banner">
+                    <div className="construction-head">
+                      <strong>{l("Construction en cours", "Construction in progress")}</strong>
+                      <div className="construction-head-actions">
+                        <span>{constructionJob.mode === "build" ? l("Nouveau batiment", "New building") : l("Amelioration", "Upgrade")}</span>
+                        <button
+                          type="button"
+                          className="construction-cancel-btn"
+                          title={l("Annuler et rembourser", "Cancel and refund")}
+                          onClick={onCancelConstruction}
+                        >
+                          <X size={14} />
+                        </button>
+                      </div>
                     </div>
-                  </details>
-                </div>
-              )}
+                    <p className="construction-name">{roomDisplayName(constructionJob.roomType, uiLanguage)}</p>
+                    <p className="construction-subline">{l("Niveau cible", "Target level")}: {constructionJob.targetLevel}</p>
+                    <p
+                      className={`construction-time ${
+                        constructionRemainingSeconds <= 60 ? "danger" : constructionRemainingSeconds <= 300 ? "warn" : "ok"
+                      }`}
+                    >
+                      {l("Temps restant", "Time left")}: {formatDuration(constructionRemainingSeconds)}
+                    </p>
+                  </div>
+                ) : (
+                  <div
+                    className="construction-banner planner-banner"
+                    onWheel={(e) => {
+                      e.stopPropagation();
+                    }}
+                  >
+                    <details className="planner-spoiler">
+                      <summary>{l("Planificateur de modules", "Module planner")}</summary>
+                      <div
+                        className="planner-list"
+                        onWheel={(e) => {
+                          e.stopPropagation();
+                        }}
+                      >
+                        {plannerItems.length === 0 ? (
+                          <p className="planner-empty">{l("Aucun module disponible pour le moment.", "No module available at the moment.")}</p>
+                        ) : (
+                          plannerItems.map((item) => (
+                            <article key={item.key} className="planner-item">
+                              <header>
+                                <strong>{item.name}</strong>
+                                <span>{item.mode === "construction" ? l("Construction", "Construction") : l("Amelioration", "Upgrade")} N{item.targetLevel}</span>
+                              </header>
+                              <div className="planner-item-cost">
+                                <ResourceCostDisplay cost={item.cost} available={resourceAmounts} language={uiLanguage} compact />
+                              </div>
+                              <div className="planner-row">
+                                <small>{l("Temps", "Time")}: {formatDuration(item.etaSec)}</small>
+                                <button type="button" className="planner-action-btn" onClick={() => onPlannerLaunch(item)}>
+                                  {item.mode === "construction" ? l("Construire", "Build") : l("Ameliorer", "Upgrade")}
+                                </button>
+                              </div>
+                            </article>
+                          ))
+                        )}
+                      </div>
+                    </details>
+                  </div>
+                )}
+              </div>
 
               <div ref={transformRef} className="vault-transform" style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`, transformOrigin: "bottom center" }}>
                 <div className="vault-grid" style={{ width: GRID_WIDTH * CELL_WIDTH + 8, height: gridHeight * CELL_HEIGHT + 8 }}>
@@ -4596,27 +6487,37 @@ export default function App() {
                       );
                     })}
 
-                    {constructionJob?.mode === "build" ? (
+                    {pendingBuildRoom ? (
                       <div
-                        className={`room-card ${ROOM_CONFIG[constructionJob.roomType].color} constructing pending`}
+                        className={`room-card ${ROOM_CONFIG[pendingBuildRoom.type].color} constructing pending`}
                         style={{
-                          left: constructionJob.x * CELL_WIDTH,
-                          bottom: constructionJob.y * CELL_HEIGHT,
-                          width: ROOM_CONFIG[constructionJob.roomType].width * CELL_WIDTH,
+                          left: pendingBuildRoom.x * CELL_WIDTH,
+                          bottom: pendingBuildRoom.y * CELL_HEIGHT,
+                          width: pendingBuildRoom.width * CELL_WIDTH,
                           height: CELL_HEIGHT
                         }}
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                        }}
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          setActiveRoom(pendingBuildRoom);
+                        }}
                         >
-                          {roomProductionSpriteStyle(constructionJob.roomType) ? (
-                            <span className="room-art room-art-sprite" style={roomProductionSpriteStyle(constructionJob.roomType)!} />
+                          {roomProductionSpriteStyle(pendingBuildRoom.type) ? (
+                            <span className="room-art room-art-sprite" style={roomProductionSpriteStyle(pendingBuildRoom.type)!} />
                           ) : (
                             <img
-                              src={ROOM_CONFIG[constructionJob.roomType].image}
-                              alt={roomDisplayName(constructionJob.roomType, uiLanguage)}
+                              src={ROOM_CONFIG[pendingBuildRoom.type].image}
+                              alt={roomDisplayName(pendingBuildRoom.type, uiLanguage)}
                               className="room-art"
                             />
                           )}
                         <div className="room-meta">
-                          <p className="room-name">{roomDisplayName(constructionJob.roomType, uiLanguage)}</p>
+                          <p className="room-name">{roomDisplayName(pendingBuildRoom.type, uiLanguage)}</p>
+                          <p className="room-level">{l("Chantier", "Build")}</p>
                         </div>
                         <div className="room-construction-overlay">
                           <div className="room-clock">
@@ -4647,6 +6548,7 @@ export default function App() {
             buildSlot={buildSlot}
             resourceAmounts={resourceAmounts}
             rooms={rooms}
+            currentPopulation={populationSnapshot.totalPopulation}
             constructionJob={constructionJob}
             buildingCostReductionFactor={buildingCostReductionFactor}
             buildingTimeReductionFactor={buildingTimeReductionFactor}
@@ -4837,27 +6739,35 @@ function SectorMapScreen({
   client,
   session,
   currentUserId,
+  currentUsername,
   hangarInventory,
   technologyLevels,
-  onMapStateSync
+  carbonProductionPerSec,
+  onMapStateSync,
+  onGrantCredits
 }: {
   language: UILanguage;
   client: Client;
   session: Session | null;
   currentUserId: string;
+  currentUsername: string;
   hangarInventory: Record<string, number>;
   technologyLevels: Record<TechnologyId, number>;
+  carbonProductionPerSec: number;
   onMapStateSync?: (payload: {
     resources?: Partial<Record<ResourceId, number>>;
     credits?: number;
     mapDropNotifications?: number;
     syncReport?: any;
   }) => void;
+  onGrantCredits?: (amount: number, claimId?: string) => void | Promise<void>;
 }) {
   const l = (fr: string, en: string) => (language === "en" ? en : fr);
   const initialMapZoom = 1.06;
+  const DAILY_HARVEST_QUEST_TARGET_SECONDS = 5 * 60;
+  const DAILY_HARVEST_QUEST_REWARD = 50;
+  const DAILY_COLLECTION_QUEST_REWARD = 150;
   const [zoom, setZoom] = useState(initialMapZoom);
-  const [pan, setPan] = useState({ x: 0, y: 0 });
   const [isDragging, setIsDragging] = useState(false);
   const [lastMouse, setLastMouse] = useState({ x: 0, y: 0 });
 
@@ -4866,44 +6776,14 @@ function SectorMapScreen({
   const [actionMode, setActionMode] = useState<"none" | "attack" | "mine" | "mission">("none");
   const [sidebarTab, setSidebarTab] = useState<"navigation" | "quests">("navigation");
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [dailyQuests, setDailyQuests] = useState([
-    {
-      id: "q1",
-      titleFr: "Collecte Miniere",
-      titleEn: "Mining Sweep",
-      descriptionFr: "Amasser 30 000 unites de ressources.",
-      descriptionEn: "Gather 30,000 units of resources.",
-      progress: 17800,
-      target: 30000,
-      rewardFr: "450 Credits",
-      rewardEn: "450 Credits",
-      claimed: false
-    },
-    {
-      id: "q2",
-      titleFr: "Dock de Chasse",
-      titleEn: "Hunter Dock",
-      descriptionFr: "Construire 2 vaisseaux d'escorte.",
-      descriptionEn: "Build 2 escort ships.",
-      progress: 1,
-      target: 2,
-      rewardFr: "1 Module rare",
-      rewardEn: "1 Rare Module",
-      claimed: false
-    },
-    {
-      id: "q3",
-      titleFr: "Patrouille Orbitale",
-      titleEn: "Orbital Patrol",
-      descriptionFr: "Lancer 3 missions tactiques.",
-      descriptionEn: "Launch 3 tactical missions.",
-      progress: 2,
-      target: 3,
-      rewardFr: "300 Credits",
-      rewardEn: "300 Credits",
-      claimed: false
-    }
-  ]);
+  const [dailyHarvestQuestState, setDailyHarvestQuestState] = useState<MapDailyHarvestQuestState>({
+    cycleKey: "",
+    extractionBestSeconds: 0,
+    extractionClaimed: false,
+    collectedResources: 0,
+    collectionClaimed: false,
+    processedReportIds: []
+  });
 
   const [filters, setFilters] = useState({ enemies: true, resources: true, missions: true });
   const [navX, setNavX] = useState("");
@@ -4930,8 +6810,12 @@ function SectorMapScreen({
   const [mapNowMs, setMapNowMs] = useState(() => Date.now());
   const [mapServerSync, setMapServerSync] = useState<{ serverMs: number; localMs: number } | null>(null);
   const [viewportSize, setViewportSize] = useState({ width: 0, height: 0 });
+  const [cameraCenter, setCameraCenter] = useState(() => mapPlayerToPlanetCoordinates(String(currentUserId || "guest")));
+  const [mapCacheHydrated, setMapCacheHydrated] = useState(false);
 
   const commandementEscadreLevel = Math.max(0, Math.floor(Number(technologyLevels.commandement_escadre ?? 0)));
+  const mapCacheKey = useMemo(() => `hsg_map_cache_v1_${String(currentUserId || "guest")}`, [currentUserId]);
+  const dailyHarvestQuestStorageKey = useMemo(() => `hsg_map_daily_harvest_v1_${String(currentUserId || "guest")}`, [currentUserId]);
   const mapMaxActiveExpeditions = Math.max(1, mapServerMaxActiveExpeditions, 1 + Math.floor(commandementEscadreLevel / 3));
   const mapActiveBlockingExpeditions = useMemo(() => {
     const nowSec = Math.max(0, Math.floor(mapNowMs / 1000));
@@ -4959,13 +6843,32 @@ function SectorMapScreen({
   const canLaunchAnotherMapExpedition = mapActiveBlockingExpeditions < mapMaxActiveExpeditions;
 
   const containerRef = useRef<HTMLDivElement>(null);
-  const didCenterOnHomeRef = useRef(false);
   const mapOverdueSyncAtRef = useRef(0);
+  const mapPlayersRpcInFlightRef = useRef(false);
+  const mapPlayersRpcBackoffUntilRef = useRef(0);
+  const mapStateRpcInFlightRef = useRef(false);
+  const mapStateRpcBackoffUntilRef = useRef(0);
+  const mapAutoCenterKeyRef = useRef("");
 
   const parseMapExpeditionRow = (expeditionRaw: Record<string, any>): MapExpeditionDto | null => {
     if (!expeditionRaw || typeof expeditionRaw !== "object") return null;
     const id = String(expeditionRaw.id || "").trim();
     if (!id) return null;
+    const fleet = Array.isArray(expeditionRaw.fleet)
+      ? expeditionRaw.fleet
+          .map((row: any) => ({
+            unitId: String(row?.unitId || "").trim(),
+            quantity: Math.max(0, Math.floor(Number(row?.quantity ?? 0)))
+          }))
+          .filter((row: any) => row.unitId.length > 0 && row.quantity > 0)
+      : [];
+    const effectiveTransportCapacity = Math.max(
+      0,
+      Math.max(
+        Math.floor(Number(expeditionRaw.totalTransportCapacity ?? 0)),
+        calculateFleetTransportCapacity(fleet)
+      )
+    );
     return {
       id,
       fieldId: String(expeditionRaw.fieldId || ""),
@@ -4979,15 +6882,10 @@ function SectorMapScreen({
       travelSeconds: Math.max(0, Math.floor(Number(expeditionRaw.travelSeconds ?? 0))),
       extractionSeconds: Math.max(0, Math.floor(Number(expeditionRaw.extractionSeconds ?? 0))),
       totalHarvestSpeed: Math.max(0, Math.floor(Number(expeditionRaw.totalHarvestSpeed ?? 0))),
-      totalTransportCapacity: Math.max(0, Math.floor(Number(expeditionRaw.totalTransportCapacity ?? 0))),
-      fleet: Array.isArray(expeditionRaw.fleet)
-        ? expeditionRaw.fleet
-            .map((row: any) => ({
-              unitId: String(row?.unitId || "").trim(),
-              quantity: Math.max(0, Math.floor(Number(row?.quantity ?? 0)))
-            }))
-            .filter((row: any) => row.unitId.length > 0 && row.quantity > 0)
-        : [],
+      totalTransportCapacity: effectiveTransportCapacity,
+      playerScore: Math.max(0, Math.floor(Number(expeditionRaw.playerScore ?? 0))),
+      scoreBonus: Number.isFinite(Number(expeditionRaw.scoreBonus ?? 0)) ? Number(expeditionRaw.scoreBonus ?? 0) : 1,
+      fleet,
       snapshotResources: (expeditionRaw.snapshotResources && typeof expeditionRaw.snapshotResources === "object"
         ? expeditionRaw.snapshotResources
         : {}) as Partial<Record<ResourceId, number>>,
@@ -5005,8 +6903,12 @@ function SectorMapScreen({
     }
     let cancelled = false;
     const loadPlayers = async () => {
+      const now = Date.now();
+      if (mapPlayersRpcInFlightRef.current) return;
+      if (now < mapPlayersRpcBackoffUntilRef.current) return;
+      mapPlayersRpcInFlightRef.current = true;
       try {
-        const rpc = await client.rpc(session, "rpc_map_players", JSON.stringify({ limit: 5000 }));
+        const rpc = await client.rpc(session, "rpc_map_players", JSON.stringify({ limit: 2000 }));
         const parsed = parseJsonObject((rpc as any)?.payload ?? rpc);
         const nested = parseJsonObject(parsed?.payload);
         const source = Object.keys(nested).length > 0 ? nested : parsed;
@@ -5023,14 +6925,23 @@ function SectorMapScreen({
           }));
         if (!cancelled) setMapPlayers(rows);
       } catch (err) {
+        if (isUnauthorizedError(err)) {
+          invalidateSession();
+          return;
+        }
+        if (isRequestTimeoutError(err)) {
+          mapPlayersRpcBackoffUntilRef.current = Date.now() + 10000;
+        }
         if (import.meta.env.DEV) {
           // eslint-disable-next-line no-console
           console.error("map players load error", err);
         }
+      } finally {
+        mapPlayersRpcInFlightRef.current = false;
       }
     };
     void loadPlayers();
-    const interval = setInterval(() => void loadPlayers(), 45000);
+    const interval = setInterval(() => void loadPlayers(), 60000);
     return () => {
       cancelled = true;
       clearInterval(interval);
@@ -5050,6 +6961,10 @@ function SectorMapScreen({
     }
     let cancelled = false;
     const loadMapState = async () => {
+      const now = Date.now();
+      if (mapStateRpcInFlightRef.current) return;
+      if (now < mapStateRpcBackoffUntilRef.current) return;
+      mapStateRpcInFlightRef.current = true;
       try {
         const rpc = await client.rpc(
           session,
@@ -5162,23 +7077,36 @@ function SectorMapScreen({
           });
         }
       } catch (err) {
+        if (isUnauthorizedError(err)) {
+          invalidateSession();
+          return;
+        }
+        if (isRequestTimeoutError(err)) {
+          mapStateRpcBackoffUntilRef.current = Date.now() + 10000;
+        }
         if (!cancelled) {
-          setMapLoadError(l("Impossible de charger les champs de ressources.", "Unable to load resource fields."));
+          const detail = extractRpcErrorMessage(err);
+          const baseMsg = l("Impossible de charger les champs de ressources.", "Unable to load resource fields.");
+          setMapLoadError(detail ? `${baseMsg} (${detail})` : baseMsg);
         }
         if (import.meta.env.DEV) {
           // eslint-disable-next-line no-console
           console.error("map fields load error", err);
         }
+      } finally {
+        mapStateRpcInFlightRef.current = false;
       }
     };
 
-    void loadMapState();
-    const interval = setInterval(() => void loadMapState(), 12000);
+    if (!mapActionBusy) void loadMapState();
+    const interval = setInterval(() => {
+      if (!mapActionBusy) void loadMapState();
+    }, 12000);
     return () => {
       cancelled = true;
       clearInterval(interval);
     };
-  }, [client, commandementEscadreLevel, session, language]);
+  }, [client, commandementEscadreLevel, session, language, mapActionBusy]);
 
   useEffect(() => {
     const tick = setInterval(() => setMapNowMs(Date.now()), 1000);
@@ -5186,23 +7114,44 @@ function SectorMapScreen({
   }, []);
 
   useEffect(() => {
-    if (!mapExpedition) {
+    const displayedExpeditions = mapExpeditions.length > 0 ? mapExpeditions : (mapExpedition ? [mapExpedition] : []);
+    if (displayedExpeditions.length <= 0) {
       setMapServerSync(null);
       return;
     }
-    setMapServerSync({
-      serverMs: Math.max(0, Math.floor(Number(mapExpedition.serverNowTs || 0))) * 1000,
-      localMs: Date.now()
+    const freshestServerMs =
+      displayedExpeditions.reduce(
+        (max, expedition) => Math.max(max, Math.max(0, Math.floor(Number(expedition.serverNowTs || 0))) * 1000),
+        0
+      ) || 0;
+    if (freshestServerMs <= 0) return;
+    setMapServerSync((prev) => {
+      const now = Date.now();
+      if (prev) {
+        const estimatedCurrentServerMs = prev.serverMs + Math.max(0, now - prev.localMs);
+        if (estimatedCurrentServerMs >= freshestServerMs) return prev;
+      }
+      return {
+        serverMs: freshestServerMs,
+        localMs: now
+      };
     });
-  }, [mapExpedition?.fieldId, mapExpedition?.id, mapExpedition?.serverNowTs, mapExpedition?.status]);
+  }, [mapExpedition, mapExpeditions]);
 
-  const sectorPlayerPlanets = useMemo(
-    () => computeSectorPlayerPlanets(mapPlayers, currentUserId),
-    [currentUserId, mapPlayers]
-  );
+  const sectorPlayerPlanets = useMemo(() => {
+    const selfId = String(currentUserId || "").trim();
+    const selfUsername = String(currentUsername || "").trim() || selfId.slice(0, 8);
+    const rows = Array.isArray(mapPlayers)
+      ? mapPlayers.filter((player) => String(player.userId || "").trim() !== selfId)
+      : [];
+    if (selfId) {
+      rows.unshift({ userId: selfId, username: selfUsername });
+    }
+    return computeSectorPlayerPlanets(rows, currentUserId);
+  }, [currentUserId, currentUsername, mapPlayers]);
 
   const mapResourceEntities = useMemo(
-    () => mapFields.filter((field) => field.isVisible !== false).map((field) => mapFieldToSectorEntity(field, language)),
+    () => mapFields.map((field) => mapFieldToSectorEntity(field, language)),
     [language, mapFields]
   );
 
@@ -5249,12 +7198,30 @@ function SectorMapScreen({
   }, [fleetDraft, harvestAvailability]);
 
   const selfPlanetCoords = useMemo(() => {
-    const selfPlanet = sectorPlayerPlanets.find((planet) => planet.isSelf);
-    if (selfPlanet) return { x: selfPlanet.x, y: selfPlanet.y };
-    const currentId = String(currentUserId || "guest");
-    const fallback = mapPlayerToSectorPlanet({ userId: currentId, username: currentId.slice(0, 8) }, currentId);
-    return { x: fallback.x, y: fallback.y };
-  }, [currentUserId, sectorPlayerPlanets]);
+    return mapPlayerToPlanetCoordinates(String(currentUserId || "guest"));
+  }, [currentUserId]);
+
+  const clampCameraCenter = useCallback((coords: { x: number; y: number }, targetZoom: number) => {
+    const safeZoom = Math.max(0.01, targetZoom);
+    const worldHalfWidth = viewportSize.width > 0 ? viewportSize.width / (2 * safeZoom) : 0;
+    const worldHalfHeight = viewportSize.height > 0 ? viewportSize.height / (2 * safeZoom) : 0;
+    const minX = Math.max(0, worldHalfWidth);
+    const maxX = Math.min(SECTOR_MAP_SIZE, SECTOR_MAP_SIZE - worldHalfWidth);
+    const minY = Math.max(0, worldHalfHeight);
+    const maxY = Math.min(SECTOR_MAP_SIZE, SECTOR_MAP_SIZE - worldHalfHeight);
+    return {
+      x: Math.round(maxX >= minX ? Math.max(minX, Math.min(maxX, coords.x)) : SECTOR_MAP_SIZE / 2),
+      y: Math.round(maxY >= minY ? Math.max(minY, Math.min(maxY, coords.y)) : SECTOR_MAP_SIZE / 2)
+    };
+  }, [viewportSize.height, viewportSize.width]);
+
+  const pan = useMemo(
+    () => ({
+      x: viewportSize.width / 2 - cameraCenter.x * zoom,
+      y: viewportSize.height / 2 - cameraCenter.y * zoom
+    }),
+    [cameraCenter.x, cameraCenter.y, viewportSize.height, viewportSize.width, zoom]
+  );
 
   useEffect(() => {
     const node = containerRef.current;
@@ -5274,36 +7241,71 @@ function SectorMapScreen({
     };
   }, []);
 
+  const centerCameraOnCoords = useCallback((coords: { x: number; y: number }, targetZoom: number) => {
+    const node = containerRef.current;
+    if (!node) return false;
+    const width = node.clientWidth;
+    const height = node.clientHeight;
+    if (width < 40 || height < 40) return false;
+    setZoom(targetZoom);
+    setCameraCenter(clampCameraCenter(coords, targetZoom));
+    return true;
+  }, [clampCameraCenter]);
+
+  const focusMyPosition = useCallback((resetZoom: boolean) => {
+    return centerCameraOnCoords(selfPlanetCoords, resetZoom ? initialMapZoom : zoom);
+  }, [centerCameraOnCoords, initialMapZoom, selfPlanetCoords, zoom]);
+
   useEffect(() => {
-    if (didCenterOnHomeRef.current) return;
-    let cancelled = false;
-    let frameId = 0;
-    const centerHome = () => {
-      if (cancelled || didCenterOnHomeRef.current) return;
-      const rect = containerRef.current?.getBoundingClientRect();
-      if (!rect || rect.width < 40 || rect.height < 40) {
-        frameId = window.requestAnimationFrame(centerHome);
-        return;
-      }
-      const nextZoom = initialMapZoom;
-      setZoom(nextZoom);
-      setPan({
-        x: rect.width / 2 - selfPlanetCoords.x * nextZoom,
-        y: rect.height / 2 - selfPlanetCoords.y * nextZoom
+    mapAutoCenterKeyRef.current = "";
+  }, [currentUserId]);
+
+  useLayoutEffect(() => {
+    if (!session || !currentUserId) return;
+    const centerKey = `${currentUserId}:${Math.round(selfPlanetCoords.x)}:${Math.round(selfPlanetCoords.y)}`;
+    if (mapAutoCenterKeyRef.current === centerKey) return;
+
+    let timerId = 0;
+    let frameA = 0;
+    let frameB = 0;
+
+    timerId = window.setTimeout(() => {
+      frameA = window.requestAnimationFrame(() => {
+        frameB = window.requestAnimationFrame(() => {
+          if (focusMyPosition(true)) {
+            mapAutoCenterKeyRef.current = centerKey;
+          }
+        });
       });
-      didCenterOnHomeRef.current = true;
-    };
-    frameId = window.requestAnimationFrame(centerHome);
+    }, 0);
+
     return () => {
-      cancelled = true;
-      if (frameId) window.cancelAnimationFrame(frameId);
+      if (timerId) window.clearTimeout(timerId);
+      if (frameA) window.cancelAnimationFrame(frameA);
+      if (frameB) window.cancelAnimationFrame(frameB);
     };
-  }, [initialMapZoom, selfPlanetCoords.x, selfPlanetCoords.y]);
+  }, [currentUserId, focusMyPosition, selfPlanetCoords.x, selfPlanetCoords.y, session]);
 
   const mapNowTs = useMemo(() => {
     if (!mapServerSync) return Math.floor(mapNowMs / 1000);
     return Math.floor((mapServerSync.serverMs + (mapNowMs - mapServerSync.localMs)) / 1000);
   }, [mapNowMs, mapServerSync]);
+
+  const dailyQuestSchedule = useMemo(() => {
+    const nowTs = Math.max(0, mapNowTs);
+    const d = new Date(nowTs * 1000);
+    const todayNoonTs = Math.floor(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 12, 0, 0) / 1000);
+    const cycleStartTs = nowTs >= todayNoonTs ? todayNoonTs : todayNoonTs - 86400;
+    const cycleEndTs = cycleStartTs + 86400;
+    const cycleDate = new Date(cycleStartTs * 1000);
+    const cycleKey = `${cycleDate.getUTCFullYear()}-${String(cycleDate.getUTCMonth() + 1).padStart(2, "0")}-${String(cycleDate.getUTCDate()).padStart(2, "0")}_12`;
+    return {
+      cycleKey,
+      cycleStartTs,
+      cycleEndTs,
+      resetSeconds: Math.max(0, cycleEndTs - nowTs)
+    };
+  }, [mapNowTs]);
 
   const fieldPopupEntity = useMemo(() => {
     if (!fieldPopupId) return null;
@@ -5331,55 +7333,106 @@ function SectorMapScreen({
     );
   }, [currentUserId, fleetDraft, harvestAvailability, selectedFieldEntity]);
 
-  const mapExpeditionVisual = useMemo(() => {
-    if (!mapExpedition) return null;
-    const field = mapFields.find((row) => row.id === mapExpedition.fieldId);
-    if (!field) return null;
-    const status = String(mapExpedition.status || "").trim().toLowerCase();
-    if (status === "returning" && mapExpedition.returnEndAt > 0 && mapNowTs >= mapExpedition.returnEndAt) return null;
-    if (status === "travel_to_field" && mapExpedition.arrivalAt > 0 && mapNowTs >= mapExpedition.arrivalAt) return null;
-    if (status === "extracting" && mapExpedition.extractionEndAt > 0 && mapNowTs >= mapExpedition.extractionEndAt) return null;
-    const home = selfPlanetCoords;
-    const fieldPoint = { x: field.x, y: field.y };
-    if (mapExpedition.status === "extracting") {
-      return {
-        status: mapExpedition.status,
-        startX: home.x,
-        startY: home.y,
-        targetX: fieldPoint.x,
-        targetY: fieldPoint.y,
-        currentX: fieldPoint.x,
-        currentY: fieldPoint.y,
-        progress: 1,
-        etaTs: mapExpedition.extractionEndAt
-      };
-    }
-    const returning = mapExpedition.status === "returning";
-    const start = returning ? fieldPoint : home;
-    const target = returning ? home : fieldPoint;
-    const startAt = returning ? mapExpedition.returnStartAt : mapExpedition.departureAt;
-    const endAt = returning ? mapExpedition.returnEndAt : mapExpedition.arrivalAt;
-    const total = Math.max(1, endAt - startAt);
-    const progress = Math.max(0, Math.min(1, (mapNowTs - startAt) / total));
-    return {
-      status: mapExpedition.status,
-      startX: start.x,
-      startY: start.y,
-      targetX: target.x,
-      targetY: target.y,
-      currentX: start.x + (target.x - start.x) * progress,
-      currentY: start.y + (target.y - start.y) * progress,
-      progress,
-      etaTs: endAt
-    };
-  }, [mapExpedition, mapFields, mapNowTs, selfPlanetCoords]);
+  const displayedMapExpeditions = useMemo(
+    () => (mapExpeditions.length > 0 ? mapExpeditions : (mapExpedition ? [mapExpedition] : [])),
+    [mapExpedition, mapExpeditions]
+  );
 
-  const mapExpeditionShipAngle = useMemo(() => {
-    if (!mapExpeditionVisual) return 0;
-    const dx = mapExpeditionVisual.targetX - mapExpeditionVisual.startX;
-    const dy = mapExpeditionVisual.targetY - mapExpeditionVisual.startY;
-    return Math.atan2(dy, dx) * (180 / Math.PI) + 90;
-  }, [mapExpeditionVisual]);
+  const derivedDisplayedMapExpeditions = useMemo(
+    () =>
+      displayedMapExpeditions
+        .map((expedition) => ({
+          expedition,
+          timeline: deriveMapExpeditionTimeline(expedition, mapNowTs)
+        }))
+        .filter((row) => !row.timeline.completed),
+    [displayedMapExpeditions, mapNowTs]
+  );
+
+  const dailyHarvestElapsedSeconds = useMemo(
+    () =>
+      derivedDisplayedMapExpeditions.reduce((max, row) => {
+        if (row.timeline.status !== "extracting") return max;
+        return Math.max(max, Math.max(0, mapNowTs - row.timeline.startAt));
+      }, 0),
+    [derivedDisplayedMapExpeditions, mapNowTs]
+  );
+
+  const dailyCollectionQuestTarget = useMemo(
+    () => Math.max(1, Math.floor(Math.max(0, Number(carbonProductionPerSec || 0)) * 3600)),
+    [carbonProductionPerSec]
+  );
+
+  const mapMovingExpeditionVisuals = useMemo(
+    () =>
+      derivedDisplayedMapExpeditions
+        .map(({ expedition, timeline }) => {
+          const field = mapFields.find((row) => row.id === expedition.fieldId);
+          if (!field) return null;
+          const status = timeline.status;
+          if (status !== "travel_to_field" && status !== "returning") return null;
+          const home = selfPlanetCoords;
+          const fieldPoint = { x: field.x, y: field.y };
+          const returning = status === "returning";
+          const start = returning ? fieldPoint : home;
+          const target = returning ? home : fieldPoint;
+          const progress = timeline.progress;
+          const dx = target.x - start.x;
+          const dy = target.y - start.y;
+          return {
+            id: expedition.id,
+            status,
+            startX: start.x,
+            startY: start.y,
+            targetX: target.x,
+            targetY: target.y,
+            currentX: start.x + dx * progress,
+            currentY: start.y + dy * progress,
+            angle: Math.atan2(dy, dx) * (180 / Math.PI) + 90
+          };
+        })
+        .filter(
+          (
+            visual
+          ): visual is {
+            id: string;
+            status: string;
+            startX: number;
+            startY: number;
+            targetX: number;
+            targetY: number;
+            currentX: number;
+            currentY: number;
+            angle: number;
+          } => Boolean(visual)
+        ),
+    [derivedDisplayedMapExpeditions, mapFields, selfPlanetCoords]
+  );
+
+  const mapExtractionVisuals = useMemo(
+    () =>
+      derivedDisplayedMapExpeditions
+        .map(({ expedition, timeline }) => {
+          if (timeline.status !== "extracting") return null;
+          const field = mapFields.find((row) => row.id === expedition.fieldId);
+          if (!field) return null;
+          return {
+            id: expedition.id,
+            currentX: field.x,
+            currentY: field.y
+          };
+        })
+        .filter(
+          (
+            visual
+          ): visual is {
+            id: string;
+            currentX: number;
+            currentY: number;
+          } => Boolean(visual)
+        ),
+    [derivedDisplayedMapExpeditions, mapFields]
+  );
 
   const entityLabelById = useMemo(() => {
     const output: Record<string, string> = {};
@@ -5398,6 +7451,7 @@ function SectorMapScreen({
       etaTs?: number;
       canRecall?: boolean;
       expeditionId?: string;
+      targetCoords?: { x: number; y: number };
     }> = fleets
       .map((fleet) => {
         const missionLabel = fleet.missionType === "attack"
@@ -5417,11 +7471,11 @@ function SectorMapScreen({
       })
       .filter((row) => row.progress < 1);
 
-    const displayedExpeditions = mapExpeditions.length > 0 ? mapExpeditions : (mapExpedition ? [mapExpedition] : []);
-    for (const expedition of displayedExpeditions) {
+    for (const { expedition, timeline } of derivedDisplayedMapExpeditions) {
       const field = mapFields.find((row) => row.id === expedition.fieldId);
       const fieldName = field ? mapFieldDisplayName(field.id, language) : mapFieldDisplayName(expedition.fieldId, language);
-      const status = String(expedition.status || "travel_to_field");
+      const fieldCoords = field ? { x: field.x, y: field.y } : undefined;
+      const status = timeline.status;
       const statusLabel = status === "extracting"
         ? (language === "en" ? "Harvesting fleet" : "Flotte en extraction")
         : status === "returning"
@@ -5432,46 +7486,27 @@ function SectorMapScreen({
         : status === "returning"
           ? `${fieldName} → ${language === "en" ? "Your planet" : "Votre planète"}`
           : `${language === "en" ? "Your planet" : "Votre planète"} → ${fieldName}`;
-      const etaTs = status === "extracting"
-        ? expedition.extractionEndAt
-        : status === "returning"
-          ? expedition.returnEndAt
-          : expedition.arrivalAt;
+      const etaTs = timeline.endAt;
       const remainingSeconds = Math.max(0, etaTs - mapNowTs);
       if (remainingSeconds <= 0) continue;
-      const progress = status === "extracting"
-        ? (() => {
-            const total = Math.max(1, expedition.extractionEndAt - expedition.extractionStartAt);
-            return Math.max(0, Math.min(1, (mapNowTs - expedition.extractionStartAt) / total));
-          })()
-        : status === "returning"
-          ? (() => {
-              const total = Math.max(1, expedition.returnEndAt - expedition.returnStartAt);
-              return Math.max(0, Math.min(1, (mapNowTs - expedition.returnStartAt) / total));
-            })()
-          : (() => {
-              const total = Math.max(1, expedition.arrivalAt - expedition.departureAt);
-              return Math.max(0, Math.min(1, (mapNowTs - expedition.departureAt) / total));
-            })();
       rows.unshift({
         id: `expedition_${expedition.id}`,
         title: statusLabel,
-        route,
+        route: fieldCoords ? `${route} [${fieldCoords.x}, ${fieldCoords.y}]` : route,
         detail: `${language === "en" ? "ETA" : "Arrivée"} ${new Date(etaTs * 1000).toLocaleTimeString()}`,
-        progress,
+        progress: timeline.progress,
         remainingSeconds,
         etaTs,
         canRecall: status !== "returning",
-        expeditionId: expedition.id
+        expeditionId: expedition.id,
+        targetCoords: fieldCoords
       });
     }
     return rows;
-  }, [entityLabelById, fleets, language, mapExpedition, mapExpeditions, mapFields, mapNowTs]);
+  }, [derivedDisplayedMapExpeditions, entityLabelById, fleets, language, mapFields, mapNowTs]);
 
-  const mapLiveCollectedRows = useMemo(() => {
-    if (!mapExpedition || mapExpedition.status !== "extracting") return [] as Array<{ resourceId: ResourceId; amount: number }>;
+  const mapLiveExtractionOverlays = useMemo(() => {
     const validResourceIds = new Set<ResourceId>(RESOURCE_DEFS.map((def) => def.id as ResourceId));
-
     const normalizeResourceId = (raw: unknown): ResourceId | null => {
       const value = String(raw || "").trim().toLowerCase();
       if (!value || !validResourceIds.has(value as ResourceId)) return null;
@@ -5479,99 +7514,312 @@ function SectorMapScreen({
     };
     const toInt = (raw: unknown) => Math.max(0, Math.floor(Number(raw ?? 0)));
 
-    const field = mapFields.find((row) => row.id === mapExpedition.fieldId);
-    const fieldSnapshot: Partial<Record<ResourceId, number>> = {};
-    if (field && Array.isArray(field.resources)) {
-      for (const row of field.resources) {
-        const rid = normalizeResourceId(row.resourceId);
-        if (!rid) continue;
-        fieldSnapshot[rid] = toInt(row.totalAmount);
+    return derivedDisplayedMapExpeditions
+      .map(({ expedition, timeline }) => {
+        if (timeline.status !== "extracting") return null;
+        const field = mapFields.find((row) => row.id === expedition.fieldId);
+        if (!field) return null;
+
+        const fieldSnapshot: Partial<Record<ResourceId, number>> = {};
+        if (Array.isArray(field.resources)) {
+          for (const row of field.resources) {
+            const rid = normalizeResourceId(row.resourceId);
+            if (!rid) continue;
+            fieldSnapshot[rid] = toInt(row.totalAmount);
+          }
+        }
+
+        const expeditionSnapshot = expedition.snapshotResources && typeof expedition.snapshotResources === "object"
+          ? expedition.snapshotResources
+          : {};
+        const serverCollected = expedition.collectedResources && typeof expedition.collectedResources === "object"
+          ? expedition.collectedResources
+          : {};
+
+        const mergedSnapshot: Partial<Record<ResourceId, number>> = {};
+        for (const [ridRaw, amountRaw] of Object.entries(fieldSnapshot)) {
+          const rid = normalizeResourceId(ridRaw);
+          if (!rid) continue;
+          mergedSnapshot[rid] = toInt(amountRaw);
+        }
+        for (const [ridRaw, amountRaw] of Object.entries(expeditionSnapshot)) {
+          const rid = normalizeResourceId(ridRaw);
+          if (!rid) continue;
+          mergedSnapshot[rid] = toInt(amountRaw);
+        }
+
+        const liveCollected: Partial<Record<ResourceId, number>> = {};
+        for (const [ridRaw, amountRaw] of Object.entries(serverCollected)) {
+          const rid = normalizeResourceId(ridRaw);
+          if (!rid) continue;
+          liveCollected[rid] = toInt(amountRaw);
+        }
+
+        const localEstimate = estimateMapExpeditionCollected(expedition, mergedSnapshot, mapNowTs);
+        for (const [ridRaw, amountRaw] of Object.entries(localEstimate)) {
+          const rid = normalizeResourceId(ridRaw);
+          if (!rid) continue;
+          liveCollected[rid] = Math.max(toInt(liveCollected[rid] ?? 0), toInt(amountRaw));
+        }
+
+        const orderedIds: ResourceId[] = [];
+        const seen = new Set<ResourceId>();
+        const addId = (raw: unknown) => {
+          const rid = normalizeResourceId(raw);
+          if (!rid || seen.has(rid)) return;
+          seen.add(rid);
+          orderedIds.push(rid);
+        };
+        if (Array.isArray(field.resources)) {
+          for (const row of field.resources) addId(row.resourceId);
+        }
+        for (const rid of Object.keys(mergedSnapshot)) addId(rid);
+        for (const rid of Object.keys(liveCollected)) addId(rid);
+
+        return {
+          id: expedition.id,
+          x: field.x,
+          y: field.y,
+          cargoUsed: Object.values(liveCollected).reduce(
+            (sum, value) => sum + Math.max(0, Math.floor(Number(value || 0))),
+            0
+          ),
+          cargoCapacity: Math.max(0, Math.floor(Number(expedition.totalTransportCapacity || 0))),
+          rows: orderedIds.map((resourceId) => ({
+            resourceId,
+            amount: toInt(liveCollected[resourceId] ?? 0)
+          }))
+        };
+      })
+      .filter(
+        (
+          overlay
+        ): overlay is {
+          id: string;
+          x: number;
+          y: number;
+          cargoUsed: number;
+          cargoCapacity: number;
+          rows: Array<{ resourceId: ResourceId; amount: number }>;
+        } => Boolean(overlay)
+      );
+  }, [derivedDisplayedMapExpeditions, mapFields, mapNowTs]);
+
+  const primaryDisplayedExpedition = useMemo(() => {
+    if (derivedDisplayedMapExpeditions.length <= 0) return null;
+    return (
+      derivedDisplayedMapExpeditions.find((row) => row.timeline.status !== "returning") ??
+      derivedDisplayedMapExpeditions[0] ??
+      null
+    );
+  }, [derivedDisplayedMapExpeditions]);
+
+  const mapLiveCollectedRows = useMemo(
+    () => {
+      if (mapLiveExtractionOverlays.length <= 0) return [];
+      const primaryId = primaryDisplayedExpedition?.expedition.id;
+      if (!primaryId) return mapLiveExtractionOverlays[0].rows;
+      const overlay = mapLiveExtractionOverlays.find((row) => row.id === primaryId);
+      return overlay ? overlay.rows : mapLiveExtractionOverlays[0].rows;
+    },
+    [mapLiveExtractionOverlays, primaryDisplayedExpedition]
+  );
+  const primaryLiveExtractionOverlay = useMemo(
+    () => {
+      if (mapLiveExtractionOverlays.length <= 0) return null;
+      const primaryId = primaryDisplayedExpedition?.expedition.id;
+      if (!primaryId) return mapLiveExtractionOverlays[0] ?? null;
+      return mapLiveExtractionOverlays.find((row) => row.id === primaryId) ?? mapLiveExtractionOverlays[0] ?? null;
+    },
+    [mapLiveExtractionOverlays, primaryDisplayedExpedition]
+  );
+
+  const primaryMapExpedition = primaryDisplayedExpedition?.expedition ?? null;
+  const primaryExpeditionState = primaryDisplayedExpedition?.timeline ?? null;
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const raw = window.localStorage.getItem(dailyHarvestQuestStorageKey);
+      if (!raw) {
+        setDailyHarvestQuestState({
+          cycleKey: dailyQuestSchedule.cycleKey,
+          extractionBestSeconds: 0,
+          extractionClaimed: false,
+          collectedResources: 0,
+          collectionClaimed: false,
+          processedReportIds: []
+        });
+        return;
       }
-    }
-
-    const expeditionSnapshot = mapExpedition.snapshotResources && typeof mapExpedition.snapshotResources === "object"
-      ? mapExpedition.snapshotResources
-      : {};
-
-    const serverCollected = mapExpedition.collectedResources && typeof mapExpedition.collectedResources === "object"
-      ? mapExpedition.collectedResources
-      : {};
-
-    const mergedSnapshot: Partial<Record<ResourceId, number>> = {};
-    for (const [ridRaw, amountRaw] of Object.entries(fieldSnapshot)) {
-      const rid = normalizeResourceId(ridRaw);
-      if (!rid) continue;
-      mergedSnapshot[rid] = toInt(amountRaw);
-    }
-    for (const [ridRaw, amountRaw] of Object.entries(expeditionSnapshot)) {
-      const rid = normalizeResourceId(ridRaw);
-      if (!rid) continue;
-      mergedSnapshot[rid] = toInt(amountRaw);
-    }
-
-    const liveCollected: Partial<Record<ResourceId, number>> = {};
-    for (const [ridRaw, amountRaw] of Object.entries(serverCollected)) {
-      const rid = normalizeResourceId(ridRaw);
-      if (!rid) continue;
-      liveCollected[rid] = toInt(amountRaw);
-    }
-
-    const hasServerProgress = Object.values(liveCollected).some((value) => toInt(value) > 0);
-    if (!hasServerProgress) {
-      const startAt = Math.max(0, Math.floor(Number(mapExpedition.extractionStartAt || 0)));
-      const endAt = Math.max(0, Math.floor(Number(mapExpedition.extractionEndAt || 0)));
-      const duration = Math.max(1, endAt - startAt);
-      const elapsed = Math.max(0, Math.min(duration, mapNowTs - startAt));
-      const ratio = duration > 0 ? elapsed / duration : 0;
-      const potential: Partial<Record<ResourceId, number>> = {};
-      let totalPotential = 0;
-      for (const [ridRaw, amountRaw] of Object.entries(mergedSnapshot)) {
-        const rid = normalizeResourceId(ridRaw);
-        if (!rid) continue;
-        const amount = Math.max(0, Math.floor(toInt(amountRaw) * ratio));
-        potential[rid] = amount;
-        totalPotential += amount;
+      const parsed = JSON.parse(raw) as Partial<MapDailyHarvestQuestState>;
+      const savedCycleKey = String(parsed?.cycleKey || "");
+      if (savedCycleKey !== dailyQuestSchedule.cycleKey) {
+        setDailyHarvestQuestState({
+          cycleKey: dailyQuestSchedule.cycleKey,
+          extractionBestSeconds: 0,
+          extractionClaimed: false,
+          collectedResources: 0,
+          collectionClaimed: false,
+          processedReportIds: []
+        });
+        return;
       }
-      const cargoCapacity = Math.max(0, Math.floor(Number(mapExpedition.totalTransportCapacity || 0)));
-      const scale = cargoCapacity > 0 && totalPotential > cargoCapacity ? cargoCapacity / totalPotential : 1;
-      for (const [ridRaw, amountRaw] of Object.entries(potential)) {
-        const rid = normalizeResourceId(ridRaw);
-        if (!rid) continue;
-        liveCollected[rid] = Math.max(0, Math.floor(toInt(amountRaw) * scale));
+      setDailyHarvestQuestState({
+        cycleKey: savedCycleKey,
+        extractionBestSeconds: Math.max(0, Math.min(DAILY_HARVEST_QUEST_TARGET_SECONDS, Math.floor(Number(parsed?.extractionBestSeconds ?? 0)))),
+        extractionClaimed: Boolean(parsed?.extractionClaimed),
+        collectedResources: Math.max(0, Math.floor(Number(parsed?.collectedResources ?? 0))),
+        collectionClaimed: Boolean(parsed?.collectionClaimed),
+        processedReportIds: Array.isArray(parsed?.processedReportIds)
+          ? parsed!.processedReportIds!.map((id) => String(id || "").trim()).filter((id) => id.length > 0).slice(-100)
+          : []
+      });
+    } catch {
+      setDailyHarvestQuestState({
+        cycleKey: dailyQuestSchedule.cycleKey,
+        extractionBestSeconds: 0,
+        extractionClaimed: false,
+        collectedResources: 0,
+        collectionClaimed: false,
+        processedReportIds: []
+      });
+    }
+  }, [DAILY_HARVEST_QUEST_TARGET_SECONDS, dailyHarvestQuestStorageKey, dailyQuestSchedule.cycleKey]);
+
+  useEffect(() => {
+    setDailyHarvestQuestState((prev) => {
+      if (prev.cycleKey === dailyQuestSchedule.cycleKey) return prev;
+      return {
+        cycleKey: dailyQuestSchedule.cycleKey,
+        extractionBestSeconds: 0,
+        extractionClaimed: false,
+        collectedResources: 0,
+        collectionClaimed: false,
+        processedReportIds: []
+      };
+    });
+  }, [dailyQuestSchedule.cycleKey]);
+
+  useEffect(() => {
+    setDailyHarvestQuestState((prev) => {
+      if (prev.cycleKey !== dailyQuestSchedule.cycleKey) {
+        return {
+          cycleKey: dailyQuestSchedule.cycleKey,
+          extractionBestSeconds: 0,
+          extractionClaimed: false,
+          collectedResources: 0,
+          collectionClaimed: false,
+          processedReportIds: []
+        };
       }
+      const nextBest = Math.max(prev.extractionBestSeconds, Math.min(DAILY_HARVEST_QUEST_TARGET_SECONDS, dailyHarvestElapsedSeconds));
+      if (nextBest === prev.extractionBestSeconds) return prev;
+      return { ...prev, extractionBestSeconds: nextBest };
+    });
+  }, [DAILY_HARVEST_QUEST_TARGET_SECONDS, dailyHarvestElapsedSeconds, dailyQuestSchedule.cycleKey]);
+
+  useEffect(() => {
+    setDailyHarvestQuestState((prev) => {
+      if (prev.cycleKey !== dailyQuestSchedule.cycleKey) {
+        return {
+          cycleKey: dailyQuestSchedule.cycleKey,
+          extractionBestSeconds: 0,
+          extractionClaimed: false,
+          collectedResources: 0,
+          collectionClaimed: false,
+          processedReportIds: []
+        };
+      }
+      const seen = new Set(prev.processedReportIds);
+      let gained = 0;
+      let changed = false;
+      for (const report of mapReports) {
+        const reportId = String(report?.id || "").trim();
+        const reportAt = Math.max(0, Math.floor(Number(report?.at ?? 0)));
+        if (!reportId || seen.has(reportId)) continue;
+        if (reportAt < dailyQuestSchedule.cycleStartTs || reportAt >= dailyQuestSchedule.cycleEndTs) continue;
+        seen.add(reportId);
+        changed = true;
+        const resources = report?.resources && typeof report.resources === "object" ? report.resources : {};
+        gained += Object.values(resources).reduce((sum, value) => sum + Math.max(0, Math.floor(Number(value || 0))), 0);
+      }
+      if (!changed) return prev;
+      return {
+        ...prev,
+        collectedResources: prev.collectedResources + gained,
+        processedReportIds: Array.from(seen).slice(-120)
+      };
+    });
+  }, [dailyQuestSchedule.cycleEndTs, dailyQuestSchedule.cycleKey, dailyQuestSchedule.cycleStartTs, mapReports]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      window.localStorage.setItem(dailyHarvestQuestStorageKey, JSON.stringify(dailyHarvestQuestState));
+    } catch {
+      // ignore storage failures
     }
+  }, [dailyHarvestQuestState, dailyHarvestQuestStorageKey]);
 
-    const orderedIds: ResourceId[] = [];
-    const seen = new Set<ResourceId>();
-    const addId = (raw: unknown) => {
-      const rid = normalizeResourceId(raw);
-      if (!rid || seen.has(rid)) return;
-      seen.add(rid);
-      orderedIds.push(rid);
-    };
-
-    if (field && Array.isArray(field.resources)) {
-      for (const row of field.resources) addId(row.resourceId);
-    }
-    for (const rid of Object.keys(mergedSnapshot)) addId(rid);
-    for (const rid of Object.keys(liveCollected)) addId(rid);
-    if (orderedIds.length <= 0) {
-      for (const rid of Object.keys(serverCollected)) addId(rid);
-    }
-
-    const rows: Array<{ resourceId: ResourceId; amount: number }> = orderedIds.map((resourceId) => ({
-      resourceId,
-      amount: toInt(liveCollected[resourceId] ?? 0)
-    }));
-    return rows;
-  }, [mapExpedition, mapFields, mapNowTs]);
-
-  const mapExtractionOverlay = useMemo(() => {
-    if (!mapExpedition || mapExpedition.status !== "extracting") return null;
-    const field = mapFields.find((row) => row.id === mapExpedition.fieldId);
-    if (!field) return null;
-    return { x: field.x, y: field.y };
-  }, [mapExpedition, mapFields]);
+  const dailyHarvestQuestProgressSeconds = Math.min(
+    DAILY_HARVEST_QUEST_TARGET_SECONDS,
+    Math.max(dailyHarvestQuestState.extractionBestSeconds, dailyHarvestElapsedSeconds)
+  );
+  const dailyHarvestQuestComplete = dailyHarvestQuestProgressSeconds >= DAILY_HARVEST_QUEST_TARGET_SECONDS;
+  const dailyCollectionQuestProgress = Math.min(dailyCollectionQuestTarget, Math.max(0, dailyHarvestQuestState.collectedResources));
+  const dailyCollectionQuestComplete = dailyCollectionQuestProgress >= dailyCollectionQuestTarget;
+  const dailyAvailableCount =
+    (dailyHarvestQuestState.extractionClaimed ? 0 : 1) +
+    (dailyHarvestQuestState.collectionClaimed ? 0 : 1);
+  const dailyHarvestQuestProgressLabel = `${formatDuration(dailyHarvestQuestProgressSeconds)} / ${formatDuration(DAILY_HARVEST_QUEST_TARGET_SECONDS)}`;
+  const dailyCollectionQuestProgressLabel = `${dailyCollectionQuestProgress.toLocaleString()} / ${dailyCollectionQuestTarget.toLocaleString()}`;
+  const dailyHarvestQuestResetLabel = l(
+    `Reset dans ${formatDuration(dailyQuestSchedule.resetSeconds)}`,
+    `Reset in ${formatDuration(dailyQuestSchedule.resetSeconds)}`
+  );
+  const dailyQuestCards = useMemo(
+    () => [
+      {
+        id: "extract_5m" as const,
+        titleFr: "Extraction prolongee",
+        titleEn: "Extended extraction",
+        descriptionFr: "Exploiter un champ de ressources pendant plus de 5 minutes.",
+        descriptionEn: "Harvest a resource field for more than 5 minutes.",
+        progressLabel: dailyHarvestQuestProgressLabel,
+        ratio: Math.min(100, Math.round((dailyHarvestQuestProgressSeconds / DAILY_HARVEST_QUEST_TARGET_SECONDS) * 100)),
+        rewardFr: "50 Credits",
+        rewardEn: "50 Credits",
+        claimed: dailyHarvestQuestState.extractionClaimed,
+        complete: dailyHarvestQuestComplete
+      },
+      {
+        id: "collect_hourly" as const,
+        titleFr: "Rendement journalier",
+        titleEn: "Daily yield",
+        descriptionFr: `Recolter ${dailyCollectionQuestTarget.toLocaleString()} ressources`,
+        descriptionEn: `Collect ${dailyCollectionQuestTarget.toLocaleString()} resources`,
+        progressLabel: dailyCollectionQuestProgressLabel,
+        ratio: Math.min(100, Math.round((dailyCollectionQuestProgress / Math.max(1, dailyCollectionQuestTarget)) * 100)),
+        rewardFr: "150 Credits",
+        rewardEn: "150 Credits",
+        claimed: dailyHarvestQuestState.collectionClaimed,
+        complete: dailyCollectionQuestComplete
+      }
+    ],
+    [
+      DAILY_HARVEST_QUEST_TARGET_SECONDS,
+      dailyCollectionQuestComplete,
+      dailyCollectionQuestProgress,
+      dailyCollectionQuestProgressLabel,
+      dailyCollectionQuestTarget,
+      dailyHarvestQuestComplete,
+      dailyHarvestQuestProgressLabel,
+      dailyHarvestQuestProgressSeconds,
+      dailyHarvestQuestState.collectionClaimed,
+      dailyHarvestQuestState.extractionClaimed
+    ]
+  );
 
   useEffect(() => {
     if (!selectedEntity) return;
@@ -5613,10 +7861,17 @@ function SectorMapScreen({
 
   const handleMouseMove = (e: React.MouseEvent) => {
     if (!isDragging) return;
-    setPan((prev) => ({
-      x: prev.x + (e.clientX - lastMouse.x),
-      y: prev.y + (e.clientY - lastMouse.y)
-    }));
+    const dx = e.clientX - lastMouse.x;
+    const dy = e.clientY - lastMouse.y;
+    setCameraCenter((prev) =>
+      clampCameraCenter(
+        {
+          x: prev.x - dx / Math.max(0.01, zoom),
+          y: prev.y - dy / Math.max(0.01, zoom)
+        },
+        zoom
+      )
+    );
     setLastMouse({ x: e.clientX, y: e.clientY });
   };
 
@@ -5624,26 +7879,15 @@ function SectorMapScreen({
     if (e.button === 2 || e.button === 1) setIsDragging(false);
   };
 
-  const applyZoomAtPoint = useCallback((deltaY: number, clientX: number, clientY: number) => {
+  const applyZoomAtPoint = useCallback((deltaY: number) => {
     setZoom((prevZoom) => {
       const delta = -deltaY * 0.0011;
       const nextZoom = Math.min(Math.max(prevZoom + delta, 0.22), 2.6);
-      if (!containerRef.current || nextZoom === prevZoom) return nextZoom;
-
-      const rect = containerRef.current.getBoundingClientRect();
-      const mouseX = clientX - rect.left;
-      const mouseY = clientY - rect.top;
-
-      setPan((prevPan) => {
-        const ratio = nextZoom / prevZoom;
-        return {
-          x: mouseX - (mouseX - prevPan.x) * ratio,
-          y: mouseY - (mouseY - prevPan.y) * ratio
-        };
-      });
+      if (nextZoom === prevZoom) return prevZoom;
+      setCameraCenter((prevCenter) => clampCameraCenter(prevCenter, nextZoom));
       return nextZoom;
     });
-  }, []);
+  }, [clampCameraCenter]);
 
   useEffect(() => {
     const node = containerRef.current;
@@ -5651,7 +7895,7 @@ function SectorMapScreen({
     const onWheel = (event: WheelEvent) => {
       event.preventDefault();
       event.stopPropagation();
-      applyZoomAtPoint(event.deltaY, event.clientX, event.clientY);
+      applyZoomAtPoint(event.deltaY);
     };
     node.addEventListener("wheel", onWheel, { passive: false });
     return () => {
@@ -5660,12 +7904,7 @@ function SectorMapScreen({
   }, [applyZoomAtPoint]);
 
   const navigateTo = (x: number, y: number) => {
-    if (!containerRef.current) return;
-    const rect = containerRef.current.getBoundingClientRect();
-    setPan({
-      x: rect.width / 2 - x * zoom,
-      y: rect.height / 2 - y * zoom
-    });
+    setCameraCenter(clampCameraCenter({ x, y }, zoom));
   };
 
   const onNavSubmit = (e: FormEvent) => {
@@ -5677,10 +7916,9 @@ function SectorMapScreen({
   };
 
   const addMarker = () => {
-    if (markers.length >= 5 || !containerRef.current) return;
-    const rect = containerRef.current.getBoundingClientRect();
-    const centerX = Math.round((rect.width / 2 - pan.x) / zoom);
-    const centerY = Math.round((rect.height / 2 - pan.y) / zoom);
+    if (markers.length >= 5) return;
+    const centerX = Math.round(cameraCenter.x);
+    const centerY = Math.round(cameraCenter.y);
     const label = `${l("Secteur", "Sector")} ${centerX.toString().slice(0, 2)}-${centerY.toString().slice(0, 2)}`;
     setMarkers((prev) => [...prev, { name: label, x: centerX, y: centerY }]);
   };
@@ -5689,13 +7927,16 @@ function SectorMapScreen({
     setMarkers((prev) => prev.filter((_, i) => i !== index));
   };
 
-  const claimQuest = (questId: string) => {
-    setDailyQuests((prev) =>
-      prev.map((quest) => {
-        if (quest.id !== questId || quest.claimed || quest.progress < quest.target) return quest;
-        return { ...quest, claimed: true };
-      })
-    );
+  const claimDailyQuest = (questId: "extract_5m" | "collect_hourly") => {
+    if (questId === "extract_5m") {
+      if (!dailyHarvestQuestComplete || dailyHarvestQuestState.extractionClaimed) return;
+      setDailyHarvestQuestState((prev) => ({ ...prev, extractionClaimed: true }));
+      onGrantCredits?.(DAILY_HARVEST_QUEST_REWARD, `daily_extract_${dailyQuestSchedule.cycleKey}`);
+      return;
+    }
+    if (!dailyCollectionQuestComplete || dailyHarvestQuestState.collectionClaimed) return;
+    setDailyHarvestQuestState((prev) => ({ ...prev, collectionClaimed: true }));
+    onGrantCredits?.(DAILY_COLLECTION_QUEST_REWARD, `daily_collect_${dailyQuestSchedule.cycleKey}`);
   };
 
   const isVisible = (entity: SectorEntity) => {
@@ -5853,6 +8094,79 @@ function SectorMapScreen({
   };
 
   useEffect(() => {
+    setMapCacheHydrated(false);
+  }, [currentUserId, mapCacheKey]);
+
+  useLayoutEffect(() => {
+    if (!session || !currentUserId) {
+      setMapCacheHydrated(true);
+      return;
+    }
+    try {
+      const raw = sessionStorage.getItem(mapCacheKey);
+      const parsed = parseJsonObject(raw);
+      const cachedAtMs = Math.max(0, Math.floor(Number(parsed?.cachedAtMs ?? 0)));
+      const cachedServerNowTs = Math.max(0, Math.floor(Number(parsed?.serverNowTs ?? 0)));
+      if (cachedAtMs > 0 && cachedServerNowTs > 0) {
+        setMapServerSync({
+          serverMs: cachedServerNowTs * 1000,
+          localMs: cachedAtMs
+        });
+      }
+      if (Array.isArray(parsed?.players)) {
+        const rows = parsed.players
+          .map((row: any) => ({
+            userId: String(row?.userId || "").trim(),
+            username: String(row?.username || "").trim()
+          }))
+          .filter((row: { userId: string; username: string }) => row.userId.length > 0);
+        if (rows.length > 0) setMapPlayers(rows);
+      }
+      if (parsed && typeof parsed === "object") {
+        applyMapPayload(parsed);
+      }
+    } catch {
+      // ignore malformed map cache
+    } finally {
+      setMapCacheHydrated(true);
+    }
+  }, [currentUserId, mapCacheKey, session]);
+
+  useEffect(() => {
+    if (!session || !currentUserId || !mapCacheHydrated) return;
+    try {
+      sessionStorage.setItem(
+        mapCacheKey,
+        JSON.stringify({
+          cachedAtMs: Date.now(),
+          serverNowTs: mapNowTs,
+          players: mapPlayers,
+          fields: mapFields,
+          expedition: mapExpedition,
+          expeditions: mapExpeditions,
+          reports: mapReports,
+          harvestInventory: mapHarvestInventory,
+          maxActiveExpeditions: mapServerMaxActiveExpeditions
+        })
+      );
+    } catch {
+      // ignore storage quota errors
+    }
+  }, [
+    currentUserId,
+    mapCacheKey,
+    mapExpedition,
+    mapExpeditions,
+    mapFields,
+    mapHarvestInventory,
+    mapPlayers,
+    mapReports,
+    mapServerMaxActiveExpeditions,
+    mapCacheHydrated,
+    session
+  ]);
+
+  useEffect(() => {
     if (!session || mapActionBusy) return;
     const displayedExpeditions = mapExpeditions.length > 0 ? mapExpeditions : (mapExpedition ? [mapExpedition] : []);
     if (displayedExpeditions.length <= 0) return;
@@ -5875,6 +8189,10 @@ function SectorMapScreen({
 
     let cancelled = false;
     const forceSync = async () => {
+      const nowMs = Date.now();
+      if (mapStateRpcInFlightRef.current) return;
+      if (nowMs < mapStateRpcBackoffUntilRef.current) return;
+      mapStateRpcInFlightRef.current = true;
       try {
         const rpc = await client.rpc(
           session,
@@ -5886,8 +8204,12 @@ function SectorMapScreen({
         const nested = parseJsonObject(parsed?.payload);
         const source = Object.keys(nested).length > 0 ? nested : parsed;
         applyMapPayload(source);
-      } catch {
-        // noop
+      } catch (err) {
+        if (isRequestTimeoutError(err)) {
+          mapStateRpcBackoffUntilRef.current = Date.now() + 10000;
+        }
+      } finally {
+        mapStateRpcInFlightRef.current = false;
       }
     };
     void forceSync();
@@ -5964,6 +8286,11 @@ function SectorMapScreen({
           : l("Lancement de collecte impossible.", "Unable to launch harvesting.")
       );
       try {
+        const now = Date.now();
+        if (mapStateRpcInFlightRef.current || now < mapStateRpcBackoffUntilRef.current) {
+          throw new Error("map state refresh skipped");
+        }
+        mapStateRpcInFlightRef.current = true;
         const rpcState = await client.rpc(
           session,
           "rpc_map_fields_state",
@@ -5973,8 +8300,13 @@ function SectorMapScreen({
         const nestedState = parseJsonObject(parsedState?.payload);
         const sourceState = Object.keys(nestedState).length > 0 ? nestedState : parsedState;
         applyMapPayload(sourceState);
-      } catch {
+      } catch (refreshErr) {
+        if (isRequestTimeoutError(refreshErr)) {
+          mapStateRpcBackoffUntilRef.current = Date.now() + 10000;
+        }
         // noop
+      } finally {
+        mapStateRpcInFlightRef.current = false;
       }
       if (import.meta.env.DEV) {
         // eslint-disable-next-line no-console
@@ -6001,7 +8333,56 @@ function SectorMapScreen({
       const source = Object.keys(nested).length > 0 ? nested : parsed;
       applyMapPayload(source);
     } catch (err) {
-      setMapActionError(l("Rappel impossible pour le moment.", "Unable to recall fleet right now."));
+      let detail = extractRpcErrorMessage(err);
+      if (!detail && err instanceof Response) {
+        try {
+          const raw = await err.text();
+          const parsed = parseJsonObject(raw);
+          detail =
+            String(parsed.message || parsed.error || parsed.error_message || "").trim() ||
+            raw.trim();
+        } catch {
+          // noop
+        }
+      }
+      const detailLower = String(detail || "").toLowerCase();
+      if (detailLower.includes("expedition is already returning")) {
+        detail = l("Cette flotte est deja en retour.", "This fleet is already returning.");
+      } else if (detailLower.includes("no recallable expedition")) {
+        detail = l("Aucune flotte rappelable pour le moment.", "No recallable fleet right now.");
+      }
+
+      let refreshed = false;
+      try {
+        const now = Date.now();
+        if (mapStateRpcInFlightRef.current || now < mapStateRpcBackoffUntilRef.current) {
+          throw new Error("map state refresh skipped");
+        }
+        mapStateRpcInFlightRef.current = true;
+        const rpcState = await client.rpc(
+          session,
+          "rpc_map_fields_state",
+          JSON.stringify({ commandementEscadreLevel })
+        );
+        const parsedState = parseJsonObject((rpcState as any)?.payload ?? rpcState);
+        const nestedState = parseJsonObject(parsedState?.payload);
+        const sourceState = Object.keys(nestedState).length > 0 ? nestedState : parsedState;
+        applyMapPayload(sourceState);
+        refreshed = true;
+      } catch (refreshErr) {
+        if (isRequestTimeoutError(refreshErr)) {
+          mapStateRpcBackoffUntilRef.current = Date.now() + 10000;
+        }
+      } finally {
+        mapStateRpcInFlightRef.current = false;
+      }
+
+      const base = l("Rappel impossible pour le moment.", "Unable to recall fleet right now.");
+      const treatAsSyncedState =
+        refreshed &&
+        (detailLower.includes("expedition is already returning") ||
+          detailLower.includes("no recallable expedition"));
+      setMapActionError(treatAsSyncedState ? "" : detail ? `${base} (${detail})` : base);
       if (import.meta.env.DEV) {
         // eslint-disable-next-line no-console
         console.error("map harvest recall error", err);
@@ -6046,12 +8427,7 @@ function SectorMapScreen({
     });
 
   const centerOnMyPosition = () => {
-    const rect = containerRef.current?.getBoundingClientRect();
-    if (!rect) return;
-    setPan({
-      x: rect.width / 2 - selfPlanetCoords.x * zoom,
-      y: rect.height / 2 - selfPlanetCoords.y * zoom
-    });
+    focusMyPosition(false);
   };
 
   const isMyPlanetOutOfView = useMemo(() => {
@@ -6066,11 +8442,6 @@ function SectorMapScreen({
       screenY > viewportSize.height - margin
     );
   }, [pan.x, pan.y, selfPlanetCoords.x, selfPlanetCoords.y, viewportSize.height, viewportSize.width, zoom]);
-
-  const dailyAvailableCount = useMemo(
-    () => dailyQuests.filter((quest) => !quest.claimed).length,
-    [dailyQuests]
-  );
 
   return (
     <main className={`sector-shell ${sidebarOpen ? "" : "sidebar-collapsed"}`}>
@@ -6108,7 +8479,14 @@ function SectorMapScreen({
                   <p className="sector-empty">{l("Aucune flotte en transit.", "No fleet currently in transit.")}</p>
                 ) : (
                   inFlightRows.map((row) => (
-                    <article key={row.id} className="sector-flight-item">
+                    <article
+                      key={row.id}
+                      className={`sector-flight-item ${row.targetCoords ? "clickable" : ""}`}
+                      onClick={() => {
+                        if (!row.targetCoords) return;
+                        navigateTo(row.targetCoords.x, row.targetCoords.y);
+                      }}
+                    >
                       <header>
                         <strong>{row.title}</strong>
                         {row.remainingSeconds == null ? <small>{row.detail}</small> : null}
@@ -6161,44 +8539,57 @@ function SectorMapScreen({
                   <span className="sector-daily-summary-caret">▾</span>
                 </span>
               </summary>
-              <p className="sector-daily-reset">{l("Reset dans 13h 24m", "Reset in 13h 24m")}</p>
+              <p className="sector-daily-reset">{dailyHarvestQuestResetLabel}</p>
               <div className="sector-daily-list">
-                {dailyQuests.map((quest) => {
-                  const ratio = Math.min(100, Math.round((quest.progress / quest.target) * 100));
-                  const complete = quest.progress >= quest.target;
-                  return (
-                    <article key={`daily_overlay_${quest.id}`} className="sector-daily-item">
-                      <header>
-                        <strong>{l(quest.titleFr, quest.titleEn)}</strong>
-                        <span>{l(quest.rewardFr, quest.rewardEn)}</span>
-                      </header>
-                      <div className="sector-daily-progress">
-                        <div style={{ width: `${ratio}%` }} />
-                      </div>
-                      <footer>
-                        <small>{quest.progress.toLocaleString()} / {quest.target.toLocaleString()}</small>
-                        <button type="button" disabled={!complete || quest.claimed} onClick={() => claimQuest(quest.id)}>
-                          {quest.claimed ? l("Recupere", "Claimed") : complete ? l("Recuperer", "Claim") : l("En cours", "In progress")}
-                        </button>
-                      </footer>
-                    </article>
-                  );
-                })}
+                {dailyQuestCards.map((quest) => (
+                  <article key={`daily_overlay_${quest.id}`} className="sector-daily-item">
+                    <header>
+                      <strong>{l(quest.titleFr, quest.titleEn)}</strong>
+                      <span>{l(quest.rewardFr, quest.rewardEn)}</span>
+                    </header>
+                    <p className="sector-daily-desc">{l(quest.descriptionFr, quest.descriptionEn)}</p>
+                    <div className="sector-daily-progress">
+                      <div style={{ width: `${quest.ratio}%` }} />
+                    </div>
+                    <footer>
+                      <small>{quest.progressLabel}</small>
+                      <button
+                        type="button"
+                        className={quest.complete && !quest.claimed ? "ready" : ""}
+                        disabled={!quest.complete || quest.claimed}
+                        onClick={() => claimDailyQuest(quest.id)}
+                      >
+                        {quest.claimed
+                          ? l("Recupere", "Claimed")
+                          : quest.complete
+                            ? l(quest.rewardFr, quest.rewardEn)
+                            : l("En cours", "In progress")}
+                      </button>
+                    </footer>
+                  </article>
+                ))}
               </div>
             </details>
           </aside>
         </div>
 
         <div
-          className="sector-transform"
+          className="sector-transform-pan"
           style={{
-            width: SECTOR_MAP_SIZE,
-            height: SECTOR_MAP_SIZE,
-            transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
-            transformOrigin: "0 0",
-            transition: isDragging ? "none" : "transform 0.12s ease-out"
+            transform: `translate(${pan.x}px, ${pan.y}px)`,
+            transition: "none"
           }}
         >
+          <div
+            className="sector-transform"
+            style={{
+              width: SECTOR_MAP_SIZE,
+              height: SECTOR_MAP_SIZE,
+              transform: `scale(${zoom})`,
+              transformOrigin: "0 0",
+              transition: "none"
+            }}
+          >
           <svg className="sector-grid" width={SECTOR_MAP_SIZE} height={SECTOR_MAP_SIZE}>
             <defs>
               <pattern id="sector-grid-pattern" width="200" height="200" patternUnits="userSpaceOnUse">
@@ -6230,80 +8621,90 @@ function SectorMapScreen({
               );
             })}
 
-            {mapExpeditionVisual ? (
-              <g className="sector-map-expedition-path">
-                {mapExpeditionVisual.status !== "extracting" ? (
-                  <line
-                    x1={mapExpeditionVisual.startX}
-                    y1={mapExpeditionVisual.startY}
-                    x2={mapExpeditionVisual.targetX}
-                    y2={mapExpeditionVisual.targetY}
-                    stroke="#86d7ff"
-                    strokeWidth="2.6"
-                    strokeDasharray="11 10"
-                    opacity="0.35"
+            {mapMovingExpeditionVisuals.map((visual) => (
+              <g key={`map_expedition_${visual.id}`} className="sector-map-expedition-path">
+                <line
+                  x1={visual.startX}
+                  y1={visual.startY}
+                  x2={visual.targetX}
+                  y2={visual.targetY}
+                  stroke="#86d7ff"
+                  strokeWidth="2.6"
+                  strokeDasharray="11 10"
+                  opacity="0.35"
+                />
+                <circle
+                  cx={visual.currentX}
+                  cy={visual.currentY}
+                  r="12"
+                  fill="rgba(120, 204, 255, 0.22)"
+                />
+                <g transform={`translate(${visual.currentX} ${visual.currentY}) rotate(${visual.angle})`}>
+                  <path
+                    d="M 0 -11 L 7 8 L 0 4 L -7 8 Z"
+                    fill="#9adfff"
+                    stroke="#e8f8ff"
+                    strokeWidth="1.2"
+                    className="sector-map-ship"
                   />
-                ) : null}
-                {mapExpeditionVisual.status === "extracting" ? (
-                  <>
-                    <circle
-                      cx={mapExpeditionVisual.currentX}
-                      cy={mapExpeditionVisual.currentY}
-                      r="18"
-                      fill="none"
-                      stroke="#aee6ff"
-                      strokeWidth="2"
-                      opacity="0.52"
-                    />
-                    <circle
-                      cx={mapExpeditionVisual.currentX}
-                      cy={mapExpeditionVisual.currentY}
-                      r="8"
-                      fill="#7ecfff"
-                      className="sector-fleet-dot"
-                    />
-                  </>
-                ) : (
-                  <>
-                    <circle
-                      cx={mapExpeditionVisual.currentX}
-                      cy={mapExpeditionVisual.currentY}
-                      r="12"
-                      fill="rgba(120, 204, 255, 0.22)"
-                    />
-                    <g transform={`translate(${mapExpeditionVisual.currentX} ${mapExpeditionVisual.currentY}) rotate(${mapExpeditionShipAngle})`}>
-                      <path
-                        d="M 0 -11 L 7 8 L 0 4 L -7 8 Z"
-                        fill="#9adfff"
-                        stroke="#e8f8ff"
-                        strokeWidth="1.2"
-                        className="sector-map-ship"
-                      />
-                    </g>
-                  </>
-                )}
+                </g>
               </g>
-            ) : null}
+            ))}
+
+            {mapExtractionVisuals.map((visual) => (
+              <g key={`map_extraction_${visual.id}`} className="sector-map-expedition-path">
+                <circle
+                  cx={visual.currentX}
+                  cy={visual.currentY}
+                  r="18"
+                  fill="none"
+                  stroke="#aee6ff"
+                  strokeWidth="2"
+                  opacity="0.52"
+                />
+                <circle
+                  cx={visual.currentX}
+                  cy={visual.currentY}
+                  r="8"
+                  fill="#7ecfff"
+                  className="sector-fleet-dot"
+                />
+              </g>
+            ))}
           </svg>
 
-          {mapExtractionOverlay ? (
+          {mapLiveExtractionOverlays.map((overlay) => (
             <div
+              key={`field_live_overlay_${overlay.id}`}
               className="sector-field-live-overlay"
-              style={{ left: mapExtractionOverlay.x, top: mapExtractionOverlay.y - 68 }}
+              style={{ left: overlay.x, top: overlay.y - 68 }}
             >
               <p>{l("Ressources cumulées", "Accumulated resources")}</p>
-              {mapLiveCollectedRows.length <= 0 ? (
+              {overlay.rows.length <= 0 ? (
                 <small>{l("Extraction en cours...", "Extraction in progress...")}</small>
               ) : (
-                mapLiveCollectedRows.map((row) => (
-                  <div key={`field_live_gain_${row.resourceId}`} className="sector-field-live-row">
-                    <span>{resourceDisplayName(row.resourceId, language)}</span>
-                    <strong>+{row.amount.toLocaleString()}</strong>
-                  </div>
-                ))
+                <>
+                  {overlay.rows.map((row) => (
+                    <div key={`field_live_gain_${overlay.id}_${row.resourceId}`} className="sector-field-live-row">
+                      <span>{resourceDisplayName(row.resourceId, language)}</span>
+                      <strong>+{row.amount.toLocaleString()}</strong>
+                    </div>
+                  ))}
+                  <small className={`sector-field-live-capacity ${overlay.cargoCapacity > 0 && overlay.cargoUsed >= overlay.cargoCapacity ? "full" : ""}`}>
+                    {l("Soute", "Cargo")}: {overlay.cargoUsed.toLocaleString()} / {overlay.cargoCapacity.toLocaleString()}
+                    {overlay.cargoCapacity > 0 && overlay.cargoUsed >= overlay.cargoCapacity
+                      ? ` • ${l("Pleine", "Full")}`
+                      : ""}
+                  </small>
+                  {overlay.cargoCapacity > 0 && overlay.cargoUsed >= overlay.cargoCapacity ? (
+                    <small className="sector-field-live-capacity-note">
+                      {l("La flotte a atteint sa capacite cargo.", "The fleet has reached its cargo capacity.")}
+                    </small>
+                  ) : null}
+                </>
               )}
             </div>
-          ) : null}
+          ))}
 
           {sectorPlayerPlanets.map((playerPlanet) => (
             <div
@@ -6361,22 +8762,23 @@ function SectorMapScreen({
               </button>
             );
           })}
+          </div>
         </div>
       </section>
 
       <aside className={`sector-sidebar ${sidebarOpen ? "open" : "collapsed"}`}>
-        <div className="sector-sidebar-toggle-row">
-          <button
-            type="button"
-            className="sector-sidebar-toggle-btn"
-            onClick={() => setSidebarOpen((prev) => !prev)}
-          >
-            {sidebarOpen ? l("Replier", "Collapse") : l("Ouvrir", "Open")}
-          </button>
+        <button
+          type="button"
+          className={`sector-sidebar-chevron ${sidebarOpen ? "open" : "collapsed"}`}
+          onClick={() => setSidebarOpen((prev) => !prev)}
+          aria-label={sidebarOpen ? l("Replier la barre laterale", "Collapse sidebar") : l("Ouvrir la barre laterale", "Open sidebar")}
+          title={sidebarOpen ? l("Replier", "Collapse") : l("Ouvrir", "Open")}
+        >
+          <ChevronRight size={18} strokeWidth={2.5} />
           {!sidebarOpen && dailyAvailableCount > 0 ? (
-            <span className="sector-sidebar-badge">{dailyAvailableCount > 99 ? "99+" : dailyAvailableCount}</span>
+            <span className="sector-sidebar-badge sector-sidebar-chevron-badge">{dailyAvailableCount > 99 ? "99+" : dailyAvailableCount}</span>
           ) : null}
-        </div>
+        </button>
 
         {sidebarOpen ? (
           <>
@@ -6432,14 +8834,14 @@ function SectorMapScreen({
               <h3><Hourglass size={15} /> {l("Exploitation", "Harvesting")}</h3>
               {mapLoadError ? <p className="sector-map-error">{mapLoadError}</p> : null}
               {mapActionError ? <p className="sector-map-error">{mapActionError}</p> : null}
-              {mapExpedition ? (
+              {primaryMapExpedition && primaryExpeditionState ? (
                 <div className="sector-map-expedition">
                   <div>
                     <span>{l("Statut", "Status")}</span>
                     <strong>
-                      {mapExpedition.status === "travel_to_field"
+                      {primaryExpeditionState.status === "travel_to_field"
                         ? l("Trajet aller", "Traveling")
-                        : mapExpedition.status === "extracting"
+                        : primaryExpeditionState.status === "extracting"
                           ? l("Extraction", "Extracting")
                           : l("Retour", "Returning")}
                     </strong>
@@ -6447,35 +8849,51 @@ function SectorMapScreen({
                   <div>
                     <span>{l("Fin estimee", "ETA")}</span>
                     <strong>
-                      {new Date(
-                        (mapExpedition.status === "returning"
-                          ? mapExpedition.returnEndAt
-                          : mapExpedition.status === "extracting"
-                            ? mapExpedition.extractionEndAt
-                            : mapExpedition.arrivalAt) * 1000
-                      ).toLocaleTimeString()}
+                      {new Date(primaryExpeditionState.endAt * 1000).toLocaleTimeString()}
                     </strong>
                   </div>
                   <div>
                     <span>{l("Vitesse de collecte", "Harvest speed")}</span>
-                    <strong>{mapExpedition.totalHarvestSpeed.toLocaleString()}</strong>
+                    <strong>{primaryMapExpedition.totalHarvestSpeed.toLocaleString()}</strong>
                   </div>
-                  {mapExpedition.status === "extracting" ? (
+                  {primaryExpeditionState.status === "extracting" ? (
                     <div className="sector-map-live-gains">
                       <p>{l("Ressources cumulées", "Accumulated resources")}</p>
                       {mapLiveCollectedRows.length <= 0 ? (
                         <small>{l("Extraction en cours...", "Extraction in progress...")}</small>
                       ) : (
-                        mapLiveCollectedRows.map((row) => (
-                          <div key={`map_gain_${row.resourceId}`} className="sector-map-live-gain-row">
-                            <span>{resourceDisplayName(row.resourceId, language)}</span>
-                            <strong>+{row.amount.toLocaleString()}</strong>
-                          </div>
-                        ))
+                        <>
+                          {mapLiveCollectedRows.map((row) => (
+                            <div key={`map_gain_${row.resourceId}`} className="sector-map-live-gain-row">
+                              <span>{resourceDisplayName(row.resourceId, language)}</span>
+                              <strong>+{row.amount.toLocaleString()}</strong>
+                            </div>
+                          ))}
+                          {primaryLiveExtractionOverlay ? (
+                            <>
+                              <small className={`sector-field-live-capacity ${primaryLiveExtractionOverlay.cargoCapacity > 0 && primaryLiveExtractionOverlay.cargoUsed >= primaryLiveExtractionOverlay.cargoCapacity ? "full" : ""}`}>
+                                {l("Soute", "Cargo")}: {primaryLiveExtractionOverlay.cargoUsed.toLocaleString()} / {primaryLiveExtractionOverlay.cargoCapacity.toLocaleString()}
+                                {primaryLiveExtractionOverlay.cargoCapacity > 0 && primaryLiveExtractionOverlay.cargoUsed >= primaryLiveExtractionOverlay.cargoCapacity
+                                  ? ` • ${l("Pleine", "Full")}`
+                                  : ""}
+                              </small>
+                              {primaryLiveExtractionOverlay.cargoCapacity > 0 && primaryLiveExtractionOverlay.cargoUsed >= primaryLiveExtractionOverlay.cargoCapacity ? (
+                                <small className="sector-field-live-capacity-note">
+                                  {l("La flotte a atteint sa capacite cargo.", "The fleet has reached its cargo capacity.")}
+                                </small>
+                              ) : null}
+                            </>
+                          ) : null}
+                        </>
                       )}
                     </div>
                   ) : null}
-                  <button type="button" className="sector-save-marker" onClick={() => void recallHarvestFleet()} disabled={mapActionBusy || mapExpedition.status === "returning"}>
+                  <button
+                    type="button"
+                    className="sector-save-marker"
+                    onClick={() => void recallHarvestFleet(primaryMapExpedition.id)}
+                    disabled={mapActionBusy || primaryExpeditionState.status === "returning"}
+                  >
                     {mapActionBusy ? l("Action...", "Processing...") : l("Rappeler la flotte", "Recall fleet")}
                   </button>
                 </div>
@@ -6535,30 +8953,35 @@ function SectorMapScreen({
                       <span className="quest-badge">{dailyAvailableCount > 99 ? "99+" : dailyAvailableCount}</span>
                     ) : null}
                   </summary>
-                  <p className="quest-reset">{l("Renouvellement dans 13h 24m", "Refresh in 13h 24m")}</p>
+                  <p className="quest-reset">{dailyHarvestQuestResetLabel}</p>
                   <div className="quest-list">
-                    {dailyQuests.map((quest) => {
-                      const ratio = Math.min(100, Math.round((quest.progress / quest.target) * 100));
-                      const complete = quest.progress >= quest.target;
-                      return (
-                        <article key={quest.id} className="quest-card">
-                          <header>
-                            <strong>{l(quest.titleFr, quest.titleEn)}</strong>
-                            <span>{l(quest.rewardFr, quest.rewardEn)}</span>
-                          </header>
-                          <p>{l(quest.descriptionFr, quest.descriptionEn)}</p>
-                          <div className="quest-progress">
-                            <div style={{ width: `${ratio}%` }} />
-                          </div>
-                          <div className="quest-foot">
-                            <small>{quest.progress.toLocaleString()} / {quest.target.toLocaleString()}</small>
-                            <button type="button" disabled={!complete || quest.claimed} onClick={() => claimQuest(quest.id)}>
-                              {quest.claimed ? l("Recupere", "Claimed") : complete ? l("Recuperer", "Claim") : l("En cours", "In progress")}
-                            </button>
-                          </div>
-                        </article>
-                      );
-                    })}
+                    {dailyQuestCards.map((quest) => (
+                      <article key={quest.id} className="quest-card">
+                        <header>
+                          <strong>{l(quest.titleFr, quest.titleEn)}</strong>
+                          <span>{l(quest.rewardFr, quest.rewardEn)}</span>
+                        </header>
+                        <p>{l(quest.descriptionFr, quest.descriptionEn)}</p>
+                        <div className="quest-progress">
+                          <div style={{ width: `${quest.ratio}%` }} />
+                        </div>
+                        <div className="quest-foot">
+                          <small>{quest.progressLabel}</small>
+                          <button
+                            type="button"
+                            className={quest.complete && !quest.claimed ? "ready" : ""}
+                            disabled={!quest.complete || quest.claimed}
+                            onClick={() => claimDailyQuest(quest.id)}
+                          >
+                            {quest.claimed
+                              ? l("Recupere", "Claimed")
+                              : quest.complete
+                                ? l(quest.rewardFr, quest.rewardEn)
+                                : l("En cours", "In progress")}
+                          </button>
+                        </div>
+                      </article>
+                    ))}
                   </div>
                 </details>
               </div>
@@ -8672,7 +11095,7 @@ function RankingScreen({
     rows.map((entry, index) => {
       const metadata = parseJsonObject(entry?.metadata);
       const rank = Math.max(1, Math.floor(Number(entry?.rank ?? index + 1)));
-      const score = Math.max(0, Math.floor(Number(entry?.score ?? 0)));
+      const score = formatDisplayedScoreValue(Number(entry?.score ?? 0));
       const subscore = Math.max(0, Math.floor(Number(entry?.subscore ?? 0)));
       const ownerId = String(entry?.ownerId ?? "");
       const allianceId = String(metadata?.allianceId ?? "");
@@ -8717,7 +11140,7 @@ function RankingScreen({
       <section className="ranking-summary-grid">
         <article className="ranking-summary-card">
           <small>{l("Votre score", "Your score")}</small>
-          <strong>{Math.max(0, Math.floor(Number(playerPoints || 0))).toLocaleString()}</strong>
+          <strong>{formatDisplayedScoreValue(playerPoints).toLocaleString()}</strong>
         </article>
         <article className="ranking-summary-card">
           <small>{l("Votre rang", "Your rank")}</small>
@@ -8798,6 +11221,7 @@ function TechnologyScreen({
   technologyLevels,
   researchJob,
   researchRemainingSeconds,
+  researchTimeFactor,
   resourceAmounts,
   inventoryItems,
   inventoryLoading,
@@ -8809,6 +11233,7 @@ function TechnologyScreen({
   technologyLevels: Record<TechnologyId, number>;
   researchJob: ResearchJob | null;
   researchRemainingSeconds: number;
+  researchTimeFactor: number;
   resourceAmounts: Record<string, number>;
   inventoryItems: InventoryViewItem[];
   inventoryLoading: boolean;
@@ -8920,7 +11345,7 @@ function TechnologyScreen({
                 const atMax = Boolean(def.maxLevel && currentLevel >= def.maxLevel);
                 const targetLevel = currentLevel + 1;
                 const nextCost = technologyCostForLevel(def, targetLevel);
-                const nextTime = technologyTimeForLevel(def, targetLevel);
+                const nextTime = Math.max(1, Math.floor(technologyTimeForLevel(def, targetLevel) * researchTimeFactor));
                 const reqMet = technologyRequirementsMet(technologyLevels, def);
                 const canPay = canAffordCost(resourceAmounts, nextCost);
                 const isCurrent = researchJob?.technologyId === def.id;
@@ -9274,10 +11699,11 @@ function WikiScreen({ language }: { language: UILanguage }) {
         <div className="wiki-toc-links">
           <a href="#wiki-tutoriel">{l("1. Tutoriel de progression", "1. Progression tutorial")}</a>
           <a href="#wiki-batiments">{l("2. Les Batiments", "2. Buildings")}</a>
-          <a href="#wiki-vaisseaux">{l("3. Vaisseaux & Defenses", "3. Ships & Defenses")}</a>
-          <a href="#wiki-technologies">{l("4. Les Technologies", "4. Technologies")}</a>
-          <a href="#wiki-champs">{l("5. Carte & Champs de ressources", "5. Map & Resource fields")}</a>
-          <a href="#wiki-inbox">{l("6. Messagerie & Recompenses", "6. Inbox & Rewards")}</a>
+          <a href="#wiki-population">{l("3. Population & Societe", "3. Population & Society")}</a>
+          <a href="#wiki-vaisseaux">{l("4. Vaisseaux & Defenses", "4. Ships & Defenses")}</a>
+          <a href="#wiki-technologies">{l("5. Les Technologies", "5. Technologies")}</a>
+          <a href="#wiki-champs">{l("6. Carte & Champs de ressources", "6. Map & Resource fields")}</a>
+          <a href="#wiki-inbox">{l("7. Messagerie & Recompenses", "7. Inbox & Rewards")}</a>
         </div>
       </nav>
 
@@ -9481,9 +11907,301 @@ Storage(n) = Storage_base x 1.6^(n - 1)`}
         </div>
       </section>
 
+      <section id="wiki-population" className="wiki-section">
+        <header className="wiki-section-head">
+          <h3>{l("3. Population & Societe", "3. Population & Society")}</h3>
+          <p>
+            {l(
+              "La population pilote production, construction, recherche et stabilite. C'est une couche strategique majeure du jeu.",
+              "Population drives production, construction, research, and stability. It is a major strategic layer."
+            )}
+          </p>
+        </header>
+
+        <div className="wiki-note">
+          <strong>{l("Principe cle", "Key principle")}</strong>
+          <span>
+            {l(
+              "La croissance est continue, mais les bonus ne s'appliquent que si votre colonie reste stable (logement, nourriture, ordre social).",
+              "Growth is continuous, but bonuses apply only if your colony stays stable (housing, food, social order)."
+            )}
+          </span>
+        </div>
+
+        <div className="wiki-info-grid">
+          <article className="wiki-info-card">
+            <strong>{l("Classes de population", "Population classes")}</strong>
+            <span>
+              {l(
+                "Travailleurs (economie), Ingenieurs (construction), Scientifiques (recherche). La repartition evolue avec les batiments civils.",
+                "Workers (economy), Engineers (construction), Scientists (research). Distribution evolves with civil buildings."
+              )}
+            </span>
+          </article>
+          <article className="wiki-info-card">
+            <strong>{l("Bonus directs", "Direct bonuses")}</strong>
+            <span>
+              {l(
+                "+1% production globale / 1000 habitants, -1% temps construction / 500 ingenieurs, +1% vitesse recherche / 300 scientifiques.",
+                "+1% global production / 1000 population, -1% construction time / 500 engineers, +1% research speed / 300 scientists."
+              )}
+            </span>
+          </article>
+          <article className="wiki-info-card">
+            <strong>{l("Contraintes", "Constraints")}</strong>
+            <span>
+              {l(
+                "Surpopulation = -25% production. Famine = croissance stop + chute de stabilite. Crises sociales possibles en stabilite basse.",
+                "Overcapacity = -25% production. Famine = growth halt + stability drop. Social crises can occur at low stability."
+              )}
+            </span>
+          </article>
+        </div>
+
+        <h4>{l("Variables et formules principales", "Core variables and formulas")}</h4>
+        <div className="wiki-table-wrap">
+          <table className="wiki-table">
+            <thead>
+              <tr>
+                <th>{l("Variable", "Variable")}</th>
+                <th>{l("Description", "Description")}</th>
+                <th>{l("Regle / Formule", "Rule / Formula")}</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>{l("Population totale", "Total population")}</td>
+                <td>{l("Habitants actifs de la colonie", "Active colony inhabitants")}</td>
+                <td>{l("Base persistante + croissance horaire", "Persistent base + hourly growth")}</td>
+              </tr>
+              <tr>
+                <td>{l("Capacite habitation", "Housing capacity")}</td>
+                <td>{l("Plafond avant surpopulation", "Ceiling before overcapacity")}</td>
+                <td>{l("Base 500 + bonus batiments civils", "Base 500 + civil building bonuses")}</td>
+              </tr>
+              <tr>
+                <td>{l("Croissance", "Growth")}</td>
+                <td>{l("Augmentation naturelle", "Natural increase")}</td>
+                <td>{l("population x 0.004 / h + migration", "population x 0.004 / h + migration")}</td>
+              </tr>
+              <tr>
+                <td>{l("Nourriture", "Food")}</td>
+                <td>{l("Reserve de soutien", "Support reserve")}</td>
+                <td>{l("Conso = population/h, prod via cantines", "Consumption = population/h, production via canteens")}</td>
+              </tr>
+              <tr>
+                <td>{l("Stabilite", "Stability")}</td>
+                <td>{l("Ordre social (0-100)", "Social order (0-100)")}</td>
+                <td>{l("Influe directement la production et les crises", "Directly impacts production and crises")}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <details className="wiki-spoiler">
+          <summary>{l("Formules detaillees (version gameplay)", "Detailed formulas (gameplay version)")}</summary>
+          <pre>
+{l(
+`Croissance_base/h = population x 0.004
+Migration/h = population x attractivite
+Croissance_finale/h = 0 si famine OU surpopulation
+sinon Croissance_base x modificateurs + Migration
+
+Bonus_prod_population = floor(population / 1000) x 1%
+Bonus_construction = floor(ingenieurs / 500) x 1%
+Bonus_recherche = floor(scientifiques / 300) x 1%
+
+Surpopulation -> -25% production
+Famine -> croissance stop + choc de stabilite
+Stabilite faible -> malus prod + risque de crise`,
+`Base_growth/h = population x 0.004
+Migration/h = population x attractiveness
+Final_growth/h = 0 if famine OR overcapacity
+otherwise Base_growth x modifiers + Migration
+
+Population_prod_bonus = floor(population / 1000) x 1%
+Construction_bonus = floor(engineers / 500) x 1%
+Research_bonus = floor(scientists / 300) x 1%
+
+Overcapacity -> -25% production
+Famine -> growth halt + stability shock
+Low stability -> production penalties + crisis risk`
+)}
+          </pre>
+        </details>
+
+        <h4>{l("Repartition des classes", "Class distribution")}</h4>
+        <div className="wiki-table-wrap">
+          <table className="wiki-table">
+            <thead>
+              <tr>
+                <th>{l("Classe", "Class")}</th>
+                <th>{l("Ratio de base", "Base ratio")}</th>
+                <th>{l("Effet principal", "Primary effect")}</th>
+                <th>{l("Palier de bonus", "Bonus threshold")}</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>{l("Travailleurs", "Workers")}</td>
+                <td>~70%</td>
+                <td>{l("Alimentent les batiments de production", "Feed production buildings")}</td>
+                <td>{l("Manque de travailleurs = rendement reduit", "Worker shortage = reduced yield")}</td>
+              </tr>
+              <tr>
+                <td>{l("Ingenieurs", "Engineers")}</td>
+                <td>~20%</td>
+                <td>{l("Accelerent les constructions", "Speed up constructions")}</td>
+                <td>500 {l("ingenieurs", "engineers")} = -1% {l("temps", "time")}</td>
+              </tr>
+              <tr>
+                <td>{l("Scientifiques", "Scientists")}</td>
+                <td>~10%</td>
+                <td>{l("Accelerent les recherches", "Speed up research")}</td>
+                <td>300 {l("scientifiques", "scientists")} = +1% {l("vitesse", "speed")}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h4>{l("Stabilite: bandes d'effet", "Stability effect bands")}</h4>
+        <div className="wiki-table-wrap">
+          <table className="wiki-table">
+            <thead>
+              <tr>
+                <th>{l("Stabilite", "Stability")}</th>
+                <th>{l("Etat", "State")}</th>
+                <th>{l("Impact", "Impact")}</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td>90+</td><td>{l("Excellent", "Excellent")}</td><td>{l("Bonus de production", "Production bonus")}</td></tr>
+              <tr><td>70-89</td><td>{l("Stable", "Stable")}</td><td>{l("Regime normal", "Normal regime")}</td></tr>
+              <tr><td>50-69</td><td>{l("Fragile", "Fragile")}</td><td>{l("Malus legers", "Light penalties")}</td></tr>
+              <tr><td>30-49</td><td>{l("Troubles", "Unrest")}</td><td>{l("Malus forts + risque crise", "Strong penalties + crisis risk")}</td></tr>
+              <tr><td>&lt;30</td><td>{l("Revolte", "Revolt")}</td><td>{l("Impact severe sur l'economie", "Severe economic impact")}</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h4>{l("Main d'oeuvre et equipages", "Workforce and crews")}</h4>
+        <div className="wiki-table-wrap">
+          <table className="wiki-table">
+            <thead>
+              <tr>
+                <th>{l("Bloc", "Block")}</th>
+                <th>{l("Exigence niveau 1", "Level 1 requirement")}</th>
+                <th>{l("Detail", "Detail")}</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>{l("Raffinerie Carbone", "Carbon Refinery")}</td>
+                <td>50</td>
+                <td>{l("Le besoin augmente avec les niveaux", "Requirement scales with levels")}</td>
+              </tr>
+              <tr>
+                <td>{l("Fabrique Titane", "Titanium Factory")}</td>
+                <td>60</td>
+                <td>{l("Le besoin augmente avec les niveaux", "Requirement scales with levels")}</td>
+              </tr>
+              <tr>
+                <td>{l("Compacteur Osmium", "Osmium Compactor")}</td>
+                <td>80</td>
+                <td>{l("Le besoin augmente avec les niveaux", "Requirement scales with levels")}</td>
+              </tr>
+              <tr>
+                <td>{l("Synchrotron Adamantium", "Adamantium Synchrotron")}</td>
+                <td>120</td>
+                <td>{l("Le besoin augmente avec les niveaux", "Requirement scales with levels")}</td>
+              </tr>
+              <tr>
+                <td>{l("Vaisseaux (equipage)", "Ships (crew)")}</td>
+                <td>{l("Variable selon unite", "Varies by unit")}</td>
+                <td>{l("Ex: Eclaireur 5, Titanide 30, Colosse 80", "Ex: Scout 5, Titanid 30, Colossus 80")}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h4>{l("Batiments civils de population", "Civil population buildings")}</h4>
+        <div className="wiki-table-wrap">
+          <table className="wiki-table">
+            <thead>
+              <tr>
+                <th>{l("Batiment", "Building")}</th>
+                <th>{l("Deblocage", "Unlock")}</th>
+                <th>{l("Role", "Role")}</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td>{l("Quartiers residentiels", "Residential Quarters")}</td><td>0</td><td>{l("+capacite habitation, +stabilite", "+housing capacity, +stability")}</td></tr>
+              <tr><td>{l("Cantine hydroponique", "Hydroponic Canteen")}</td><td>0</td><td>{l("+production nourriture", "+food production")}</td></tr>
+              <tr><td>{l("Centre medical", "Medical Center")}</td><td>500</td><td>{l("+croissance, +sante, +stabilite", "+growth, +health, +stability")}</td></tr>
+              <tr><td>{l("Parc orbital", "Orbital Park")}</td><td>500</td><td>{l("+loisirs, +stabilite", "+leisure, +stability")}</td></tr>
+              <tr><td>{l("Academie technique", "Technical Academy")}</td><td>2000</td><td>{l("+part Ingenieurs", "+Engineer share")}</td></tr>
+              <tr><td>{l("Universite orbitale", "Orbital University")}</td><td>8000</td><td>{l("+part Scientifiques", "+Scientist share")}</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h4>{l("Exemples concrets", "Concrete examples")}</h4>
+        <div className="wiki-table-wrap">
+          <table className="wiki-table">
+            <thead>
+              <tr>
+                <th>{l("Situation", "Situation")}</th>
+                <th>{l("Calcul", "Calculation")}</th>
+                <th>{l("Resultat", "Result")}</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>{l("Population 12 450", "Population 12,450")}</td>
+                <td>floor(12 450 / 1000) = 12</td>
+                <td>{l("+12% production globale", "+12% global production")}</td>
+              </tr>
+              <tr>
+                <td>{l("Ingenieurs 2 500", "Engineers 2,500")}</td>
+                <td>floor(2 500 / 500) = 5</td>
+                <td>{l("-5% temps de construction", "-5% construction time")}</td>
+              </tr>
+              <tr>
+                <td>{l("Scientifiques 1 350", "Scientists 1,350")}</td>
+                <td>floor(1 350 / 300) = 4</td>
+                <td>{l("+4% vitesse de recherche", "+4% research speed")}</td>
+              </tr>
+              <tr>
+                <td>{l("Croissance brute a 12 450 hab.", "Base growth at 12,450 pop")}</td>
+                <td>12 450 x 0.004 = 49.8 /h</td>
+                <td>{l("~50 habitants/h avant modifs", "~50 pop/h before modifiers")}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <details className="wiki-spoiler">
+          <summary>{l("FAQ population", "Population FAQ")}</summary>
+          <div className="wiki-faq-list">
+            <article className="wiki-faq-item">
+              <strong>{l("Pourquoi ma population ne monte plus ?", "Why did my population stop growing?")}</strong>
+              <span>{l("Cause principale: famine ou surpopulation. Verifiez nourriture et capacite habitation.", "Main causes: famine or overcapacity. Check food and housing capacity.")}</span>
+            </article>
+            <article className="wiki-faq-item">
+              <strong>{l("Pourquoi ma production baisse alors que mes batiments montent ?", "Why is production lower while my buildings level up?")}</strong>
+              <span>{l("Souvent manque de travailleurs, stabilite faible, ou crise sociale active.", "Usually worker shortage, low stability, or an active social crisis.")}</span>
+            </article>
+            <article className="wiki-faq-item">
+              <strong>{l("Comment debloquer les batiments de population avances ?", "How do I unlock advanced population buildings?")}</strong>
+              <span>{l("Atteignez les paliers de population (500, 2000, 8000) et maintenez une colonie stable.", "Reach population thresholds (500, 2,000, 8,000) and keep colony stability high.")}</span>
+            </article>
+          </div>
+        </details>
+      </section>
+
       <section id="wiki-vaisseaux" className="wiki-section">
         <header className="wiki-section-head">
-          <h3>{l("3. Vaisseaux & Defenses", "3. Ships & Defenses")}</h3>
+          <h3>{l("4. Vaisseaux & Defenses", "4. Ships & Defenses")}</h3>
           <p>{l("Le systeme militaire combine puissance brute, endurance, vitesse, capacite et energie quantique.", "The military system combines raw power, endurance, speed, capacity and quantum energy.")}</p>
         </header>
 
@@ -9583,7 +12301,7 @@ Storage(n) = Storage_base x 1.6^(n - 1)`}
 
       <section id="wiki-technologies" className="wiki-section">
         <header className="wiki-section-head">
-          <h3>{l("4. Les Technologies", "4. Technologies")}</h3>
+          <h3>{l("5. Les Technologies", "5. Technologies")}</h3>
           <p>{l("Progression scientifique a croissance exponentielle: economie, combat, defense, commandement et energie.", "Exponential scientific progression: economy, combat, defense, command and energy.")}</p>
         </header>
 
@@ -9654,7 +12372,7 @@ Bonuses stack multiplicatively`
 
       <section id="wiki-champs" className="wiki-section">
         <header className="wiki-section-head">
-          <h3>{l("5. Carte & Champs de ressources", "5. Map & Resource fields")}</h3>
+          <h3>{l("6. Carte & Champs de ressources", "6. Map & Resource fields")}</h3>
           <p>
             {l(
               "Les champs de ressources ajoutent une economie opportuniste: trajet court, exploitation longue, risque PvP et gains differes au retour.",
@@ -9957,7 +12675,7 @@ returnedAmount = min(collectedAmount, fleetTransportCapacity)`}
 
       <section id="wiki-inbox" className="wiki-section">
         <header className="wiki-section-head">
-          <h3>{l("6. Messagerie & Recompenses", "6. Inbox & Rewards")}</h3>
+          <h3>{l("7. Messagerie & Recompenses", "7. Inbox & Rewards")}</h3>
           <p>
             {l(
               "La messagerie est persistante et separee du chat: rapports, recompenses, systeme et conversations joueurs.",
@@ -10077,11 +12795,415 @@ returnedAmount = min(collectedAmount, fleetTransportCapacity)`}
   );
 }
 
+function PopulationScreen({
+  language,
+  snapshot,
+  rooms,
+  resourceAmounts,
+  buildingCostReductionFactor,
+  buildingTimeReductionFactor,
+  onNavigate
+}: {
+  language: UILanguage;
+  snapshot: PopulationSnapshot;
+  rooms: Room[];
+  resourceAmounts: Record<string, number>;
+  buildingCostReductionFactor: number;
+  buildingTimeReductionFactor: number;
+  onNavigate: (screen: UIScreen) => void;
+}) {
+  const l = (fr: string, en: string) => (language === "en" ? en : fr);
+  const roomLevels = useMemo(() => buildRoomLevelMap(rooms), [rooms]);
+  const populationFillPct = Math.max(0, Math.min(100, (snapshot.totalPopulation / Math.max(1, snapshot.capacity)) * 100));
+  const foodFillPct = Math.max(0, Math.min(100, (snapshot.foodStock / Math.max(1, snapshot.foodCapacity)) * 100));
+  const workforceLoadPct = Math.max(0, Math.min(100, (snapshot.requiredWorkers / Math.max(1, snapshot.workers)) * 100));
+  const constructionSpeedPct = (1 / Math.max(0.01, snapshot.constructionTimeFactor) - 1) * 100;
+  const researchSpeedPct = (1 / Math.max(0.01, snapshot.researchTimeFactor) - 1) * 100;
+
+  const populationBuildingOrder: PopulationBuildingId[] = [
+    "quartiers_residentiels",
+    "cantine_hydroponique",
+    "centre_medical",
+    "parc_orbital",
+    "academie_technique",
+    "universite_orbitale"
+  ];
+
+  const nextPopulationUnlock = useMemo(() => {
+    const rows = (Object.entries(POPULATION_BUILD_UNLOCK_MIN) as Array<[PopulationBuildingId, number]>)
+      .filter(([, minPopulation]) => Number(minPopulation) > snapshot.totalPopulation)
+      .sort((a, b) => a[1] - b[1]);
+    if (rows.length <= 0) return null;
+    const [roomType, minPopulation] = rows[0];
+    return { roomType, minPopulation };
+  }, [snapshot.totalPopulation]);
+
+  const buildingRows = useMemo(() => {
+    const formatPercent = (value: number) => `${value >= 0 ? "+" : ""}${(value * 100).toFixed(1)}%`;
+    return populationBuildingOrder.map((roomType) => {
+      const level = Math.max(0, Math.floor(Number(roomLevels[roomType] ?? 0)));
+      const unlocked = isPopulationBuildingUnlocked(roomType, snapshot.totalPopulation);
+      const unlockPopulation = POPULATION_BUILD_UNLOCK_MIN[roomType] ?? 0;
+      const nextLevel = Math.max(1, level + 1);
+      const nextCost = costForLevel(roomType, nextLevel, buildingCostReductionFactor);
+      const nextTimeSec = buildSecondsForLevel(roomType, nextLevel, buildingTimeReductionFactor);
+      const effects = POPULATION_BUILDING_EFFECTS[roomType] ?? {};
+      const effectRows: string[] = [];
+      if (effects.housingCapPerLevel) {
+        effectRows.push(l(`+${Math.floor(effects.housingCapPerLevel).toLocaleString()} capacite habitation / niveau`, `+${Math.floor(effects.housingCapPerLevel).toLocaleString()} housing capacity / level`));
+      }
+      if (effects.foodPerHourPerLevel) {
+        effectRows.push(l(`+${Math.floor(effects.foodPerHourPerLevel).toLocaleString()}/h nourriture / niveau`, `+${Math.floor(effects.foodPerHourPerLevel).toLocaleString()}/h food / level`));
+      }
+      if (effects.growthBonusPerLevel) {
+        effectRows.push(l(`${formatPercent(effects.growthBonusPerLevel)} croissance / niveau`, `${formatPercent(effects.growthBonusPerLevel)} growth / level`));
+      }
+      if (effects.stabilityPerLevel) {
+        effectRows.push(l(`+${effects.stabilityPerLevel.toFixed(2)} stabilite structurelle / niveau`, `+${effects.stabilityPerLevel.toFixed(2)} structural stability / level`));
+      }
+      if (effects.leisurePerLevel) {
+        effectRows.push(l(`+${effects.leisurePerLevel.toFixed(2)} score loisirs / niveau`, `+${effects.leisurePerLevel.toFixed(2)} leisure score / level`));
+      }
+      if (effects.healthPerLevel) {
+        effectRows.push(l(`+${effects.healthPerLevel.toFixed(2)} score sante / niveau`, `+${effects.healthPerLevel.toFixed(2)} health score / level`));
+      }
+      if (effects.engineerSharePerLevel) {
+        effectRows.push(l(`${formatPercent(effects.engineerSharePerLevel)} part ingenieurs / niveau`, `${formatPercent(effects.engineerSharePerLevel)} engineers share / level`));
+      }
+      if (effects.scientistSharePerLevel) {
+        effectRows.push(l(`${formatPercent(effects.scientistSharePerLevel)} part scientifiques / niveau`, `${formatPercent(effects.scientistSharePerLevel)} scientists share / level`));
+      }
+      return {
+        roomType,
+        level,
+        unlocked,
+        unlockPopulation,
+        nextCost,
+        nextTimeSec,
+        effectRows
+      };
+    });
+  }, [buildingCostReductionFactor, buildingTimeReductionFactor, language, roomLevels, snapshot.totalPopulation]);
+
+  const adviceRows = useMemo(() => {
+    const rows: Array<{
+      id: string;
+      tone: "good" | "warn" | "danger";
+      title: string;
+      text: string;
+      actionLabel?: string;
+      actionScreen?: UIScreen;
+    }> = [];
+
+    if (snapshot.isOverCapacity) {
+      rows.push({
+        id: "over_capacity",
+        tone: "danger",
+        title: l("Surpopulation active", "Overcapacity active"),
+        text: l(
+          "Votre production subit deja -25%. Priorite absolue: monter Quartiers residentiels pour augmenter la capacite.",
+          "Your production already suffers -25%. Top priority: upgrade Residential Quarters to increase capacity."
+        ),
+        actionLabel: l("Ouvrir Jeu", "Open Game"),
+        actionScreen: "game"
+      });
+    }
+
+    if (snapshot.foodShortage || snapshot.foodBalancePerHour < 0) {
+      rows.push({
+        id: "food_shortage",
+        tone: "danger",
+        title: l("Nourriture critique", "Critical food"),
+        text: l(
+          "La croissance s'arrete et la stabilite chute. Montez Cantine hydroponique et securisez les ressources de base.",
+          "Growth is halted and stability drops. Upgrade Hydroponic Canteen and secure base resources."
+        ),
+        actionLabel: l("Voir Ressources", "Open Resources"),
+        actionScreen: "resources"
+      });
+    }
+
+    if (snapshot.stability < 70) {
+      rows.push({
+        id: "stability_low",
+        tone: "warn",
+        title: l("Stabilite fragile", "Fragile stability"),
+        text: l(
+          "Sous 70%, des malus apparaissent. Parc orbital et Centre medical sont les leviers les plus efficaces.",
+          "Below 70%, penalties apply. Orbital Park and Medical Center are your best levers."
+        ),
+        actionLabel: l("Aller a Jeu", "Go to Game"),
+        actionScreen: "game"
+      });
+    }
+
+    if (snapshot.requiredWorkers > snapshot.workers) {
+      rows.push({
+        id: "workers_short",
+        tone: "warn",
+        title: l("Main-d'oeuvre insuffisante", "Insufficient workforce"),
+        text: l(
+          "Vos exploitations tournent en sous-regime. Augmentez la population totale et evitez de surmultiplier les lignes de production.",
+          "Your extraction lines are under-powered. Increase total population and avoid overexpanding production lines."
+        ),
+        actionLabel: l("Plan population", "Population plan"),
+        actionScreen: "population"
+      });
+    }
+
+    if (snapshot.growthPerHour <= 0) {
+      rows.push({
+        id: "growth_zero",
+        tone: "warn",
+        title: l("Croissance nulle", "Zero growth"),
+        text: l(
+          "Sans croissance, vous bloquez votre progression long terme. Verifiez capacite, nourriture et stabilite.",
+          "Without growth, long-term progression stalls. Check capacity, food, and stability."
+        ),
+        actionLabel: l("Voir stats", "Review stats"),
+        actionScreen: "population"
+      });
+    }
+
+    if (!snapshot.isOverCapacity && !snapshot.foodShortage && snapshot.stability >= 85) {
+      rows.push({
+        id: "good_state",
+        tone: "good",
+        title: l("Etat sain", "Healthy state"),
+        text: l(
+          "Votre colonie est stable. Vous pouvez pousser les batiments avances (Academie, Universite) pour accelerer construction et recherche.",
+          "Your colony is stable. You can push advanced buildings (Academy, University) to speed up construction and research."
+        ),
+        actionLabel: l("Ouvrir Technologie", "Open Technology"),
+        actionScreen: "technology"
+      });
+    }
+
+    if (rows.length < 3) {
+      rows.push({
+        id: "default_balance",
+        tone: "good",
+        title: l("Routine recommandee", "Recommended routine"),
+        text: l(
+          "Gardez un oeil sur 3 indicateurs: capacite habitation, balance nourriture, stabilite. Ajustez avant de lancer des upgrades lourds.",
+          "Monitor 3 indicators: housing capacity, food balance, and stability. Adjust before launching heavy upgrades."
+        ),
+        actionLabel: l("Retour Jeu", "Back to Game"),
+        actionScreen: "game"
+      });
+    }
+
+    return rows.slice(0, 5);
+  }, [language, snapshot]);
+
+  const signedPct = (value: number) => `${value >= 0 ? "+" : ""}${value.toFixed(1)}%`;
+
+  return (
+    <main className="population-shell-page">
+      <section className="population-hero">
+        <div>
+          <h2>{l("Centre de commandement population", "Population command center")}</h2>
+          <p>
+            {l(
+              "Pilotez votre croissance, votre stabilite et vos bonus de production. Cette page explique chaque mecanique avec vos valeurs en direct.",
+              "Control your growth, stability, and production modifiers. This page explains each mechanic with your live values."
+            )}
+          </p>
+        </div>
+        <div className="population-hero-actions">
+          <button type="button" onClick={() => onNavigate("game")}>{l("Aller a Jeu", "Go to Game")}</button>
+          <button type="button" onClick={() => onNavigate("resources")}>{l("Voir Ressources", "View Resources")}</button>
+          <button type="button" onClick={() => onNavigate("technology")}>{l("Voir Technologie", "View Technology")}</button>
+        </div>
+      </section>
+
+      <section className="population-kpi-grid-page">
+        <article className="population-kpi-card">
+          <small>{l("Population", "Population")}</small>
+          <strong>{snapshot.totalPopulation.toLocaleString()} / {snapshot.capacity.toLocaleString()}</strong>
+          <div className="population-kpi-track"><div style={{ width: `${populationFillPct}%` }} /></div>
+        </article>
+        <article className="population-kpi-card">
+          <small>{l("Croissance totale", "Total growth")}</small>
+          <strong>{snapshot.growthPerHour >= 0 ? "+" : ""}{snapshot.growthPerHour.toFixed(0)}/h</strong>
+          <p>{l("Migration", "Migration")}: {snapshot.migrationPerHour >= 0 ? "+" : ""}{snapshot.migrationPerHour.toFixed(0)}/h</p>
+        </article>
+        <article className="population-kpi-card">
+          <small>{l("Stabilite", "Stability")}</small>
+          <strong>{snapshot.stability.toFixed(1)}%</strong>
+          <p className={`population-band-text ${snapshot.stabilityBand}`}>
+            {populationStabilityBandLabel(snapshot.stabilityBand, language)}
+          </p>
+        </article>
+        <article className="population-kpi-card">
+          <small>{l("Nourriture", "Food")}</small>
+          <strong>{Math.floor(snapshot.foodStock).toLocaleString()} / {snapshot.foodCapacity.toLocaleString()}</strong>
+          <div className="population-kpi-track food"><div style={{ width: `${foodFillPct}%` }} /></div>
+          <p>{snapshot.foodBalancePerHour >= 0 ? "+" : ""}{snapshot.foodBalancePerHour.toFixed(0)}/h</p>
+        </article>
+        <article className="population-kpi-card">
+          <small>{l("Main-d'oeuvre", "Workforce")}</small>
+          <strong>{snapshot.requiredWorkers.toLocaleString()} / {snapshot.workers.toLocaleString()}</strong>
+          <div className="population-kpi-track workforce"><div style={{ width: `${workforceLoadPct}%` }} /></div>
+          <p>{l("Libre", "Free")}: {snapshot.availableWorkers.toLocaleString()}</p>
+        </article>
+        <article className="population-kpi-card">
+          <small>{l("Niveau civilisation", "Civilization tier")}</small>
+          <strong>{l(snapshot.civilizationTier.nameFr, snapshot.civilizationTier.nameEn)}</strong>
+          <p>{l("Evenement", "Event")}: {snapshot.activeEvent ? populationEventLabel(snapshot.activeEvent.type, language) : l("Aucun", "None")}</p>
+        </article>
+      </section>
+
+      <section className="population-main-grid">
+        <article className="population-panel-card">
+          <h3>{l("Bonus & malus actuels", "Current bonuses & penalties")}</h3>
+          <ul className="population-impact-list">
+            <li className={snapshot.productionBonusPct >= 0 ? "bonus" : "malus"}>
+              {l("Production globale", "Global production")}: {signedPct(snapshot.productionBonusPct)}
+            </li>
+            <li className={constructionSpeedPct >= 0 ? "bonus" : "malus"}>
+              {l("Vitesse construction", "Construction speed")}: {signedPct(constructionSpeedPct)}
+            </li>
+            <li className={researchSpeedPct >= 0 ? "bonus" : "malus"}>
+              {l("Vitesse recherche", "Research speed")}: {signedPct(researchSpeedPct)}
+            </li>
+            <li className={snapshot.workforceMultiplier >= 1 ? "bonus" : "malus"}>
+              {l("Efficacite main-d'oeuvre", "Workforce efficiency")}: {signedPct((snapshot.workforceMultiplier - 1) * 100)}
+            </li>
+            <li className={snapshot.foodBalancePerHour >= 0 ? "bonus" : "malus"}>
+              {l("Balance nourriture", "Food balance")}: {snapshot.foodBalancePerHour >= 0 ? "+" : ""}{snapshot.foodBalancePerHour.toFixed(0)}/h
+            </li>
+          </ul>
+
+          {nextPopulationUnlock ? (
+            <p className="population-next-unlock">
+              {l("Prochain debloquage", "Next unlock")}:{" "}
+              <strong>{roomDisplayName(nextPopulationUnlock.roomType, language)}</strong>{" "}
+              {l("a", "at")} {nextPopulationUnlock.minPopulation.toLocaleString()} {l("population", "population")}
+            </p>
+          ) : null}
+        </article>
+
+        <article className="population-panel-card">
+          <h3>{l("Conseils actionnables", "Actionable guidance")}</h3>
+          <div className="population-advice-stack">
+            {adviceRows.map((row) => (
+              <div key={row.id} className={`population-advice ${row.tone}`}>
+                <strong>{row.title}</strong>
+                <p>{row.text}</p>
+                {row.actionLabel && row.actionScreen ? (
+                  <button type="button" onClick={() => onNavigate(row.actionScreen)}>
+                    {row.actionLabel}
+                  </button>
+                ) : null}
+              </div>
+            ))}
+          </div>
+        </article>
+      </section>
+
+      <section className="population-formula-card">
+        <h3>{l("Comment fonctionne la population (didactique)", "How population works (didactic)")}</h3>
+        <div className="population-formula-table-wrap">
+          <table className="population-formula-table">
+            <thead>
+              <tr>
+                <th>{l("Mecanique", "Mechanic")}</th>
+                <th>{l("Regle", "Rule")}</th>
+                <th>{l("Votre valeur actuelle", "Your current value")}</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>{l("Croissance naturelle", "Natural growth")}</td>
+                <td>{l("Population x 0.4%/h (+ migration)", "Population x 0.4%/h (+ migration)")}</td>
+                <td>{snapshot.growthPerHour >= 0 ? "+" : ""}{snapshot.growthPerHour.toFixed(0)}/h</td>
+              </tr>
+              <tr>
+                <td>{l("Bonus production population", "Population production bonus")}</td>
+                <td>{l("+1% par tranche de 1 000 habitants", "+1% per 1,000 inhabitants")}</td>
+                <td>{l("Integre dans", "Included in")} {signedPct(snapshot.productionBonusPct)}</td>
+              </tr>
+              <tr>
+                <td>{l("Ingenieurs", "Engineers")}</td>
+                <td>{l("-1% temps construction / 500", "-1% construction time / 500")}</td>
+                <td>{snapshot.engineers.toLocaleString()} ({signedPct(snapshot.constructionSpeedBonusPct)})</td>
+              </tr>
+              <tr>
+                <td>{l("Scientifiques", "Scientists")}</td>
+                <td>{l("+1% vitesse recherche / 300", "+1% research speed / 300")}</td>
+                <td>{snapshot.scientists.toLocaleString()} ({signedPct(snapshot.researchSpeedBonusPct)})</td>
+              </tr>
+              <tr>
+                <td>{l("Surpopulation", "Overcapacity")}</td>
+                <td>{l("Si population > capacite: -25% production", "If population > capacity: -25% production")}</td>
+                <td>{snapshot.isOverCapacity ? l("Actif", "Active") : l("Inactif", "Inactive")}</td>
+              </tr>
+              <tr>
+                <td>{l("Nourriture", "Food")}</td>
+                <td>{l("Si deficit: croissance arretee + malus", "If deficit: growth halted + penalties")}</td>
+                <td>{snapshot.foodShortage ? l("Penurie active", "Shortage active") : l("Equilibre", "Balanced")}</td>
+              </tr>
+              <tr>
+                <td>{l("Stabilite", "Stability")}</td>
+                <td>{l("90+ bonus, 70-90 normal, <70 malus progressifs", "90+ bonus, 70-90 normal, <70 progressive penalties")}</td>
+                <td>{snapshot.stability.toFixed(1)}% ({populationStabilityBandLabel(snapshot.stabilityBand, language)})</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section className="population-buildings-card">
+        <h3>{l("Leviers de gestion: batiments population", "Management levers: population buildings")}</h3>
+        <div className="population-building-grid">
+          {buildingRows.map((row) => (
+            <article key={row.roomType} className={`population-building-item ${row.unlocked ? "unlocked" : "locked"}`}>
+              <header>
+                <strong>{roomDisplayName(row.roomType, language)}</strong>
+                <span>{l("Niveau", "Level")} {row.level}</span>
+              </header>
+
+              {!row.unlocked ? (
+                <p className="population-building-lock">
+                  {l("Deblocage a", "Unlock at")} {row.unlockPopulation.toLocaleString()} {l("population", "population")}
+                </p>
+              ) : null}
+
+              <ul>
+                {row.effectRows.length > 0 ? (
+                  row.effectRows.map((effect) => <li key={`${row.roomType}_${effect}`}>{effect}</li>)
+                ) : (
+                  <li>{l("Effet passif de support population.", "Passive support effect for population.")}</li>
+                )}
+              </ul>
+
+              <div className="population-building-cost">
+                <small>{l("Cout prochain niveau", "Next level cost")}</small>
+                <ResourceCostDisplay cost={row.nextCost} available={resourceAmounts} language={language} compact />
+              </div>
+
+              <p className="population-building-time">
+                {l("Temps prochain niveau", "Next level time")}: {formatDuration(row.nextTimeSec)}
+              </p>
+
+              <button type="button" onClick={() => onNavigate("game")}>
+                {l("Construire / ameliorer dans Jeu", "Build / upgrade in Game")}
+              </button>
+            </article>
+          ))}
+        </div>
+      </section>
+    </main>
+  );
+}
+
 function ResourceScreen({
   language,
   amounts,
   unlockedIds,
   rates,
+  populationSnapshot,
   technologyLevels,
   loading,
   error,
@@ -10092,6 +13214,7 @@ function ResourceScreen({
   amounts: Record<string, number>;
   unlockedIds: string[];
   rates: Record<string, number>;
+  populationSnapshot: PopulationSnapshot;
   technologyLevels: Record<TechnologyId, number>;
   loading: boolean;
   error: string;
@@ -10108,6 +13231,50 @@ function ResourceScreen({
   );
 
   const totalPerSecond = RESOURCE_DEFS.filter((r) => unlockedIds.includes(r.id)).reduce((sum, r) => sum + rates[r.id], 0);
+  const globalResourceImpacts = useMemo(() => {
+    const rows: Array<{ id: string; kind: "bonus" | "malus"; label: string }> = [];
+    const formatPercent = (value: number) => `${value >= 0 ? "+" : ""}${value.toFixed(1)}%`;
+    const pushRow = (id: string, value: number, frLabel: string, enLabel: string) => {
+      if (!Number.isFinite(value) || Math.abs(value) < 0.05) return;
+      rows.push({
+        id,
+        kind: value >= 0 ? "bonus" : "malus",
+        label: `${l(frLabel, enLabel)}: ${formatPercent(value)}`
+      });
+    };
+
+    const populationProductionPct = Math.floor(populationSnapshot.totalPopulation / 1000);
+    pushRow("population", populationProductionPct, "Population active", "Active population");
+
+    const stabilityImpactByBand: Record<PopulationSnapshot["stabilityBand"], number> = {
+      excellent: 8,
+      normal: 0,
+      warning: -6,
+      trouble: -15,
+      revolt: -34
+    };
+    pushRow("stability", stabilityImpactByBand[populationSnapshot.stabilityBand] ?? 0, "Stabilite sociale", "Social stability");
+
+    const workforcePenaltyPct = (populationSnapshot.workforceMultiplier - 1) * 100;
+    pushRow("workforce", workforcePenaltyPct, "Main-d'oeuvre disponible", "Available workforce");
+
+    if (populationSnapshot.isOverCapacity) {
+      pushRow("capacity", -25, "Surpopulation (capacite depassee)", "Overcapacity (housing exceeded)");
+    }
+    if (populationSnapshot.foodShortage) {
+      pushRow("food", -18, "Penurie alimentaire", "Food shortage");
+    }
+
+    pushRow("event", populationSnapshot.eventProductionPct, "Evenement en cours", "Active event");
+    pushRow("crisis", populationSnapshot.crisisPenaltyPct, "Crise sociale", "Social crisis");
+    pushRow(
+      "total",
+      populationSnapshot.productionBonusPct,
+      "Impact total sur la production",
+      "Total production impact"
+    );
+    return rows;
+  }, [language, populationSnapshot]);
 
   return (
     <main className="resource-shell">
@@ -10166,6 +13333,21 @@ function ResourceScreen({
                         </ul>
                       </div>
                     ) : null}
+                    {globalResourceImpacts.length > 0 ? (
+                      <div className="resource-impact-list">
+                        <small>{l("Bonus / malus actifs", "Active bonuses / penalties")}</small>
+                        <ul>
+                          {globalResourceImpacts.map((impact, impactIndex) => (
+                            <li
+                              key={`${res.id}_impact_${impact.id}_${impactIndex}`}
+                              className={`resource-impact-item ${impact.kind}`}
+                            >
+                              {impact.label}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    ) : null}
                   </>
                 ) : (
                   <div className="resource-lock">{l("Verrouille: technologie requise", "Locked: technology required")}</div>
@@ -10208,6 +13390,21 @@ function ResourceScreen({
                           {techBonuses.map((row) => (
                             <li key={`${res.id}_${row.techId}`}>
                               {row.name} Lv.{row.level}: +{row.bonusPercent.toFixed(1)}%
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    ) : null}
+                    {globalResourceImpacts.length > 0 ? (
+                      <div className="resource-impact-list">
+                        <small>{l("Bonus / malus actifs", "Active bonuses / penalties")}</small>
+                        <ul>
+                          {globalResourceImpacts.map((impact, impactIndex) => (
+                            <li
+                              key={`${res.id}_impact_${impact.id}_${impactIndex}`}
+                              className={`resource-impact-item ${impact.kind}`}
+                            >
+                              {impact.label}
                             </li>
                           ))}
                         </ul>
@@ -10267,13 +13464,6 @@ function InventoryScreen({
     LEGENDARY: "/room-images/coffre-legendaire.png",
     DIVINE: "/room-images/coffre-divin.png"
   };
-  const timeBoostImageBySeconds: Record<number, string> = {
-    60: "/room-images/Faille-Temporelle-1-min.png",
-    300: "/room-images/Faille-Temporelle-5-min.png",
-    3600: "/room-images/Faille-Temporelle-1-heure.png",
-    10800: "/room-images/Faille-Temporelle-3-heure.png",
-    43200: "/room-images/Faille-Temporelle-12-heure.png"
-  };
 
   const resolveInventoryItemImage = (item: InventoryViewItem) => {
     if (item.category === "RESOURCE_CRATE") {
@@ -10281,8 +13471,7 @@ function InventoryScreen({
       return chestImageByType[chestType] ?? chestImageByType.CLASSIC;
     }
     if (item.category === "TIME_BOOST") {
-      const secs = Math.max(0, Math.floor(Number(item.durationSeconds ?? 0)));
-      return timeBoostImageBySeconds[secs] ?? TIME_BOOST_ITEM_IMAGE;
+      return resolveTimeBoostImage(item.durationSeconds);
     }
     return "/room-images/item-acceleration.png";
   };
@@ -10561,7 +13750,7 @@ function InboxScreen({
   onClaimApplied: (payload: any) => void;
 }) {
   const l = (fr: string, en: string) => (language === "en" ? en : fr);
-  const [tab, setTab] = useState<"ALL" | "COMBAT_REPORT" | "REWARD" | "SYSTEM" | "PLAYER">("PLAYER");
+  const [tab, setTab] = useState<"ALL" | "COMBAT_REPORT" | "REWARD" | "SYSTEM" | "PLAYER">("ALL");
   const [items, setItems] = useState<InboxMessage[]>([]);
   const [cursor, setCursor] = useState("");
   const [hasMore, setHasMore] = useState(false);
@@ -10595,13 +13784,6 @@ function InboxScreen({
     RARE: "/room-images/coffre-rare.png",
     LEGENDARY: "/room-images/coffre-legendaire.png",
     DIVINE: "/room-images/coffre-divin.png"
-  };
-  const timeBoostImageBySeconds: Record<number, string> = {
-    60: "/room-images/Faille-Temporelle-1-min.png",
-    300: "/room-images/Faille-Temporelle-5-min.png",
-    3600: "/room-images/Faille-Temporelle-1-heure.png",
-    10800: "/room-images/Faille-Temporelle-3-heure.png",
-    43200: "/room-images/Faille-Temporelle-12-heure.png"
   };
 
   const chestTierLabel = (tier: NonNullable<InventoryViewItem["chestType"]>) => {
@@ -10704,8 +13886,7 @@ function InboxScreen({
       return chestImageByType[chestType] ?? chestImageByType.CLASSIC;
     }
     if (item.category === "TIME_BOOST") {
-      const secs = Math.max(0, Math.floor(Number(item.durationSeconds ?? 0)));
-      return timeBoostImageBySeconds[secs] ?? TIME_BOOST_ITEM_IMAGE;
+      return resolveTimeBoostImage(item.durationSeconds);
     }
     return "/room-images/item-acceleration.png";
   };
@@ -10796,9 +13977,11 @@ function InboxScreen({
     if (tab === "ALL") {
       // "Tous" garde les messages systeme/combat/recompenses.
       // Les messages joueurs sont accessibles sous forme de discussions dans l'onglet "Joueurs".
-      return items.filter((m) => m.type !== "PLAYER");
+      return items
+        .filter((m) => m.type !== "PLAYER")
+        .sort((a, b) => b.createdAt - a.createdAt);
     }
-    return items;
+    return [...items].sort((a, b) => b.createdAt - a.createdAt);
   }, [items, tab]);
   const selectedMessageReplyTargetUserId = useMemo(() => {
     if (!selectedMessage || selectedMessage.type !== "PLAYER") return "";
@@ -12294,7 +15477,7 @@ function AuthOverlay({
         ) : null}
 
         <label>
-          Email
+          {l("Email (pas le pseudo)", "Email (not username)")}
           <input
             value={authEmail}
             onChange={(e) => onEmailChange(e.target.value)}
@@ -12429,8 +15612,11 @@ function ProfileScreen({
 function StatLine({ icon, label, value }: { icon: JSX.Element; label: string; value: number }) {
   return (
     <div className="stat-line">
-      <span className="stat-label">{icon} {label}</span>
-      <strong>{value}</strong>
+      <span className="stat-label">
+        {icon}
+        <span>{label}</span>
+      </span>
+      <strong className="stat-value">{value.toLocaleString()}</strong>
     </div>
   );
 }
@@ -12440,6 +15626,7 @@ function BuildModal({
   buildSlot,
   resourceAmounts,
   rooms,
+  currentPopulation,
   constructionJob,
   buildingCostReductionFactor,
   buildingTimeReductionFactor,
@@ -12451,6 +15638,7 @@ function BuildModal({
   buildSlot: { x: number; y: number } | null;
   resourceAmounts: Record<string, number>;
   rooms: Room[];
+  currentPopulation: number;
   constructionJob: ConstructionJob | null;
   buildingCostReductionFactor: number;
   buildingTimeReductionFactor: number;
@@ -12459,10 +15647,32 @@ function BuildModal({
   getAvailableSpace: (x: number, y: number) => { minX: number; maxX: number; width: number };
 }) {
   const l = (fr: string, en: string) => (language === "en" ? en : fr);
-  if (!buildSlot) return null;
+  const [buildTab, setBuildTab] = useState<"production" | "population">("production");
 
-  const free = getAvailableSpace(buildSlot.x, buildSlot.y);
-  const buildableTypes = BUILDABLE_ROOMS.filter((type) => !rooms.some((r) => r.type === type));
+  const free = buildSlot
+    ? getAvailableSpace(buildSlot.x, buildSlot.y)
+    : { minX: 0, maxX: 0, width: 0 };
+  const buildableTypes = buildSlot
+    ? BUILDABLE_ROOMS.filter((type) => !rooms.some((r) => r.type === type))
+    : [];
+  const productionTypes = buildableTypes.filter((type) => {
+    const group = ROOM_CONFIG[type].buildGroup;
+    return group === "production" || group === "infrastructure";
+  });
+  const populationTypes = buildableTypes.filter((type) => ROOM_CONFIG[type].buildGroup === "population");
+  const visibleTypes = buildTab === "production" ? productionTypes : populationTypes;
+
+  useEffect(() => {
+    if (buildTab === "production" && productionTypes.length <= 0 && populationTypes.length > 0) {
+      setBuildTab("population");
+      return;
+    }
+    if (buildTab === "population" && populationTypes.length <= 0 && productionTypes.length > 0) {
+      setBuildTab("production");
+    }
+  }, [buildTab, populationTypes.length, productionTypes.length]);
+
+  if (!buildSlot) return null;
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
@@ -12472,13 +15682,36 @@ function BuildModal({
           <button onClick={onClose}><X size={16} /></button>
         </div>
 
+        <div className="build-tabs">
+          <button
+            type="button"
+            className={buildTab === "production" ? "active" : ""}
+            onClick={() => setBuildTab("production")}
+          >
+            {l("Production", "Production")}
+            <span>{productionTypes.length}</span>
+          </button>
+          <button
+            type="button"
+            className={buildTab === "population" ? "active" : ""}
+            onClick={() => setBuildTab("population")}
+          >
+            {l("Population", "Population")}
+            <span>{populationTypes.length}</span>
+          </button>
+        </div>
+
         <div className="room-grid">
-          {buildableTypes.map((type) => {
+          {visibleTypes.map((type) => {
             const cfg = ROOM_CONFIG[type];
             const cost = costForLevel(type, 1, buildingCostReductionFactor);
             const affordable = canAffordCost(resourceAmounts, cost);
             const fits = cfg.width <= free.width;
-            const disabled = !affordable || !fits || Boolean(constructionJob);
+            const populationUnlocked = isPopulationBuildingUnlocked(type, currentPopulation);
+            const populationRequired = type in POPULATION_BUILD_UNLOCK_MIN
+              ? POPULATION_BUILD_UNLOCK_MIN[type as PopulationBuildingId] ?? 0
+              : 0;
+            const disabled = !affordable || !fits || !populationUnlocked || Boolean(constructionJob);
 
             return (
               <button key={type} className={`build-item ${disabled ? "disabled" : ""}`} disabled={disabled} onClick={() => onBuild(type)}>
@@ -12489,18 +15722,28 @@ function BuildModal({
                   <ResourceCostDisplay cost={cost} available={resourceAmounts} language={language} compact />
                 </div>
                 <span>{l("Temps", "Time")} {formatDuration(buildSecondsForLevel(type, 1, buildingTimeReductionFactor))}</span>
+                {!populationUnlocked ? (
+                  <em>
+                    {l("Population requise", "Population required")} {populationRequired.toLocaleString()}
+                  </em>
+                ) : null}
                 {!fits && <em>{l("Espace horizontal insuffisant", "Not enough horizontal space")}</em>}
                 {!affordable && <em>{l("Ressources insuffisantes", "Not enough resources")}</em>}
                 {constructionJob ? <em>{l("File de construction occupee", "Construction queue busy")}</em> : null}
               </button>
             );
           })}
-          {buildableTypes.length === 0 ? (
+          {visibleTypes.length === 0 ? (
             <p className="planner-empty">
-              {l(
-                "Tous les modules uniques constructibles ont deja ete deployes.",
-                "All unique buildable modules are already deployed."
-              )}
+              {buildTab === "production"
+                ? l(
+                    "Tous les modules de production constructibles ont deja ete deployes.",
+                    "All buildable production modules are already deployed."
+                  )
+                : l(
+                    "Aucun batiment de population disponible pour le moment.",
+                    "No population building available yet."
+                  )}
             </p>
           ) : null}
         </div>
@@ -12549,6 +15792,10 @@ function UpgradeModal({
   const isRoomUnderUpgrade = Boolean(
     constructionJob && constructionJob.mode === "upgrade" && constructionJob.roomId === room?.id
   );
+  const isPendingBuild = Boolean(
+    constructionJob && constructionJob.mode === "build" && room?.id === PENDING_BUILD_ROOM_ID
+  );
+  const isRoomBusy = isRoomUnderUpgrade || isPendingBuild;
   const boostItems = useMemo(
     () =>
       inventoryItems
@@ -12576,9 +15823,9 @@ function UpgradeModal({
   }, [boostItemId, boostItems, boostOpen]);
 
   useEffect(() => {
-    if (isRoomUnderUpgrade) return;
+    if (isRoomBusy) return;
     setBoostOpen(false);
-  }, [isRoomUnderUpgrade]);
+  }, [isRoomBusy]);
 
   if (!room) return null;
 
@@ -12587,19 +15834,22 @@ function UpgradeModal({
   const nextCost = costForLevel(room.type, room.level + 1, buildingCostReductionFactor);
   const canPay = canAffordCost(resourceAmounts, nextCost);
   const isResource = Boolean(cfg.resourceId);
-  const current = cfg.resourceId
-    ? computeProductionPerSecond(cfg.resourceId, room.level, productionBonusesByResource[cfg.resourceId] ?? 0)
-    : room.type === "entrepot"
-      ? computeStorageCapacity(room.level)
-      : 0;
+  const effectiveLevel = isPendingBuild ? 0 : room.level;
+  const current = isPendingBuild
+    ? 0
+    : cfg.resourceId
+      ? computeProductionPerSecond(cfg.resourceId, effectiveLevel, productionBonusesByResource[cfg.resourceId] ?? 0)
+      : room.type === "entrepot"
+        ? computeStorageCapacity(effectiveLevel)
+        : 0;
   const next = cfg.resourceId
-    ? computeProductionPerSecond(cfg.resourceId, room.level + 1, productionBonusesByResource[cfg.resourceId] ?? 0)
+    ? computeProductionPerSecond(cfg.resourceId, effectiveLevel + 1, productionBonusesByResource[cfg.resourceId] ?? 0)
     : room.type === "entrepot"
-      ? computeStorageCapacity(room.level + 1)
+      ? computeStorageCapacity(effectiveLevel + 1)
       : 0;
   const deltaNext = Math.max(0, next - current);
-  const projectionStart = Math.max(1, room.level - 1);
-  const projectionLevels = Array.from({ length: 7 }, (_, idx) => projectionStart + idx).filter((lvl) => lvl <= room.level + 5);
+  const projectionStart = Math.max(1, effectiveLevel - 1);
+  const projectionLevels = Array.from({ length: 7 }, (_, idx) => projectionStart + idx).filter((lvl) => lvl <= effectiveLevel + 5);
   const selectedBoost = boostItems.find((item) => item.id === boostItemId) ?? (boostItems.length > 0 ? boostItems[0] : null);
   const requestedBoostQuantity = Math.max(1, Math.floor(Number(boostQuantityInput) || 1));
   const effectiveBoostQuantity = selectedBoost ? Math.min(requestedBoostQuantity, selectedBoost.quantity) : 0;
@@ -12607,7 +15857,7 @@ function UpgradeModal({
   const remainingAfterBoost = Math.max(0, constructionRemainingSeconds - totalBoostSeconds);
   const boostLoading = Boolean(selectedBoost) && inventoryActionLoadingId === selectedBoost.id;
   const canUseBoost =
-    isRoomUnderUpgrade && Boolean(selectedBoost) && effectiveBoostQuantity > 0 && !boostLoading && !inventoryLoading;
+    isRoomBusy && Boolean(selectedBoost) && effectiveBoostQuantity > 0 && !boostLoading && !inventoryLoading;
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
@@ -12619,8 +15869,8 @@ function UpgradeModal({
 
         <div className="upgrade-body">
           <div className="upgrade-level-line">
-            <span>{l("Niveau", "Level")} {room.level} / {cfg.maxLevel}</span>
-            <em>{constructionJob ? l("File occupee", "Queue busy") : l("Pret", "Ready")}</em>
+            <span>{l("Niveau", "Level")} {effectiveLevel}</span>
+            <em>{isRoomBusy ? l("File occupee", "Queue busy") : l("Pret", "Ready")}</em>
           </div>
           <p className="upgrade-stat-main">
             {isResource ? l("Production/sec", "Production/sec") : room.type === "entrepot" ? l("Capacite stockage", "Storage capacity") : l("Structure", "Structure")}:
@@ -12638,7 +15888,11 @@ function UpgradeModal({
               <ResourceCostDisplay cost={nextCost} available={resourceAmounts} language={language} compact />
             </div>
           ) : null}
-          <p className="upgrade-time-line">{l("Temps prochain niveau", "Next level time")}: {formatDuration(buildSecondsForLevel(room.type, room.level + 1, buildingTimeReductionFactor))}</p>
+          <p className="upgrade-time-line">
+            {isPendingBuild ? l("Temps construction", "Construction time") : l("Temps prochain niveau", "Next level time")}:
+            {" "}
+            {formatDuration(buildSecondsForLevel(room.type, effectiveLevel + 1, buildingTimeReductionFactor))}
+          </p>
 
           {isResource ? (
             <details className="upgrade-spoiler">
@@ -12650,7 +15904,7 @@ function UpgradeModal({
                 {projectionLevels.map((lvl) => {
                   const valueSec = computeProductionPerSecond(cfg.resourceId!, lvl, productionBonusesByResource[cfg.resourceId!] ?? 0);
                   const valueHour = valueSec * 3600;
-                  const marker = lvl === room.level ? "current" : lvl === room.level + 1 ? "next" : "";
+                  const marker = lvl === effectiveLevel ? "current" : lvl === effectiveLevel + 1 ? "next" : "";
                   return (
                     <Fragment key={`projection_${lvl}`}>
                       <div className={`cell ${marker}`}>N{lvl}</div>
@@ -12673,7 +15927,7 @@ function UpgradeModal({
           </div>
         ) : null}
 
-        {isRoomUnderUpgrade ? (
+        {isRoomBusy ? (
           <div className="upgrade-actions boost-only">
             <button
               className="boost-toggle"
@@ -12686,7 +15940,7 @@ function UpgradeModal({
           </div>
         ) : null}
 
-        {isRoomUnderUpgrade && boostOpen ? (
+        {isRoomBusy && boostOpen ? (
           <div className="upgrade-boost-panel">
             <div className="upgrade-boost-grid">
               {boostItems.map((item) => {
@@ -12698,7 +15952,16 @@ function UpgradeModal({
                     className={`upgrade-boost-item ${active ? "active" : ""}`}
                     onClick={() => setBoostItemId(item.id)}
                   >
-                    <img src={TIME_BOOST_ITEM_IMAGE} alt={item.name} />
+                    <img
+                      src={resolveTimeBoostImage(item.durationSeconds)}
+                      alt={item.name}
+                      onError={(e) => {
+                        const img = e.currentTarget as HTMLImageElement;
+                        if (!img.src.endsWith(TIME_BOOST_ITEM_IMAGE)) {
+                          img.src = TIME_BOOST_ITEM_IMAGE;
+                        }
+                      }}
+                    />
                     <div className="upgrade-boost-item-meta">
                       <strong>{formatBoostDurationLabel(item.durationSeconds ?? 0)}</strong>
                       <span>{item.quantity.toLocaleString()} {l("dispo", "available")}</span>
