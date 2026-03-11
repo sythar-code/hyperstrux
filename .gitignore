@@ -1,4 +1,7 @@
 .env
+admin/.env
+admin/node_modules
+admin/dist
 frontend/node_modules
 frontend/dist
 backend/nakama/data

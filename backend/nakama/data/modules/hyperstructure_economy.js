@@ -37,6 +37,21 @@ var ALLIANCE_CREATE_COST = {
 var MAP_COLLECTION = "hyperstructure_map";
 var MAP_RESOURCE_FIELDS_KEY = "resource_fields_v1";
 var MAP_WRITE_RETRIES = 6;
+var ADMIN_COLLECTION = "hsg_admin_v1";
+var ADMIN_ROLE_INDEX_KEY = "role_index_v1";
+var ADMIN_AUDIT_COLLECTION = "hsg_admin_audit_v1";
+var ADMIN_AUDIT_RETENTION = 5000;
+var ADMIN_AUDIT_LIST_LIMIT_DEFAULT = 40;
+var ADMIN_AUDIT_LIST_LIMIT_MAX = 120;
+var ADMIN_BOOTSTRAP_USERNAMES = {
+  heimy: true
+};
+var ADMIN_ROLE_SUPERADMIN = "superadmin";
+var ADMIN_ROLE_ADMIN = "admin";
+var ADMIN_USER_SEARCH_LIMIT_DEFAULT = 25;
+var ADMIN_USER_SEARCH_LIMIT_MAX = 60;
+var ADMIN_MAP_OCCUPIED_LIST_LIMIT_DEFAULT = 80;
+var ADMIN_MAINTENANCE_USER_CAP = 10000;
 var MAP_TARGET_FIELD_COUNT = 36;
 var MAP_WORLD_SIZE = 10000;
 var MAP_PADDING = 360;
@@ -360,6 +375,48 @@ function defaultEconomyState() {
     resourceExpeditions: [],
     resourceReports: []
   };
+}
+
+function ensureEconomyState(raw) {
+  var state = raw && typeof raw === "object" ? raw : {};
+
+  if (!state.resources || typeof state.resources !== "object") state.resources = {};
+  for (var i = 0; i < RESOURCE_IDS.length; i++) {
+    var resourceId = RESOURCE_IDS[i];
+    var resourceRow = state.resources[resourceId];
+    var resourceAmount = resourceRow && typeof resourceRow === "object" ? Number(resourceRow.amount || 0) : 0;
+    state.resources[resourceId] = {
+      amount: Number.isFinite(resourceAmount) && resourceAmount > 0 ? resourceAmount : 0
+    };
+  }
+
+  if (!state.buildings || typeof state.buildings !== "object") state.buildings = {};
+  var buildingIds = RESOURCE_IDS.concat(["entrepot"]);
+  for (var j = 0; j < buildingIds.length; j++) {
+    var buildingId = buildingIds[j];
+    var buildingRow = state.buildings[buildingId];
+    var buildingLevel = buildingRow && typeof buildingRow === "object" ? sanitizePositiveInt(Number(buildingRow.level || 0)) : 0;
+    if ((buildingId === "carbone" || buildingId === "titane" || buildingId === "entrepot") && buildingLevel <= 0) {
+      buildingLevel = 1;
+    }
+    state.buildings[buildingId] = { level: buildingLevel };
+  }
+
+  state.premiumCredits = Math.max(0, Math.floor(Number(state.premiumCredits || 0)));
+  state.creditGrantClaims = Array.isArray(state.creditGrantClaims) ? state.creditGrantClaims : [];
+  state.building_upgrade_slot = state.building_upgrade_slot || null;
+  state.building_construct_slot = state.building_construct_slot || null;
+  state.research_slot = state.research_slot || null;
+  state.hangarQueue = Array.isArray(state.hangarQueue) ? state.hangarQueue : [];
+  state.hangarInventory = state.hangarInventory && typeof state.hangarInventory === "object" ? state.hangarInventory : {};
+  state.commandementEscadreLevel = Math.max(0, sanitizePositiveInt(Number(state.commandementEscadreLevel || 0)));
+  state.resourceExpedition = state.resourceExpedition && typeof state.resourceExpedition === "object" ? state.resourceExpedition : null;
+  state.resourceExpeditions = Array.isArray(state.resourceExpeditions) ? state.resourceExpeditions : [];
+  state.resourceReports = Array.isArray(state.resourceReports) ? state.resourceReports : [];
+  state.version = Math.max(1, Math.floor(Number(state.version || 1)));
+  state.lastUpdateTs = Math.max(0, Math.floor(Number(state.lastUpdateTs || nowTs())));
+
+  return state;
 }
 
 function cloneState(s) {
@@ -1270,6 +1327,137 @@ function getAvailableResourcesForPlayer(player) {
     var level = sanitizePositiveInt(Number((buildings[rid] && buildings[rid].level) || 0));
     if (level > 0) out[rid] = true;
   }
+  if (Object.keys(out).length <= 0) {
+    out.carbone = true;
+    out.titane = true;
+  }
+  return out;
+}
+
+function randomIntInclusiveSeeded(min, max, seedKey) {
+  var lo = Math.floor(Number(min || 0));
+  var hi = Math.floor(Number(max || 0));
+  if (hi < lo) {
+    var swap = hi;
+    hi = lo;
+    lo = swap;
+  }
+  if (hi <= lo) return lo;
+  var span = hi - lo + 1;
+  return lo + Math.floor(seededFloat01(seedKey) * span);
+}
+
+function listAllowedResourceIds(allowedResources) {
+  var allowed = allowedResources && typeof allowedResources === "object" ? allowedResources : {};
+  var out = [];
+  for (var i = 0; i < RESOURCE_IDS.length; i++) {
+    var rid = RESOURCE_IDS[i];
+    if (allowed[rid]) out.push(rid);
+  }
+  return out;
+}
+
+function pickDistinctWeightedResourcesSeeded(allowedResourceIds, count, rarityConfig, seedKey) {
+  var target = Math.max(1, Math.min(sanitizePositiveInt(count || 1), allowedResourceIds.length));
+  var scored = [];
+  for (var i = 0; i < allowedResourceIds.length; i++) {
+    var rid = allowedResourceIds[i];
+    var weight = Math.max(0.000001, Number(resourceWeightForField(rid, rarityConfig) || 0.000001));
+    scored.push({
+      resourceId: rid,
+      score: seededFloat01(seedKey + "|" + rid) * weight
+    });
+  }
+  scored.sort(function(a, b) {
+    if (b.score !== a.score) return b.score - a.score;
+    return String(a.resourceId).localeCompare(String(b.resourceId));
+  });
+  var out = [];
+  for (var j = 0; j < scored.length && out.length < target; j++) {
+    out.push(scored[j].resourceId);
+  }
+  return out;
+}
+
+function buildVirtualMapFieldResourcesForPlayer(field, allowedResources, viewerSeed) {
+  var allowedIds = listAllowedResourceIds(allowedResources);
+  if (allowedIds.length <= 0) return [];
+
+  var rarityCfg = MAP_FIELD_RARITY_CONFIGS[String(field && field.rarityTier || "COMMON").toUpperCase()] || MAP_FIELD_RARITY_CONFIGS.COMMON;
+  var qualityCfg = MAP_FIELD_QUALITY_CONFIGS[String(field && field.qualityTier || "STANDARD").toUpperCase()] || MAP_FIELD_QUALITY_CONFIGS.STANDARD;
+  var cappedAllowed = [];
+  for (var i = 0; i < allowedIds.length; i++) {
+    var rid = allowedIds[i];
+    if ((RESOURCE_RARITY[rid] || 10) <= sanitizePositiveInt(rarityCfg.maxTier || 25)) cappedAllowed.push(rid);
+  }
+  var pool = cappedAllowed.length > 0 ? cappedAllowed : allowedIds.slice();
+  if (pool.length <= 0) return [];
+
+  var minTypes = Math.max(1, sanitizePositiveInt(rarityCfg.minTypes || 1));
+  var maxTypes = sanitizePositiveInt(rarityCfg.maxTypes || 0);
+  if (maxTypes <= 0) maxTypes = 5;
+  var maxSelectable = Math.max(1, Math.min(pool.length, maxTypes, 5));
+  var typeCount = randomIntInclusiveSeeded(1, maxSelectable, String(viewerSeed || "") + "|typeCount");
+  typeCount = Math.max(Math.min(minTypes, maxSelectable), typeCount);
+  typeCount = Math.max(1, Math.min(typeCount, maxSelectable));
+
+  var selected = pickDistinctWeightedResourcesSeeded(pool, typeCount, rarityCfg, String(viewerSeed || "") + "|pick");
+  if (selected.length <= 0) selected = pool.slice(0, Math.min(1, pool.length));
+
+  var rows = [];
+  for (var j = 0; j < selected.length; j++) {
+    var resourceId = selected[j];
+    var baseCfg = MAP_RESOURCE_BASE_AMOUNTS[resourceId] || { min: 5000, max: 12000 };
+    var baseAmount = randomIntInclusiveSeeded(baseCfg.min, baseCfg.max, String(viewerSeed || "") + "|amount|" + resourceId);
+    var amount = Math.max(
+      1,
+      Math.floor(baseAmount * Number(qualityCfg.quantityMultiplier || 1) * Number(rarityCfg.quantityMultiplier || 1))
+    );
+    rows.push({
+      resourceId: resourceId,
+      totalAmount: amount,
+      remainingAmount: amount
+    });
+  }
+  return rows;
+}
+
+function resolveFieldResourcesForPlayer(field, allowedResources, viewerSeed) {
+  var allowed = allowedResources && typeof allowedResources === "object" ? allowedResources : {};
+  var directRows = [];
+  var resources = Array.isArray(field && field.resources) ? field.resources : [];
+  for (var i = 0; i < resources.length; i++) {
+    var row = resources[i] || {};
+    var rid = String(row.resourceId || "").trim();
+    if (!rid || !allowed[rid]) continue;
+    var totalAmount = sanitizePositiveInt(row.totalAmount || 0);
+    var remainingAmount = sanitizePositiveInt(row.remainingAmount || 0);
+    if (totalAmount <= 0 && remainingAmount <= 0) continue;
+    if (remainingAmount <= 0) remainingAmount = totalAmount;
+    directRows.push({
+      resourceId: rid,
+      totalAmount: Math.max(totalAmount, remainingAmount),
+      remainingAmount: remainingAmount
+    });
+  }
+  if (directRows.length > 0) {
+    return { rows: directRows, isVirtual: false };
+  }
+  return {
+    rows: buildVirtualMapFieldResourcesForPlayer(field, allowed, viewerSeed),
+    isVirtual: true
+  };
+}
+
+function rowsToResourceMap(resourceRows) {
+  var rows = Array.isArray(resourceRows) ? resourceRows : [];
+  var out = {};
+  for (var i = 0; i < rows.length; i++) {
+    var row = rows[i] || {};
+    var rid = String(row.resourceId || "").trim();
+    if (!rid) continue;
+    out[rid] = sanitizePositiveInt(row.remainingAmount || row.totalAmount || 0);
+  }
   return out;
 }
 
@@ -1417,10 +1605,13 @@ function resolveReturnResources(harvestedByResource, currentRemainingByResource,
 
 function settleHarvestAgainstField(field, expedition, progressRatio) {
   var ratio = clampNumber(progressRatio, 0, 1);
+  var useVirtualSnapshot = Boolean(expedition && expedition.snapshotVirtual);
   var snapshot = expedition.snapshotResources && typeof expedition.snapshotResources === "object"
     ? expedition.snapshotResources
     : mapFieldResourcesToMap(field);
-  var currentRemaining = mapFieldResourcesToMap(field);
+  var currentRemaining = useVirtualSnapshot
+    ? JSON.parse(JSON.stringify(snapshot || {}))
+    : mapFieldResourcesToMap(field);
   var extractionSeconds = Math.max(1, sanitizePositiveInt(expedition.extractionSeconds || MAP_MIN_EXTRACTION_SECONDS));
   var harvestTimeSeconds = Math.floor(extractionSeconds * ratio);
   var playerScore = sanitizePositiveInt(expedition.playerScore || 0);
@@ -1440,19 +1631,81 @@ function settleHarvestAgainstField(field, expedition, progressRatio) {
   var snapshotTotal = Math.max(1, sumResourceMap(snapshot));
   var workSpent = Math.floor((field.totalExtractionWork || 0) * (collectedTotal / snapshotTotal));
   field.remainingExtractionWork = Math.max(0, sanitizePositiveInt(field.remainingExtractionWork || 0) - workSpent);
-  writeMapToFieldResources(field, resolved.remainingByResource);
+  if (!useVirtualSnapshot) {
+    writeMapToFieldResources(field, resolved.remainingByResource);
+  }
 
   var hasRemaining = false;
-  var resources = Array.isArray(field.resources) ? field.resources : [];
-  for (var r = 0; r < resources.length; r++) {
-    if (sanitizePositiveInt(resources[r].remainingAmount || 0) > 0) {
-      hasRemaining = true;
-      break;
+  if (useVirtualSnapshot) {
+    hasRemaining = sanitizePositiveInt(field.remainingExtractionWork || 0) > 0;
+  } else {
+    var resources = Array.isArray(field.resources) ? field.resources : [];
+    for (var r = 0; r < resources.length; r++) {
+      if (sanitizePositiveInt(resources[r].remainingAmount || 0) > 0) {
+        hasRemaining = true;
+        break;
+      }
     }
   }
 
   return {
     collected: collected,
+    collectedTotal: collectedTotal,
+    hasRemaining: hasRemaining
+  };
+}
+
+function applyCollectedResourcesToField(field, expedition, collected) {
+  if (!field || !expedition || !collected || typeof collected !== "object") {
+    return { collectedTotal: 0, hasRemaining: sanitizePositiveInt(field && field.remainingExtractionWork || 0) > 0 };
+  }
+
+  var useVirtualSnapshot = Boolean(expedition.snapshotVirtual);
+  var snapshot = expedition.snapshotResources && typeof expedition.snapshotResources === "object"
+    ? expedition.snapshotResources
+    : mapFieldResourcesToMap(field);
+  var snapshotTotal = Math.max(1, sumResourceMap(snapshot));
+  var collectedTotal = 0;
+
+  if (!useVirtualSnapshot) {
+    var remainingByResource = mapFieldResourcesToMap(field);
+    var keys = Object.keys(collected);
+    for (var i = 0; i < keys.length; i++) {
+      var rid = keys[i];
+      var picked = sanitizePositiveInt(collected[rid] || 0);
+      if (picked <= 0) continue;
+      var currentRemaining = sanitizePositiveInt(remainingByResource[rid] || 0);
+      var applied = Math.max(0, Math.min(currentRemaining, picked));
+      if (applied <= 0) continue;
+      remainingByResource[rid] = currentRemaining - applied;
+      collected[rid] = applied;
+      collectedTotal += applied;
+    }
+    writeMapToFieldResources(field, remainingByResource);
+  } else {
+    var virtualKeys = Object.keys(collected);
+    for (var j = 0; j < virtualKeys.length; j++) {
+      collectedTotal += sanitizePositiveInt(collected[virtualKeys[j]] || 0);
+    }
+  }
+
+  var workSpent = Math.floor((sanitizePositiveInt(field.totalExtractionWork || 0)) * (collectedTotal / snapshotTotal));
+  field.remainingExtractionWork = Math.max(0, sanitizePositiveInt(field.remainingExtractionWork || 0) - workSpent);
+
+  var hasRemaining = false;
+  if (useVirtualSnapshot) {
+    hasRemaining = sanitizePositiveInt(field.remainingExtractionWork || 0) > 0;
+  } else {
+    var resources = Array.isArray(field.resources) ? field.resources : [];
+    for (var r = 0; r < resources.length; r++) {
+      if (sanitizePositiveInt(resources[r].remainingAmount || 0) > 0) {
+        hasRemaining = true;
+        break;
+      }
+    }
+  }
+
+  return {
     collectedTotal: collectedTotal,
     hasRemaining: hasRemaining
   };
@@ -1603,13 +1856,15 @@ function createMapHarvestRewardMessage(nk, userId, report) {
   });
 }
 
-function serializeMapFieldForViewer(field, viewerUserId) {
+function serializeMapFieldForViewer(field, viewerUserId, allowedResources) {
   var isOwner = String(field.occupiedByPlayerId || "") === String(viewerUserId || "");
   var detailsVisible = !field.isOccupied || isOwner;
   var resources = [];
   if (detailsVisible) {
-    for (var i = 0; i < field.resources.length; i++) {
-      var row = field.resources[i];
+    var resolved = resolveFieldResourcesForPlayer(field, allowedResources, String(field.id || "") + "|" + String(viewerUserId || ""));
+    var rows = resolved.rows || [];
+    for (var i = 0; i < rows.length; i++) {
+      var row = rows[i];
       resources.push({
         resourceId: row.resourceId,
         totalAmount: sanitizePositiveInt(row.totalAmount || 0),
@@ -1813,9 +2068,32 @@ function startMapExpedition(economy, mapState, userId, username, fieldId, fleetI
   var travelSeconds = calculateMapTravelSeconds(userId, field.x, field.y, stats.mapSpeed);
   var extractionSeconds = calculateMapExtractionSeconds(field.remainingExtractionWork, stats.totalHarvestSpeed);
   var allowedResources = getAvailableResourcesForPlayer(economy);
-  var snapshot = mapFieldResourcesToMap(field, allowedResources);
+  var resolvedFieldResources = resolveFieldResourcesForPlayer(field, allowedResources, String(field.id || "") + "|" + String(userId || ""));
+  var snapshot = rowsToResourceMap(resolvedFieldResources.rows);
   if (sumResourceMap(snapshot) <= 0) {
-    throw new Error("No harvestable resources unlocked for this field.");
+    var forcedRows = buildVirtualMapFieldResourcesForPlayer(
+      field,
+      Object.keys(allowedResources || {}).length > 0 ? allowedResources : { carbone: true, titane: true },
+      String(field.id || "") + "|" + String(userId || "") + "|forced"
+    );
+    snapshot = rowsToResourceMap(forcedRows);
+    resolvedFieldResources = {
+      rows: forcedRows,
+      isVirtual: true
+    };
+  }
+  if (sumResourceMap(snapshot) <= 0) {
+    snapshot = {
+      carbone: Math.max(60000, sanitizePositiveInt((MAP_RESOURCE_BASE_AMOUNTS.carbone || {}).min || 60000)),
+      titane: Math.max(30000, sanitizePositiveInt((MAP_RESOURCE_BASE_AMOUNTS.titane || {}).min || 30000))
+    };
+    resolvedFieldResources = {
+      rows: [
+        { resourceId: "carbone", totalAmount: snapshot.carbone, remainingAmount: snapshot.carbone },
+        { resourceId: "titane", totalAmount: snapshot.titane, remainingAmount: snapshot.titane }
+      ],
+      isVirtual: true
+    };
   }
   var playerScore = calculatePlayerHarvestScore(economy);
   var scoreBonus = calculateHarvestScoreBonus(playerScore);
@@ -1840,6 +2118,7 @@ function startMapExpedition(economy, mapState, userId, username, fieldId, fleetI
     returnStartAt: 0,
     returnEndAt: 0,
     snapshotResources: snapshot,
+    snapshotVirtual: Boolean(resolvedFieldResources.isVirtual),
     playerScore: playerScore,
     scoreBonus: scoreBonus,
     collectedResources: {},
@@ -1898,29 +2177,22 @@ function recallMapExpedition(economy, mapState, serverNowTs, expeditionId) {
     expedition.dropItemId = "";
     expedition.dropQuantity = 0;
   } else if (expedition.status === "extracting") {
+    var recalledCollected = estimateExpeditionCollected(expedition, serverNowTs);
+    expedition.collectedResources = recalledCollected;
     if (field) {
-      var startAt = sanitizePositiveInt(expedition.extractionStartAt || serverNowTs);
-      var endAt = sanitizePositiveInt(expedition.extractionEndAt || (startAt + MAP_MIN_EXTRACTION_SECONDS));
-      var duration = Math.max(1, endAt - startAt);
-      var elapsed = clampNumber(serverNowTs - startAt, 0, duration);
-      var ratio = elapsed / duration;
-      var outcome = settleHarvestAgainstField(field, expedition, ratio);
-      expedition.collectedResources = outcome.collected;
-      if (outcome.collectedTotal > 0) {
-        var rolled = rollMapFieldDrop();
-        expedition.dropItemId = rolled.itemId;
-        expedition.dropQuantity = rolled.quantity;
-      } else {
-        expedition.dropItemId = "";
-        expedition.dropQuantity = 0;
-      }
+      var outcome = applyCollectedResourcesToField(field, expedition, recalledCollected);
       clearFieldOccupation(field);
       if (!outcome.hasRemaining) {
         field.remainingExtractionWork = 0;
         field.expiresAt = serverNowTs;
       }
+    }
+    var recalledTotal = sumResourceMap(expedition.collectedResources);
+    if (recalledTotal > 0) {
+      var rolled = rollMapFieldDrop();
+      expedition.dropItemId = rolled.itemId;
+      expedition.dropQuantity = rolled.quantity;
     } else {
-      expedition.collectedResources = {};
       expedition.dropItemId = "";
       expedition.dropQuantity = 0;
     }
@@ -1963,7 +2235,7 @@ function withMapTransaction(nk, userId, username, update, logger, traceTag) {
     for (var i = 0; i < (read || []).length; i++) {
       var obj = read[i];
       if (obj.collection === ECONOMY_COLLECTION && obj.key === ECONOMY_KEY) {
-        economyState = obj.value || defaultEconomyState();
+        economyState = ensureEconomyState(obj.value || defaultEconomyState());
         economyVersion = obj.version || "";
       } else if (obj.collection === INVENTORY_COLLECTION && obj.key === INVENTORY_KEY) {
         inventoryState = normalizeInventory(obj.value || defaultInventoryState(userId), userId);
@@ -2652,9 +2924,9 @@ function openChest(nk, playerId, itemId, quantity, logger) {
 
 function readEconomyState(nk, userId) {
   var read = nk.storageRead([{ collection: ECONOMY_COLLECTION, key: ECONOMY_KEY, userId: userId }]);
-  if (!read || read.length === 0) return { state: defaultEconomyState(), version: "" };
+  if (!read || read.length === 0) return { state: ensureEconomyState(defaultEconomyState()), version: "" };
   var obj = read[0];
-  return { state: obj.value || defaultEconomyState(), version: obj.version || "" };
+  return { state: ensureEconomyState(obj.value || defaultEconomyState()), version: obj.version || "" };
 }
 
 function readInventoryState(nk, userId) {
@@ -3388,7 +3660,7 @@ function withEconomyInventoryTransaction(nk, userId, update) {
     for (var j = 0; j < (read || []).length; j++) {
       var obj = read[j];
       if (obj.collection === ECONOMY_COLLECTION && obj.key === ECONOMY_KEY) {
-        economyState = obj.value || defaultEconomyState();
+        economyState = ensureEconomyState(obj.value || defaultEconomyState());
         economyVersion = obj.version || "";
       }
       if (obj.collection === INVENTORY_COLLECTION && obj.key === INVENTORY_KEY) {
@@ -3459,6 +3731,434 @@ function parsePayload(payload) {
 function requireUserId(ctx) {
   if (!ctx.userId) throw new Error("Authentication required.");
   return ctx.userId;
+}
+
+function defaultAdminRoleIndex() {
+  return {
+    version: 1,
+    updatedAt: nowTs(),
+    admins: {}
+  };
+}
+
+function normalizeAdminRoleIndex(raw) {
+  var index = raw && typeof raw === "object" ? raw : defaultAdminRoleIndex();
+  if (!index.admins || typeof index.admins !== "object") index.admins = {};
+  var normalizedAdmins = {};
+  var keys = Object.keys(index.admins);
+  for (var i = 0; i < keys.length; i++) {
+    var userId = String(keys[i] || "").trim();
+    if (!userId) continue;
+    var row = index.admins[userId] && typeof index.admins[userId] === "object" ? index.admins[userId] : {};
+    var role = String(row.role || "").trim().toLowerCase();
+    if (role !== ADMIN_ROLE_ADMIN && role !== ADMIN_ROLE_SUPERADMIN) continue;
+    normalizedAdmins[userId] = {
+      userId: userId,
+      username: String(row.username || "").trim(),
+      role: role,
+      enabled: row.enabled !== false,
+      grantedAt: sanitizePositiveInt(row.grantedAt || 0),
+      grantedBy: String(row.grantedBy || "").trim()
+    };
+  }
+  index.admins = normalizedAdmins;
+  index.version = Math.max(1, sanitizePositiveInt(index.version || 1));
+  index.updatedAt = sanitizePositiveInt(index.updatedAt || nowTs());
+  return index;
+}
+
+function readAdminRoleIndex(nk) {
+  var read = nk.storageRead([{ collection: ADMIN_COLLECTION, key: ADMIN_ROLE_INDEX_KEY }]) || [];
+  if (!Array.isArray(read) || read.length <= 0) {
+    return { state: defaultAdminRoleIndex(), version: "" };
+  }
+  return {
+    state: normalizeAdminRoleIndex(read[0].value || defaultAdminRoleIndex()),
+    version: String(read[0].version || "")
+  };
+}
+
+function writeAdminRoleIndex(nk, index, expectedVersion) {
+  var req = {
+    collection: ADMIN_COLLECTION,
+    key: ADMIN_ROLE_INDEX_KEY,
+    permissionRead: 0,
+    permissionWrite: 0,
+    value: normalizeAdminRoleIndex(index)
+  };
+  if (expectedVersion) req.version = expectedVersion;
+  var writes = nk.storageWrite([req]) || [];
+  return writes[0] && writes[0].version ? String(writes[0].version) : "";
+}
+
+function getAdminRoleEntry(index, userId) {
+  var safeId = String(userId || "").trim();
+  if (!safeId || !index || !index.admins || typeof index.admins !== "object") return null;
+  var row = index.admins[safeId];
+  if (!row || row.enabled === false) return null;
+  var role = String(row.role || "").trim().toLowerCase();
+  if (role !== ADMIN_ROLE_ADMIN && role !== ADMIN_ROLE_SUPERADMIN) return null;
+  return row;
+}
+
+function hasEnabledAdmin(index) {
+  if (!index || !index.admins || typeof index.admins !== "object") return false;
+  var keys = Object.keys(index.admins);
+  for (var i = 0; i < keys.length; i++) {
+    var row = index.admins[keys[i]];
+    if (row && row.enabled !== false) return true;
+  }
+  return false;
+}
+
+function isBootstrapAdminCandidate(ctx) {
+  var username = String((ctx && ctx.username) || "").trim().toLowerCase();
+  return Boolean(ADMIN_BOOTSTRAP_USERNAMES[username]);
+}
+
+function assertAdmin(ctx, nk) {
+  var userId = requireUserId(ctx);
+  var roleRead = readAdminRoleIndex(nk);
+  var roleEntry = getAdminRoleEntry(roleRead.state, userId);
+  if (!roleEntry) throw new Error("Admin access required.");
+  return roleEntry;
+}
+
+function appendAdminAudit(nk, actorUserId, actorUsername, action, targetSummary, payloadSummary, reason) {
+  var now = nowTs();
+  var key = "audit_" + now + "_" + Math.floor(Math.random() * 1000000000).toString(36);
+  var entry = {
+    id: key,
+    actorUserId: String(actorUserId || "").trim(),
+    actorUsername: String(actorUsername || "").trim(),
+    action: String(action || "").trim(),
+    targetSummary: targetSummary && typeof targetSummary === "object" ? targetSummary : {},
+    payloadSummary: payloadSummary && typeof payloadSummary === "object" ? payloadSummary : {},
+    reason: String(reason || "").trim().slice(0, 400),
+    createdAt: now
+  };
+  nk.storageWrite([
+    {
+      collection: ADMIN_AUDIT_COLLECTION,
+      key: key,
+      permissionRead: 0,
+      permissionWrite: 0,
+      value: entry
+    }
+  ]);
+  return entry;
+}
+
+function summarizeAdminResources(resources) {
+  var out = {};
+  var input = resources && typeof resources === "object" ? resources : {};
+  for (var i = 0; i < RESOURCE_IDS.length; i++) {
+    var rid = RESOURCE_IDS[i];
+    var amount = Math.max(0, Math.floor(Number(input[rid] || 0)));
+    if (amount > 0) out[rid] = amount;
+  }
+  return out;
+}
+
+function summarizeAdminItems(items) {
+  var list = Array.isArray(items) ? items : [];
+  var out = [];
+  for (var i = 0; i < list.length; i++) {
+    var row = list[i] && typeof list[i] === "object" ? list[i] : {};
+    var itemId = String(row.itemId || "").trim();
+    var quantity = Math.max(0, Math.floor(Number(row.quantity || 0)));
+    if (!itemId || quantity <= 0 || !ITEM_DEFINITIONS[itemId]) continue;
+    out.push({ itemId: itemId, quantity: quantity });
+  }
+  return out;
+}
+
+function summarizeAdminAttachments(body) {
+  return normalizeInboxAttachments({
+    resources: summarizeAdminResources(body && body.resources),
+    items: summarizeAdminItems(body && body.items),
+    credits: Math.max(0, Math.floor(Number(body && body.credits || 0))),
+    chests: Array.isArray(body && body.chests) ? body.chests : []
+  });
+}
+
+function createAdminGiftMessage(nk, userIdOrBroadcast, title, body, attachments) {
+  var safeTitle = String(title || "Cadeau administrateur").trim().slice(0, 140) || "Cadeau administrateur";
+  var safeBody = String(body || "").trim().slice(0, 8000);
+  var safeAttachments = normalizeInboxAttachments(attachments || {});
+  if (String(userIdOrBroadcast || "").toLowerCase() === "broadcast") {
+    var userIds = listAllUserIdsForInboxBroadcast(nk);
+    var created = 0;
+    var failed = 0;
+    for (var i = 0; i < userIds.length; i++) {
+      try {
+        createRewardMessage(nk, userIds[i], safeAttachments, safeTitle, safeBody);
+        created += 1;
+      } catch (_err) {
+        failed += 1;
+      }
+    }
+    return {
+      delivered: created,
+      failed: failed,
+      attempted: userIds.length
+    };
+  }
+  createRewardMessage(nk, String(userIdOrBroadcast || ""), safeAttachments, safeTitle, safeBody);
+  return { delivered: 1, failed: 0, attempted: 1 };
+}
+
+function queryAdminUsers(nk, queryRaw, limit) {
+  if (!nk || typeof nk.sqlQuery !== "function") throw new Error("Admin user search requires sqlQuery support.");
+  var safeLimit = Math.max(1, Math.min(ADMIN_USER_SEARCH_LIMIT_MAX, sanitizePositiveInt(limit || ADMIN_USER_SEARCH_LIMIT_DEFAULT)));
+  var raw = String(queryRaw || "").trim().toLowerCase();
+  var sql;
+  if (!raw) {
+    sql =
+      "SELECT id, username, display_name, avatar_url, create_time, disable_time " +
+      "FROM users ORDER BY create_time DESC LIMIT " + safeLimit;
+  } else {
+    var escaped = escapeSqlLiteral(raw);
+    var allowUuidMatch = isUuidLike(raw);
+    var whereParts = [
+      "lower(username) LIKE '" + escaped + "%'",
+      "lower(display_name) LIKE '" + escaped + "%'"
+    ];
+    if (allowUuidMatch) {
+      whereParts.push("id = '" + escaped + "'");
+    }
+    var rankParts = [
+      "WHEN lower(username) = '" + escaped + "' THEN 0 ",
+      "WHEN lower(display_name) = '" + escaped + "' THEN 1 "
+    ];
+    if (allowUuidMatch) {
+      rankParts.push("WHEN id = '" + escaped + "' THEN 2 ");
+    }
+    rankParts.push("WHEN lower(username) LIKE '" + escaped + "%' THEN 3 ");
+    sql =
+      "SELECT id, username, display_name, avatar_url, create_time, disable_time " +
+      "FROM users WHERE " + whereParts.join(" OR ") + " " +
+      "ORDER BY " +
+      "CASE " + rankParts.join("") +
+      "ELSE 4 END, create_time DESC " +
+      "LIMIT " + safeLimit;
+  }
+  return nk.sqlQuery(sql) || [];
+}
+
+function queryAdminScalarCount(nk, sql, fieldName) {
+  if (!nk || typeof nk.sqlQuery !== "function") return 0;
+  var rows = nk.sqlQuery(sql) || [];
+  if (!Array.isArray(rows) || rows.length <= 0) return 0;
+  return sanitizePositiveInt(Number((rows[0] && rows[0][fieldName]) || 0));
+}
+
+function countEnabledAdminRoles(index) {
+  if (!index || !index.admins || typeof index.admins !== "object") return 0;
+  var keys = Object.keys(index.admins);
+  var count = 0;
+  for (var i = 0; i < keys.length; i++) {
+    if (getAdminRoleEntry(index, keys[i])) count += 1;
+  }
+  return count;
+}
+
+function listAdminAuditEntries(nk, limit, cursor) {
+  var safeLimit = Math.max(1, Math.min(ADMIN_AUDIT_LIST_LIMIT_MAX, sanitizePositiveInt(limit || ADMIN_AUDIT_LIST_LIMIT_DEFAULT)));
+  var nextCursor = String(cursor || "");
+  var listed = null;
+  try {
+    listed = nk.storageList(null, ADMIN_AUDIT_COLLECTION, safeLimit, nextCursor);
+  } catch (_e) {
+    try {
+      listed = nk.storageList("", ADMIN_AUDIT_COLLECTION, safeLimit, nextCursor);
+    } catch (_e2) {
+      listed = { objects: [], cursor: "" };
+    }
+  }
+  var objects = listed && Array.isArray(listed.objects) ? listed.objects : [];
+  var items = [];
+  for (var i = 0; i < objects.length; i++) {
+    var obj = objects[i] || {};
+    var value = obj.value && typeof obj.value === "object" ? obj.value : {};
+    items.push({
+      id: String(value.id || obj.key || "").trim(),
+      actorUserId: String(value.actorUserId || "").trim(),
+      actorUsername: String(value.actorUsername || "").trim(),
+      action: String(value.action || "").trim(),
+      targetSummary: value.targetSummary && typeof value.targetSummary === "object" ? value.targetSummary : {},
+      payloadSummary: value.payloadSummary && typeof value.payloadSummary === "object" ? value.payloadSummary : {},
+      reason: String(value.reason || "").trim(),
+      createdAt: sanitizePositiveInt(value.createdAt || 0)
+    });
+  }
+  items.sort(function(a, b) { return b.createdAt - a.createdAt; });
+  return {
+    items: items,
+    cursor: String((listed && listed.cursor) || "")
+  };
+}
+
+function buildAdminMapOverview(mapState, limit) {
+  var state = normalizeMapFieldState(mapState || defaultMapFieldState());
+  var fields = Array.isArray(state.fields) ? state.fields : [];
+  var now = nowTs();
+  var occupied = [];
+  var visibleCount = 0;
+  var occupiedCount = 0;
+  var hiddenCount = 0;
+  var expiredCount = 0;
+
+  for (var i = 0; i < fields.length; i++) {
+    var field = fields[i] || {};
+    var isVisible = field.isVisible !== false;
+    var isOccupied = Boolean(field.isOccupied);
+    var expiresAt = sanitizePositiveInt(field.expiresAt || 0);
+    if (isVisible) visibleCount += 1;
+    else hiddenCount += 1;
+    if (expiresAt > 0 && expiresAt <= now) expiredCount += 1;
+    if (!isOccupied) continue;
+    occupiedCount += 1;
+    occupied.push({
+      id: String(field.id || ""),
+      x: sanitizePositiveInt(field.x || 0),
+      y: sanitizePositiveInt(field.y || 0),
+      rarityTier: String(field.rarityTier || ""),
+      qualityTier: String(field.qualityTier || ""),
+      occupiedByPlayerId: String(field.occupiedByPlayerId || ""),
+      occupiedByUsername: String(field.occupiedByUsername || ""),
+      occupyingFleetId: String(field.occupyingFleetId || ""),
+      expiresAt: expiresAt
+    });
+  }
+
+  occupied.sort(function(a, b) {
+    if (a.occupiedByUsername !== b.occupiedByUsername) return String(a.occupiedByUsername || "").localeCompare(String(b.occupiedByUsername || ""));
+    return String(a.id || "").localeCompare(String(b.id || ""));
+  });
+
+  var safeLimit = Math.max(1, Math.min(200, sanitizePositiveInt(limit || ADMIN_MAP_OCCUPIED_LIST_LIMIT_DEFAULT)));
+  return {
+    summary: {
+      totalFields: fields.length,
+      occupiedFields: occupiedCount,
+      visibleFields: visibleCount,
+      hiddenFields: hiddenCount,
+      expiredFields: expiredCount,
+      totalSpawned: sanitizePositiveInt(state.totalSpawned || 0),
+      updatedAt: sanitizePositiveInt(state.updatedAt || 0)
+    },
+    occupiedFields: occupied.slice(0, safeLimit)
+  };
+}
+
+function listAdminUserIdentities(nk, limit) {
+  var ids = listAllUserIdsForInboxBroadcast(nk);
+  var safeLimit = Math.max(1, Math.min(ADMIN_MAINTENANCE_USER_CAP, sanitizePositiveInt(limit || ADMIN_MAINTENANCE_USER_CAP)));
+  if (ids.length > safeLimit) ids = ids.slice(0, safeLimit);
+  var usernameIndex = {};
+  if (nk && typeof nk.usersGetId === "function") {
+    for (var offset = 0; offset < ids.length; offset += 100) {
+      var batch = ids.slice(offset, offset + 100);
+      var users = [];
+      try {
+        users = nk.usersGetId(batch) || [];
+      } catch (_err) {
+        users = [];
+      }
+      for (var i = 0; i < users.length; i++) {
+        var row = users[i] || {};
+        var userId = String(row.id || row.userId || "").trim();
+        if (!userId) continue;
+        usernameIndex[userId] = String(row.username || row.displayName || row.display_name || userId).trim() || userId;
+      }
+    }
+  }
+  var out = [];
+  for (var j = 0; j < ids.length; j++) {
+    var userId = String(ids[j] || "").trim();
+    if (!userId) continue;
+    out.push({
+      userId: userId,
+      username: usernameIndex[userId] || userId
+    });
+  }
+  return out;
+}
+
+function runAdminMapMaintenance(nk) {
+  var beforeRead = readMapFieldState(nk);
+  var beforeOverview = buildAdminMapOverview(beforeRead.state, ADMIN_MAP_OCCUPIED_LIST_LIMIT_DEFAULT);
+  var users = listAdminUserIdentities(nk, ADMIN_MAINTENANCE_USER_CAP);
+  var usersTouched = 0;
+  var reportsSettled = 0;
+  var errors = [];
+
+  for (var i = 0; i < users.length; i++) {
+    var row = users[i] || {};
+    var userId = String(row.userId || "").trim();
+    var username = String(row.username || userId).trim() || userId;
+    if (!userId) continue;
+    try {
+      var tx = withMapTransaction(nk, userId, username, function(economy, _inventory, _mapState, ts, syncResult) {
+        return {
+          activeExpeditions: countBlockingResourceExpeditions(getResourceExpeditionList(economy), ts),
+          settledReports: syncResult && Array.isArray(syncResult.reports)
+            ? syncResult.reports.length
+            : (syncResult && syncResult.report ? 1 : 0)
+        };
+      });
+      var touched = Boolean(
+        (tx.syncResult && tx.syncResult.changed) ||
+        (tx.result && sanitizePositiveInt(tx.result.settledReports || 0) > 0)
+      );
+      if (touched) usersTouched += 1;
+      reportsSettled += sanitizePositiveInt(tx.result && tx.result.settledReports || 0);
+    } catch (err) {
+      if (errors.length < 20) {
+        errors.push({
+          userId: userId,
+          username: username,
+          message: String(err || "Map maintenance failed.")
+        });
+      }
+    }
+  }
+
+  var cleanupTs = nowTs();
+  var afterRead = readMapFieldState(nk);
+  var mapState = normalizeMapFieldState(afterRead.state || defaultMapFieldState());
+  var mapVersion = String(afterRead.version || "");
+  var fingerprintBefore = JSON.stringify(mapState.fields || []);
+  compactMapFields(mapState, cleanupTs);
+  ensureMapFieldsSeeded(nk, mapState, cleanupTs);
+  var fingerprintAfter = JSON.stringify(mapState.fields || []);
+  if (fingerprintAfter !== fingerprintBefore || !mapVersion) {
+    mapState.version = sanitizePositiveInt(mapState.version || 0) + 1;
+    mapState.updatedAt = cleanupTs;
+    var write = {
+      collection: MAP_COLLECTION,
+      key: MAP_RESOURCE_FIELDS_KEY,
+      userId: SYSTEM_USER_ID,
+      permissionRead: 2,
+      permissionWrite: 0,
+      value: mapState
+    };
+    if (mapVersion) write.version = mapVersion;
+    nk.storageWrite([write]);
+  }
+
+  var finalOverview = buildAdminMapOverview(mapState, ADMIN_MAP_OCCUPIED_LIST_LIMIT_DEFAULT);
+  return {
+    usersScanned: users.length,
+    usersTouched: usersTouched,
+    reportsSettled: reportsSettled,
+    releasedFields: Math.max(0, sanitizePositiveInt(beforeOverview.summary.occupiedFields || 0) - sanitizePositiveInt(finalOverview.summary.occupiedFields || 0)),
+    before: beforeOverview.summary,
+    after: finalOverview.summary,
+    occupiedFields: finalOverview.occupiedFields,
+    errors: errors
+  };
 }
 
 function resolveQueueSlotForBuilding(state, buildingId) {
@@ -5381,6 +6081,7 @@ var INBOX_SYSTEM_BROADCAST_BATCH = 500;
 var INBOX_SYSTEM_BROADCAST_MAX_USERS = 100000;
 var INBOX_DAILY_NOON_EXPIRY_SEC = 72 * 60 * 60;
 var INBOX_DAILY_NOON_META_KIND = "DAILY_NOON_CHEST";
+var INBOX_SYSTEM_LOCALIZED_META_KIND = "SYSTEM_LOCALIZED";
 var INBOX_DAILY_NOON_ACCELERATOR_TABLE = [
   { itemId: "TIME_RIFT_60", weight: 50 },
   { itemId: "TIME_RIFT_300", weight: 35 },
@@ -5571,6 +6272,15 @@ function normalizeInboxAttachments(attachments) {
 function normalizeInboxMessageMeta(metaRaw) {
   if (!metaRaw || typeof metaRaw !== "object") return {};
   var kind = String(metaRaw.kind || "").trim().toUpperCase();
+  if (kind === INBOX_SYSTEM_LOCALIZED_META_KIND) {
+    return {
+      kind: INBOX_SYSTEM_LOCALIZED_META_KIND,
+      titleFr: String(metaRaw.titleFr || "").trim().slice(0, 140),
+      titleEn: String(metaRaw.titleEn || "").trim().slice(0, 140),
+      bodyFr: String(metaRaw.bodyFr || "").trim().slice(0, 8000),
+      bodyEn: String(metaRaw.bodyEn || "").trim().slice(0, 8000)
+    };
+  }
   if (kind !== INBOX_DAILY_NOON_META_KIND) return {};
   return {
     kind: INBOX_DAILY_NOON_META_KIND,
@@ -5579,6 +6289,25 @@ function normalizeInboxMessageMeta(metaRaw) {
     streakDay: Math.max(1, Math.min(7, sanitizePositiveInt(metaRaw.streakDay || 1))),
     rewardGenerated: Boolean(metaRaw.rewardGenerated),
     openedAt: sanitizePositiveInt(metaRaw.openedAt || 0)
+  };
+}
+
+function normalizeLocalizedSystemMessagePayload(raw) {
+  var titleFr = String(raw && (raw.titleFr || raw.title || "") || "").trim().slice(0, 140);
+  var titleEn = String(raw && (raw.titleEn || raw.title || "") || "").trim().slice(0, 140);
+  var bodyFr = String(raw && (raw.bodyFr || raw.body || "") || "").trim().slice(0, 8000);
+  var bodyEn = String(raw && (raw.bodyEn || raw.body || "") || "").trim().slice(0, 8000);
+  if (!titleFr && titleEn) titleFr = titleEn;
+  if (!titleEn && titleFr) titleEn = titleFr;
+  if (!bodyFr && bodyEn) bodyFr = bodyEn;
+  if (!bodyEn && bodyFr) bodyEn = bodyFr;
+  return {
+    titleFr: titleFr,
+    titleEn: titleEn,
+    bodyFr: bodyFr,
+    bodyEn: bodyEn,
+    baseTitle: titleFr || titleEn || "Annonce systeme",
+    baseBody: bodyFr || bodyEn || ""
   };
 }
 
@@ -5797,17 +6526,7 @@ function chestTypeToItemId(chestType) {
 }
 
 function ensureEconomyForClaim(raw) {
-  var state = raw && typeof raw === "object" ? raw : defaultEconomyState();
-  if (!state.resources || typeof state.resources !== "object") state.resources = {};
-  for (var i = 0; i < RESOURCE_IDS.length; i++) {
-    var rid = RESOURCE_IDS[i];
-    var cur = state.resources[rid];
-    var amount = cur && typeof cur === "object" ? Number(cur.amount || 0) : 0;
-    state.resources[rid] = { amount: Number.isFinite(amount) && amount > 0 ? amount : 0 };
-  }
-  state.premiumCredits = Math.max(0, Math.floor(Number(state.premiumCredits || 0)));
-  state.version = Math.max(1, Math.floor(Number(state.version || 1)));
-  state.lastUpdateTs = Math.max(0, Math.floor(Number(state.lastUpdateTs || nowTs())));
+  var state = ensureEconomyState(raw);
   return state;
 }
 
@@ -5959,9 +6678,10 @@ function listAllUserIdsForInboxBroadcast(nk) {
   return ids;
 }
 
-function createSystemMessage(nk, userIdOrBroadcast, title, body) {
+function createSystemMessage(nk, userIdOrBroadcast, title, body, localizedMeta) {
   var safeTitle = String(title || "Annonce systeme").trim().slice(0, 140) || "Annonce systeme";
   var safeBody = String(body || "").trim().slice(0, 8000);
+  var meta = localizedMeta && typeof localizedMeta === "object" ? normalizeInboxMessageMeta(localizedMeta) : {};
   if (String(userIdOrBroadcast || "").toLowerCase() === "broadcast") {
     var userIds = listAllUserIdsForInboxBroadcast(nk);
     var created = 0;
@@ -5973,6 +6693,7 @@ function createSystemMessage(nk, userIdOrBroadcast, title, body) {
           type: "SYSTEM",
           title: safeTitle,
           body: safeBody,
+          meta: meta,
           attachments: {},
           expiresAt: nowTs() + 60 * 60 * 24 * 30
         });
@@ -5987,6 +6708,7 @@ function createSystemMessage(nk, userIdOrBroadcast, title, body) {
       type: "SYSTEM",
       title: safeTitle,
       body: safeBody,
+      meta: meta,
       createdAt: nowTs(),
       stats: { attempted: userIds.length, delivered: created, failed: failed }
     };
@@ -5995,8 +6717,313 @@ function createSystemMessage(nk, userIdOrBroadcast, title, body) {
     type: "SYSTEM",
     title: safeTitle,
     body: safeBody,
+    meta: meta,
     attachments: {},
     expiresAt: nowTs() + 60 * 60 * 24 * 30
+  });
+}
+
+function rpcAdminBootstrapSelf(ctx, _logger, nk, _payload) {
+  var userId = requireUserId(ctx);
+  var username = String(ctx.username || "").trim();
+  var roleRead = readAdminRoleIndex(nk);
+  var existingRole = getAdminRoleEntry(roleRead.state, userId);
+  if (existingRole) {
+    return JSON.stringify({
+      ok: true,
+      bootstrapped: false,
+      isAdmin: true,
+      role: existingRole.role
+    });
+  }
+  if (hasEnabledAdmin(roleRead.state)) {
+    throw new Error("Admin bootstrap already completed.");
+  }
+  if (!isBootstrapAdminCandidate(ctx)) {
+    throw new Error("Bootstrap forbidden.");
+  }
+
+  var index = roleRead.state;
+  index.admins[userId] = {
+    userId: userId,
+    username: username,
+    role: ADMIN_ROLE_SUPERADMIN,
+    enabled: true,
+    grantedAt: nowTs(),
+    grantedBy: "bootstrap"
+  };
+  index.updatedAt = nowTs();
+  index.version = Math.max(1, sanitizePositiveInt(index.version || 1)) + 1;
+  writeAdminRoleIndex(nk, index, roleRead.version);
+  appendAdminAudit(nk, userId, username, "admin_bootstrap_self", { userId: userId, username: username }, {}, "Initial admin bootstrap");
+  return JSON.stringify({
+    ok: true,
+    bootstrapped: true,
+    isAdmin: true,
+    role: ADMIN_ROLE_SUPERADMIN
+  });
+}
+
+function rpcAdminStatus(ctx, _logger, nk, _payload) {
+  var userId = requireUserId(ctx);
+  var roleRead = readAdminRoleIndex(nk);
+  var roleEntry = getAdminRoleEntry(roleRead.state, userId);
+  return JSON.stringify({
+    ok: true,
+    isAdmin: Boolean(roleEntry),
+    role: roleEntry ? roleEntry.role : "",
+    username: String(ctx.username || ""),
+    userId: userId,
+    bootstrapAvailable: !hasEnabledAdmin(roleRead.state) && isBootstrapAdminCandidate(ctx)
+  });
+}
+
+function rpcAdminUsersSearch(ctx, _logger, nk, payload) {
+  assertAdmin(ctx, nk);
+  var body = parsePayload(payload);
+  var rows = queryAdminUsers(nk, body.query, body.limit);
+  var roleRead = readAdminRoleIndex(nk);
+  var items = [];
+  for (var i = 0; i < rows.length; i++) {
+    var row = rows[i] || {};
+    var userId = String(row.id || "").trim();
+    if (!userId) continue;
+    var roleEntry = getAdminRoleEntry(roleRead.state, userId);
+    items.push({
+      userId: userId,
+      username: String(row.username || row.display_name || userId),
+      displayName: String(row.display_name || ""),
+      avatarUrl: String(row.avatar_url || ""),
+      createdAt: String(row.create_time || ""),
+      disabledAt: String(row.disable_time || ""),
+      adminRole: roleEntry ? roleEntry.role : ""
+    });
+  }
+  return JSON.stringify({ ok: true, items: items });
+}
+
+function rpcAdminUserGet(ctx, _logger, nk, payload) {
+  assertAdmin(ctx, nk);
+  var body = parsePayload(payload);
+  var targetRaw = String(body.userId || body.username || body.target || "").trim();
+  if (!targetRaw) throw new Error("Missing target.");
+  var target = resolveInboxRecipient(nk, targetRaw);
+  var targetUserId = target.userId;
+  var targetUsername = target.username || targetUserId;
+  var rows = queryAdminUsers(nk, targetUserId, 5);
+  var userRow = null;
+  for (var i = 0; i < rows.length; i++) {
+    if (String((rows[i] && rows[i].id) || "") === targetUserId) {
+      userRow = rows[i];
+      break;
+    }
+  }
+  var economyRead = readEconomyState(nk, targetUserId);
+  var inventoryRead = readInventoryState(nk, targetUserId);
+  var profileRead = readPlayerProfile(nk, targetUserId);
+  var roleRead = readAdminRoleIndex(nk);
+  var inventoryItems = serializeInventoryItems(inventoryRead.state);
+  return JSON.stringify({
+    ok: true,
+    user: {
+      userId: targetUserId,
+      username: targetUsername,
+      displayName: String((userRow && userRow.display_name) || ""),
+      avatarUrl: String((userRow && userRow.avatar_url) || ""),
+      createdAt: String((userRow && userRow.create_time) || ""),
+      disabledAt: String((userRow && userRow.disable_time) || ""),
+      adminRole: (getAdminRoleEntry(roleRead.state, targetUserId) || {}).role || ""
+    },
+    economy: {
+      credits: Math.max(0, Math.floor(Number(economyRead.state.premiumCredits || 0))),
+      resources: serializeResourceAmounts(economyRead.state),
+      buildings: economyRead.state.buildings || {}
+    },
+    inventory: {
+      items: inventoryItems,
+      totalStacks: inventoryItems.length,
+      totalUnits: inventoryItems.reduce(function(sum, item) {
+        return sum + Math.max(0, Math.floor(Number(item.quantity || 0)));
+      }, 0),
+      mapDropNotifications: sanitizePositiveInt(inventoryRead.state.mapDropNotifications || 0)
+    },
+    profile: profileRead.state || defaultPlayerProfile()
+  });
+}
+
+function rpcAdminSendSystemMessage(ctx, _logger, nk, payload) {
+  var roleEntry = assertAdmin(ctx, nk);
+  var body = parsePayload(payload);
+  var localized = normalizeLocalizedSystemMessagePayload(body);
+  var reason = String(body.reason || "").trim();
+  if (!localized.titleFr || !localized.titleEn) throw new Error("French and English titles are required.");
+  if (!localized.bodyFr || !localized.bodyEn) throw new Error("French and English bodies are required.");
+  if (reason.length < 3) throw new Error("Reason is required.");
+  var result = createSystemMessage(nk, "broadcast", localized.baseTitle, localized.baseBody, {
+    kind: INBOX_SYSTEM_LOCALIZED_META_KIND,
+    titleFr: localized.titleFr,
+    titleEn: localized.titleEn,
+    bodyFr: localized.bodyFr,
+    bodyEn: localized.bodyEn
+  });
+  appendAdminAudit(
+    nk,
+    requireUserId(ctx),
+    String(ctx.username || ""),
+    "admin_send_system_message",
+    { mode: "broadcast" },
+    {
+      role: roleEntry.role,
+      titleFr: localized.titleFr,
+      titleEn: localized.titleEn,
+      bodyFrLength: localized.bodyFr.length,
+      bodyEnLength: localized.bodyEn.length,
+      delivered: result && result.stats ? sanitizePositiveInt(result.stats.delivered || 0) : 0
+    },
+    reason
+  );
+  return JSON.stringify({ ok: true, message: result });
+}
+
+function rpcAdminSendGift(ctx, _logger, nk, payload) {
+  var roleEntry = assertAdmin(ctx, nk);
+  var body = parsePayload(payload);
+  var targetMode = String(body.targetMode || "one").trim().toLowerCase() === "all" ? "all" : "one";
+  var reason = String(body.reason || "").trim();
+  if (reason.length < 3) throw new Error("Reason is required.");
+  var title = String(body.title || "Cadeau administrateur").trim();
+  var messageBody = String(body.body || "").trim();
+  var attachments = summarizeAdminAttachments(body);
+  if (!inboxHasClaimable(attachments)) throw new Error("Gift payload is empty.");
+
+  var targetSummary;
+  var result;
+  if (targetMode === "all") {
+    targetSummary = { mode: "all" };
+    result = createAdminGiftMessage(nk, "broadcast", title, messageBody, attachments);
+  } else {
+    var targetRaw = String(body.userId || body.username || body.target || "").trim();
+    if (!targetRaw) throw new Error("Missing target.");
+    var target = resolveInboxRecipient(nk, targetRaw);
+    targetSummary = { mode: "one", userId: target.userId, username: target.username || target.userId };
+    result = createAdminGiftMessage(nk, target.userId, title, messageBody, attachments);
+  }
+
+  appendAdminAudit(
+    nk,
+    requireUserId(ctx),
+    String(ctx.username || ""),
+    "admin_send_gift",
+    targetSummary,
+    {
+      role: roleEntry.role,
+      title: title,
+      resources: summarizeAdminResources(attachments.resources),
+      items: attachments.items,
+      credits: attachments.credits,
+      delivered: sanitizePositiveInt(result.delivered || 0),
+      failed: sanitizePositiveInt(result.failed || 0)
+    },
+    reason
+  );
+
+  return JSON.stringify({
+    ok: true,
+    target: targetSummary,
+    result: result
+  });
+}
+
+function rpcAdminOverview(ctx, _logger, nk, payload) {
+  assertAdmin(ctx, nk);
+  var body = parsePayload(payload);
+  var recentUsersLimit = Math.max(3, Math.min(12, sanitizePositiveInt(body.recentUsersLimit || 6)));
+  var roleRead = readAdminRoleIndex(nk);
+  var totalUsers = queryAdminScalarCount(nk, "SELECT COUNT(*) AS count FROM users", "count");
+  var disabledUsers = queryAdminScalarCount(nk, "SELECT COUNT(*) AS count FROM users WHERE disable_time > to_timestamp(0)", "count");
+  var mapOverview = buildAdminMapOverview(readMapFieldState(nk).state, 8);
+  var recentRows = queryAdminUsers(nk, "", recentUsersLimit);
+  var recentUsers = [];
+  for (var i = 0; i < recentRows.length; i++) {
+    var row = recentRows[i] || {};
+    var userId = String(row.id || "").trim();
+    if (!userId) continue;
+    recentUsers.push({
+      userId: userId,
+      username: String(row.username || row.display_name || userId),
+      displayName: String(row.display_name || ""),
+      avatarUrl: String(row.avatar_url || ""),
+      createdAt: String(row.create_time || ""),
+      disabledAt: String(row.disable_time || ""),
+      adminRole: (getAdminRoleEntry(roleRead.state, userId) || {}).role || ""
+    });
+  }
+  return JSON.stringify({
+    ok: true,
+    metrics: {
+      totalUsers: totalUsers,
+      disabledUsers: disabledUsers,
+      enabledAdmins: countEnabledAdminRoles(roleRead.state),
+      mapFields: mapOverview.summary.totalFields,
+      occupiedFields: mapOverview.summary.occupiedFields,
+      expiredFields: mapOverview.summary.expiredFields,
+      totalSpawnedFields: mapOverview.summary.totalSpawned,
+      mapUpdatedAt: mapOverview.summary.updatedAt
+    },
+    recentUsers: recentUsers,
+    occupiedFields: mapOverview.occupiedFields,
+    auditPreview: listAdminAuditEntries(nk, 8, "").items
+  });
+}
+
+function rpcAdminAuditList(ctx, _logger, nk, payload) {
+  assertAdmin(ctx, nk);
+  var body = parsePayload(payload);
+  var result = listAdminAuditEntries(nk, body.limit, body.cursor);
+  return JSON.stringify({
+    ok: true,
+    items: result.items,
+    cursor: result.cursor
+  });
+}
+
+function rpcAdminMapOverview(ctx, _logger, nk, payload) {
+  assertAdmin(ctx, nk);
+  var body = parsePayload(payload);
+  var limit = Math.max(1, Math.min(200, sanitizePositiveInt(body.limit || ADMIN_MAP_OCCUPIED_LIST_LIMIT_DEFAULT)));
+  var overview = buildAdminMapOverview(readMapFieldState(nk).state, limit);
+  return JSON.stringify({
+    ok: true,
+    summary: overview.summary,
+    occupiedFields: overview.occupiedFields
+  });
+}
+
+function rpcAdminMapMaintenance(ctx, _logger, nk, payload) {
+  var roleEntry = assertAdmin(ctx, nk);
+  var body = parsePayload(payload);
+  var reason = String(body.reason || "").trim();
+  if (reason.length < 3) throw new Error("Reason is required.");
+  var result = runAdminMapMaintenance(nk);
+  appendAdminAudit(
+    nk,
+    requireUserId(ctx),
+    String(ctx.username || ""),
+    "admin_map_maintenance",
+    { mode: "global" },
+    {
+      role: roleEntry.role,
+      usersScanned: sanitizePositiveInt(result.usersScanned || 0),
+      usersTouched: sanitizePositiveInt(result.usersTouched || 0),
+      reportsSettled: sanitizePositiveInt(result.reportsSettled || 0),
+      releasedFields: sanitizePositiveInt(result.releasedFields || 0),
+      occupiedAfter: sanitizePositiveInt(result.after && result.after.occupiedFields || 0)
+    },
+    reason
+  );
+  return JSON.stringify({
+    ok: true,
+    result: result
   });
 }
 
@@ -6957,7 +7984,7 @@ function readMapStateSnapshotNoWrite(nk, userId, username, commandementEscadreLe
   for (var i = 0; i < read.length; i++) {
     var obj = read[i] || {};
     if (obj.collection === ECONOMY_COLLECTION && obj.key === ECONOMY_KEY) {
-      economyState = obj.value || defaultEconomyState();
+      economyState = ensureEconomyState(obj.value || defaultEconomyState());
     } else if (obj.collection === INVENTORY_COLLECTION && obj.key === INVENTORY_KEY) {
       inventoryState = normalizeInventory(obj.value || defaultInventoryState(userId), userId);
     } else if (obj.collection === MAP_COLLECTION && obj.key === MAP_RESOURCE_FIELDS_KEY) {
@@ -6972,6 +7999,7 @@ function readMapStateSnapshotNoWrite(nk, userId, username, commandementEscadreLe
   if (commandementEscadreLevel > 0) {
     resolveMapActiveFleetSlots(economy, commandementEscadreLevel);
   }
+  var allowedResources = getAvailableResourcesForPlayer(economy);
 
   ensureMapFieldsSeeded(nk, mapState, ts);
   reconcileMapOccupancyForPlayer(nk, economy, mapState, userId, username);
@@ -6983,7 +8011,7 @@ function readMapStateSnapshotNoWrite(nk, userId, username, commandementEscadreLe
   }
   var fields = [];
   for (var fi = 0; fi < mapState.fields.length; fi++) {
-    fields.push(serializeMapFieldForViewer(mapState.fields[fi], userId));
+    fields.push(serializeMapFieldForViewer(mapState.fields[fi], userId, allowedResources));
   }
 
   return {
@@ -7015,6 +8043,7 @@ function rpcMapFieldsState(ctx, logger, nk, payload) {
       if (commandementEscadreLevel > 0) {
         resolveMapActiveFleetSlots(economy, commandementEscadreLevel);
       }
+      var allowedResources = getAvailableResourcesForPlayer(economy);
       var expeditionList = getResourceExpeditionList(economy);
       var serializedExpeditions = [];
       for (var ei = 0; ei < expeditionList.length; ei++) {
@@ -7022,7 +8051,7 @@ function rpcMapFieldsState(ctx, logger, nk, payload) {
       }
       var fields = [];
       for (var i = 0; i < mapState.fields.length; i++) {
-        fields.push(serializeMapFieldForViewer(mapState.fields[i], userId));
+        fields.push(serializeMapFieldForViewer(mapState.fields[i], userId, allowedResources));
       }
       return {
         serverNowTs: ts,
@@ -7075,6 +8104,7 @@ function rpcMapFieldsStart(ctx, _logger, nk, payload) {
 
   var tx = withMapTransaction(nk, userId, username, function(economy, inventory, mapState, ts, syncResult) {
     var maxActiveSlots = resolveMapActiveFleetSlots(economy, commandementEscadreLevel);
+    var allowedResources = getAvailableResourcesForPlayer(economy);
     var expedition = startMapExpedition(economy, mapState, userId, username, fieldId, fleet, ts, maxActiveSlots, nk);
     var expeditionList = getResourceExpeditionList(economy);
     var serializedExpeditions = [];
@@ -7088,14 +8118,14 @@ function rpcMapFieldsStart(ctx, _logger, nk, payload) {
     var selectedField = findMapField(mapState, fieldId);
     var fields = [];
     for (var i = 0; i < mapState.fields.length; i++) {
-      fields.push(serializeMapFieldForViewer(mapState.fields[i], userId));
+      fields.push(serializeMapFieldForViewer(mapState.fields[i], userId, allowedResources));
     }
     return {
       __dirty: true,
       serverNowTs: ts,
       expedition: serializeMapExpedition(expedition, ts),
       expeditions: serializedExpeditions,
-      selectedField: selectedField ? serializeMapFieldForViewer(selectedField, userId) : null,
+      selectedField: selectedField ? serializeMapFieldForViewer(selectedField, userId, allowedResources) : null,
       fields: fields,
       harvestInventory: serializeHarvestInventory(economy),
       maxActiveExpeditions: maxActiveSlots,
@@ -7130,6 +8160,7 @@ function rpcMapFieldsRecall(ctx, _logger, nk, payload) {
 
   var tx = withMapTransaction(nk, userId, username, function(economy, inventory, mapState, ts, syncResult) {
     var expedition = recallMapExpedition(economy, mapState, ts, expeditionId);
+    var allowedResources = getAvailableResourcesForPlayer(economy);
     var expeditionList = getResourceExpeditionList(economy);
     var serializedExpeditions = [];
     for (var ei = 0; ei < expeditionList.length; ei++) {
@@ -7137,7 +8168,7 @@ function rpcMapFieldsRecall(ctx, _logger, nk, payload) {
     }
     var fields = [];
     for (var i = 0; i < mapState.fields.length; i++) {
-      fields.push(serializeMapFieldForViewer(mapState.fields[i], userId));
+      fields.push(serializeMapFieldForViewer(mapState.fields[i], userId, allowedResources));
     }
     return {
       __dirty: true,
@@ -7482,6 +8513,16 @@ function InitModule(_ctx, logger, _nk, initializer) {
   initializer.registerRpc("rpc_inbox_daily_noon_test", rpcInboxDailyNoonTest);
   initializer.registerRpc("rpc_chat_get_likes", rpcChatGetLikes);
   initializer.registerRpc("rpc_chat_toggle_like", rpcChatToggleLike);
+  initializer.registerRpc("admin_bootstrap_self", rpcAdminBootstrapSelf);
+  initializer.registerRpc("admin_status", rpcAdminStatus);
+  initializer.registerRpc("admin_overview", rpcAdminOverview);
+  initializer.registerRpc("admin_audit_list", rpcAdminAuditList);
+  initializer.registerRpc("admin_users_search", rpcAdminUsersSearch);
+  initializer.registerRpc("admin_user_get", rpcAdminUserGet);
+  initializer.registerRpc("admin_map_overview", rpcAdminMapOverview);
+  initializer.registerRpc("admin_map_maintenance", rpcAdminMapMaintenance);
+  initializer.registerRpc("admin_send_system_message", rpcAdminSendSystemMessage);
+  initializer.registerRpc("admin_send_gift", rpcAdminSendGift);
   initializer.registerRpc("rpc_map_players", rpcMapPlayers);
   initializer.registerRpc("rpc_map_fields_state", rpcMapFieldsState);
   initializer.registerRpc("rpc_map_fields_start", rpcMapFieldsStart);

@@ -1,4 +1,5 @@
-﻿import { Client, Session } from "@heroiclabs/nakama-js";
+import { Client, Session } from "@heroiclabs/nakama-js";
+import * as THREE from "three";
 import {
   ArrowUpCircle,
   Bed,
@@ -230,6 +231,26 @@ type PopulationSnapshot = {
   onboardingProtectionRemainingSec: number;
 };
 
+type CommanderId = "selene_voss" | "kael_ardent" | "lyra_nova" | "orion_hale";
+
+type CommanderDef = {
+  id: CommanderId;
+  nameFr: string;
+  nameEn: string;
+  titleFr: string;
+  titleEn: string;
+  descriptionFr: string;
+  descriptionEn: string;
+  bonusLabelFr: string;
+  bonusLabelEn: string;
+  accent: string;
+  image: string;
+  productionMultiplier?: number;
+  buildingTimeFactor?: number;
+  researchTimeFactor?: number;
+  storageMultiplier?: number;
+};
+
 type MainMissionDefinition = {
   id: string;
   roomType: RoomType;
@@ -261,6 +282,8 @@ const SAVE_KEY_LEGACY_OWNER_KEY = "hsg_vault_state_v2_owner";
 const AUTH_SESSION_KEY = "hsg_nakama_session_v1";
 const UI_SCREEN_KEY = "hsg_ui_screen_v1";
 const PROFILE_EMAIL_DRAFT_KEY = "hsg_profile_email_draft_v1";
+const PROFILE_COMMANDER_COLLECTION = "hyperstructure_profile";
+const PROFILE_COMMANDER_KEY = "commander_state_v1";
 const UI_LANG_KEY = "hsg_ui_lang_v1";
 const INVENTORY_UI_NOTIFS_KEY = "hsg_inventory_notifs_v1";
 const SCORE_DISPLAY_DIVISOR = 50000;
@@ -283,6 +306,214 @@ function resolveTimeBoostImage(durationSeconds?: number | null) {
   const secs = Math.max(0, Math.floor(Number(durationSeconds ?? 0)));
   return TIME_BOOST_IMAGE_BY_SECONDS[secs] ?? TIME_BOOST_ITEM_IMAGE;
 }
+
+const DEFAULT_COMMANDER_ID: CommanderId = "selene_voss";
+
+const COMMANDER_DEFS: Record<CommanderId, CommanderDef> = {
+  selene_voss: {
+    id: "selene_voss",
+    nameFr: "Selene Voss",
+    nameEn: "Selene Voss",
+    titleFr: "Architecte des Flux",
+    titleEn: "Flux Architect",
+    descriptionFr: "Optimise les chaines de production et stabilise les rendements de l'hyperstructure.",
+    descriptionEn: "Optimizes production chains and stabilizes hyperstructure output.",
+    bonusLabelFr: "Production globale +8%",
+    bonusLabelEn: "Global production +8%",
+    accent: "#60d7c2",
+    image: "/room-images/commandant1.png",
+    productionMultiplier: 1.08
+  },
+  kael_ardent: {
+    id: "kael_ardent",
+    nameFr: "Kael Ardent",
+    nameEn: "Kael Ardent",
+    titleFr: "Maitre des Chantiers",
+    titleEn: "Dockmaster",
+    descriptionFr: "Coordonne les equipes de construction pour reduire les temps de chantier.",
+    descriptionEn: "Coordinates construction crews to reduce build times.",
+    bonusLabelFr: "Temps de construction -10%",
+    bonusLabelEn: "Construction time -10%",
+    accent: "#6db9ff",
+    image: "/room-images/commandant4.png",
+    buildingTimeFactor: 0.9
+  },
+  lyra_nova: {
+    id: "lyra_nova",
+    nameFr: "Lyra Nova",
+    nameEn: "Lyra Nova",
+    titleFr: "Directrice Scientifique",
+    titleEn: "Science Director",
+    descriptionFr: "Accelere les cycles de recherche et la priorisation des laboratoires.",
+    descriptionEn: "Accelerates research cycles and laboratory prioritization.",
+    bonusLabelFr: "Temps de recherche -10%",
+    bonusLabelEn: "Research time -10%",
+    accent: "#9e8cff",
+    image: "/room-images/commandant3.png",
+    researchTimeFactor: 0.9
+  },
+  orion_hale: {
+    id: "orion_hale",
+    nameFr: "Orion Hale",
+    nameEn: "Orion Hale",
+    titleFr: "Strategiste Logistique",
+    titleEn: "Logistics Strategist",
+    descriptionFr: "Renforce les chaines de stockage et retarde la saturation des entrepots.",
+    descriptionEn: "Strengthens storage chains and delays warehouse saturation.",
+    bonusLabelFr: "Capacite d'entrepot +15%",
+    bonusLabelEn: "Storage capacity +15%",
+    accent: "#f0b86f",
+    image: "/room-images/commandant2.png",
+    storageMultiplier: 1.15
+  }
+};
+
+const COMMANDER_IDS = Object.keys(COMMANDER_DEFS) as CommanderId[];
+
+const commanderLabel = (commanderId: CommanderId, language: UILanguage) =>
+  language === "en" ? COMMANDER_DEFS[commanderId].nameEn : COMMANDER_DEFS[commanderId].nameFr;
+
+const commanderTitle = (commanderId: CommanderId, language: UILanguage) =>
+  language === "en" ? COMMANDER_DEFS[commanderId].titleEn : COMMANDER_DEFS[commanderId].titleFr;
+
+const commanderDescription = (commanderId: CommanderId, language: UILanguage) =>
+  language === "en" ? COMMANDER_DEFS[commanderId].descriptionEn : COMMANDER_DEFS[commanderId].descriptionFr;
+
+const commanderBonusLabel = (commanderId: CommanderId, language: UILanguage) =>
+  language === "en" ? COMMANDER_DEFS[commanderId].bonusLabelEn : COMMANDER_DEFS[commanderId].bonusLabelFr;
+
+const commanderIdFromAvatar = (avatarUrl?: string | null): CommanderId =>
+  COMMANDER_IDS.find((id) => COMMANDER_DEFS[id].image === (avatarUrl || "").trim()) ?? DEFAULT_COMMANDER_ID;
+
+type LoginIntroBackdropId = "void" | "orbital" | "collapse" | "command";
+type LoginIntroSpeaker = "system" | "kael" | "lyra" | "title";
+
+type LoginIntroScene = {
+  id: number;
+  speaker: LoginIntroSpeaker;
+  backdrop: LoginIntroBackdropId;
+  accent?: "amber" | "cyan";
+  side?: "left" | "right";
+  textFr: string;
+  textEn: string;
+  autoAdvanceMs?: number;
+};
+
+const LOGIN_INTRO_SCENES: LoginIntroScene[] = [
+  {
+    id: 0,
+    speaker: "system",
+    backdrop: "void",
+    textFr:
+      "ANNÉE 2847\n\nLes mondes habitables sont tombés les uns après les autres.\nIl ne reste plus que des hyperstructures, des routes minières… et le vide.",
+    textEn:
+      "YEAR 2847\n\nThe habitable worlds have fallen one by one.\nOnly hyperstructures, mining routes and the void remain.",
+    autoAdvanceMs: 2200
+  },
+  {
+    id: 1,
+    speaker: "kael",
+    backdrop: "orbital",
+    accent: "amber",
+    side: "left",
+    textFr:
+      "Le dernier relevé orbital est sans appel.\nLes réserves faciles sont épuisées.\nLes prochaines semaines se joueront sur l’acier, le carburant et la discipline.",
+    textEn:
+      "The latest orbital scan is conclusive. Easy reserves are gone. The coming weeks will be decided by steel, fuel and discipline."
+  },
+  {
+    id: 2,
+    speaker: "lyra",
+    backdrop: "orbital",
+    accent: "cyan",
+    side: "right",
+    textFr:
+      "Les alliances se reforment déjà.\nLes champs de ressources attirent les flottes, les opportunistes et les prédateurs.\nDésormais, chaque départ est une décision stratégique.",
+    textEn:
+      "Alliances are already reforming. Resource fields attract fleets, opportunists and predators. Every launch becomes a strategic decision."
+  },
+  {
+    id: 3,
+    speaker: "system",
+    backdrop: "collapse",
+    textFr:
+      "Autour de votre hyperstructure, les anciennes orbites ne sont plus que des cicatrices lumineuses.\nLe trafic civil se mêle aux convois militaires dans un même flux de survie.",
+    textEn:
+      "[Around your hyperstructure, former orbits are now little more than luminous scars.]\n[Civilian traffic blends into military convoys.]",
+    autoAdvanceMs: 1800
+  },
+  {
+    id: 4,
+    speaker: "kael",
+    backdrop: "command",
+    accent: "amber",
+    side: "left",
+    textFr:
+      "Votre structure n’est pas prête.\nLes entrepôts saturent.\nLes chantiers manquent de cadence.\nLa moindre erreur logistique se paiera en retard, en famine… ou en pertes.",
+    textEn:
+      "Your structure is not ready. Warehouses saturate. Shipyards lack tempo. The smallest logistical failure will be paid in delays, hunger or losses."
+  },
+  {
+    id: 5,
+    speaker: "lyra",
+    backdrop: "command",
+    accent: "cyan",
+    side: "right",
+    textFr:
+      "{player}, vos priorités sont claires :\nstabiliser la population, ouvrir les chaînes de production, sécuriser les champs de ressources,\net ne jamais laisser l’ennemi imposer le tempo.",
+    textEn:
+      "{player}, your priorities are simple: stabilize the population, expand production chains, secure resource fields and never let the enemy set the tempo."
+  },
+  {
+    id: 6,
+    speaker: "kael",
+    backdrop: "command",
+    accent: "amber",
+    side: "left",
+    textFr:
+      "Construisez plus vite que vos rivaux.\nRécoltez avant eux.\nRenforcez vos flottes avant qu’ils ne découvrent vos faiblesses.",
+    textEn:
+      "Build faster than your rivals. Harvest before they do. Reinforce your fleets before they discover your weaknesses."
+  },
+  {
+    id: 7,
+    speaker: "lyra",
+    backdrop: "command",
+    accent: "cyan",
+    side: "right",
+    textFr:
+      "Vous ne dirigez pas une simple station.\nVous dirigez une civilisation suspendue dans le vide.\nChaque module, chaque recherche, chaque escadre peut faire pencher l’avenir.",
+    textEn:
+      "You are not running a simple station. You are leading a civilization suspended in the void. Every module, every research cycle, every squadron matters."
+  },
+  {
+    id: 8,
+    speaker: "title",
+    backdrop: "void",
+    textFr: "HYPERSTRUX\nPROTOCOLE DE COMMANDEMENT",
+    textEn: "HYPERSTRUX\nCOMMAND PROTOCOL",
+    autoAdvanceMs: 2600
+  }
+];
+
+const LOGIN_INTRO_BACKDROP_STYLES: Record<LoginIntroBackdropId, CSSProperties> = {
+  void: {
+    background:
+      "radial-gradient(circle at 50% -10%, rgba(89, 176, 255, 0.18), transparent 32%), linear-gradient(180deg, #01040a 0%, #02050d 45%, #000103 100%)"
+  },
+  orbital: {
+    background:
+      "radial-gradient(circle at 18% 18%, rgba(77, 155, 255, 0.16), transparent 24%), radial-gradient(circle at 82% 76%, rgba(35, 197, 255, 0.1), transparent 22%), linear-gradient(160deg, #04101a 0%, #071726 45%, #02060d 100%)"
+  },
+  collapse: {
+    background:
+      "radial-gradient(circle at 24% 42%, rgba(255, 108, 59, 0.16), transparent 24%), radial-gradient(circle at 78% 18%, rgba(101, 167, 255, 0.12), transparent 22%), linear-gradient(180deg, #140606 0%, #120a16 52%, #04030a 100%)"
+  },
+  command: {
+    background:
+      "radial-gradient(circle at 50% 100%, rgba(0, 209, 255, 0.14), transparent 28%), radial-gradient(circle at 50% 0%, rgba(79, 130, 255, 0.12), transparent 20%), linear-gradient(180deg, #03101b 0%, #041523 40%, #01070d 100%)"
+  }
+};
 
 const vaultStorageKeyForUser = (userId?: string | null) =>
   userId && userId.trim().length > 0 ? `${SAVE_KEY_USER_PREFIX}_${userId}` : SAVE_KEY;
@@ -546,6 +777,426 @@ const ROOM_NAME_EN: Record<RoomType, string> = {
   academie_technique: "Technical Academy",
   universite_orbitale: "Orbital University",
   entrepot: "Orbital Warehouse"
+};
+
+type BuildGuideEntry = {
+  roleFr: string;
+  roleEn: string;
+  detailsFr: string[];
+  detailsEn: string[];
+  tipsFr: string[];
+  tipsEn: string[];
+};
+
+const BUILD_GUIDE_CONTENT: Partial<Record<RoomType, BuildGuideEntry>> = {
+  carbone: {
+    roleFr: "Base absolue de ton economie. Le carbone finance presque tout le debut de partie.",
+    roleEn: "Absolute foundation of your economy. Carbon funds almost everything early on.",
+    detailsFr: [
+      "Produit la ressource la plus demandee pour les constructions, upgrades et debuts de tech.",
+      "Sert de socle a toute la chaine industrielle : si le carbone manque, tout ralentit.",
+      "Consomme des travailleurs, donc il faut suivre ta population en parallele."
+    ],
+    detailsEn: [
+      "Produces the most demanded resource for buildings, upgrades and early tech.",
+      "Acts as the base of the whole industrial chain: if carbon stalls, everything stalls.",
+      "Consumes workers, so population growth must keep up."
+    ],
+    tipsFr: [
+      "Priorite debut de partie : garde toujours plusieurs niveaux d'avance sur tes besoins immediats.",
+      "Monte-le avant de forcer les ressources avancees, sinon tu bloques toute ta progression.",
+      "Si ton equipage disponible baisse trop, tu as peut-etre surdeveloppe la production trop vite."
+    ],
+    tipsEn: [
+      "Early priority: keep it a few levels ahead of your immediate needs.",
+      "Upgrade it before forcing advanced resources or your whole progression will choke.",
+      "If available crew drops too much, you likely expanded production too fast."
+    ]
+  },
+  titane: {
+    roleFr: "Deuxieme pilier economique. Le titane accompagne presque toutes les structures serieuses.",
+    roleEn: "Second economic pillar. Titanium supports almost every serious structure.",
+    detailsFr: [
+      "Monte en meme temps que le carbone sur tout le mid game.",
+      "Devient vite un cout recurrent pour hangar, technologies et batiments civils.",
+      "Comme le carbone, il mobilise des travailleurs."
+    ],
+    detailsEn: [
+      "Should grow alongside carbon through the whole mid game.",
+      "Quickly becomes a recurring cost for hangar, technologies and civic buildings.",
+      "Like carbon, it ties up workers."
+    ],
+    tipsFr: [
+      "Evite de laisser le titane trop loin derriere le carbone.",
+      "Si tu prepares une phase militaire ou population, monte le titane avant.",
+      "Surveille ton entrepot : un titane bloque coupe ton rythme de construction."
+    ],
+    tipsEn: [
+      "Do not let titanium lag too far behind carbon.",
+      "If you plan a military or population phase, push titanium first.",
+      "Watch your storage: blocked titanium kills your building tempo."
+    ]
+  },
+  osmium: {
+    roleFr: "Premier palier de ressource avancee. Il debloque une economie plus dense.",
+    roleEn: "First advanced resource tier. It unlocks a denser economy.",
+    detailsFr: [
+      "Intervient dans les batiments plus techniques et les paliers de progression du milieu de partie.",
+      "Chaque niveau demande davantage de main-d'oeuvre qu'une simple mine de carbone ou titane.",
+      "C'est souvent la premiere vraie ressource qui crée des goulets."
+    ],
+    detailsEn: [
+      "Used in more technical buildings and mid-game progression tiers.",
+      "Each level demands more workforce than a simple carbon or titanium line.",
+      "It is often the first resource that creates real bottlenecks."
+    ],
+    tipsFr: [
+      "Ne l'ouvre pas trop tot si ta population n'est pas stable.",
+      "Monte-le quand ton carbone et ton titane sont deja confortables.",
+      "Si tes files ralentissent, regarde d'abord si l'osmium manque."
+    ],
+    tipsEn: [
+      "Do not unlock it too early if your population is unstable.",
+      "Scale it when carbon and titanium already feel comfortable.",
+      "If your queues slow down, check osmium first."
+    ]
+  },
+  adamantium: {
+    roleFr: "Ressource lourde pour les paliers solides du mid/late game.",
+    roleEn: "Heavy resource for solid mid/late-game tiers.",
+    detailsFr: [
+      "Sert aux batiments plus chers, aux composantes plus militaires et aux progressions robustes.",
+      "Demande une economie de base deja saine pour etre rentable.",
+      "Mobilise beaucoup de travailleurs par niveau."
+    ],
+    detailsEn: [
+      "Feeds pricier buildings, stronger military layers and robust progression steps.",
+      "Needs a healthy base economy to be worth it.",
+      "Consumes a lot of workers per level."
+    ],
+    tipsFr: [
+      "N'investis pas dedans si ton carbone/titane/osmium sont encore tendus.",
+      "Monte-le par paliers pour accompagner tes besoins, pas par reflexe.",
+      "Si ta population souffre, ce batiment est souvent trop cher en workforce."
+    ],
+    tipsEn: [
+      "Do not invest in it while carbon, titanium or osmium still feel tight.",
+      "Scale it in steps to match demand, not by reflex.",
+      "If your population is strained, this building is often too workforce-heavy."
+    ]
+  },
+  magmatite: {
+    roleFr: "Ressource avancee de specialisation. Elle sert a densifier ton compte.",
+    roleEn: "Advanced specialization resource used to deepen your account.",
+    detailsFr: [
+      "Entre dans les chaines plus exigeantes de progression.",
+      "Ne sert vraiment que si ton economie de base tient deja sans assistance.",
+      "Chaque niveau augmente la pression sur la main-d'oeuvre."
+    ],
+    detailsEn: [
+      "Feeds more demanding progression chains.",
+      "Only becomes truly useful once your base economy runs comfortably.",
+      "Each level increases workforce pressure."
+    ],
+    tipsFr: [
+      "Considere-la comme un luxe controle, pas comme une priorite debut/mid.",
+      "Monte-la quand tu sais deja pourquoi tu en as besoin.",
+      "Si tes equipages manquent, ralentis ici avant de couper les batiments de base."
+    ],
+    tipsEn: [
+      "Treat it as controlled luxury, not as an early or mid-game priority.",
+      "Upgrade it when you know exactly why you need it.",
+      "If crew is tight, slow this line before cutting core production."
+    ]
+  },
+  neodyme: {
+    roleFr: "Ressource de propulsion et de sophistication industrielle.",
+    roleEn: "Resource tied to propulsion and industrial sophistication.",
+    detailsFr: [
+      "Sert a soutenir des paliers plus techniques et des compositions plus avancees.",
+      "A besoin d'une population deja saine pour ne pas peser sur tout le reste.",
+      "Coute cher en temps et en main-d'oeuvre."
+    ],
+    detailsEn: [
+      "Supports more technical tiers and advanced compositions.",
+      "Needs a healthy population base or it drags down everything else.",
+      "Expensive in both time and workforce."
+    ],
+    tipsFr: [
+      "Monte-le quand tu prevois une vraie acceleration technologique ou hangar.",
+      "N'essaie pas de le spam : quelques niveaux bien places suffisent souvent.",
+      "Associe-le a Quartiers residentiels si ton equipage descend trop."
+    ],
+    tipsEn: [
+      "Scale it when you plan a real tech or hangar acceleration.",
+      "Do not spam it: a few well-timed levels are often enough.",
+      "Pair it with Residential Quarters if crew availability drops too far."
+    ]
+  },
+  chronium: {
+    roleFr: "Ressource tardive orientee optimisation et paliers technologiques eleves.",
+    roleEn: "Late resource focused on optimization and higher tech tiers.",
+    detailsFr: [
+      "Intervient quand le compte commence a se specialiser fortement.",
+      "Chaque niveau est couteux, donc il doit repondre a un besoin concret.",
+      "Il augmente la charge de workforce plus qu'une ressource de base."
+    ],
+    detailsEn: [
+      "Becomes relevant once the account starts specializing heavily.",
+      "Each level is expensive and should answer a concrete need.",
+      "It stresses workforce more than baseline resources."
+    ],
+    tipsFr: [
+      "Monte-le seulement si ta boucle carbone/titane/osmium est deja solide.",
+      "Ne le construis pas pour la collection : construis-le pour un objectif.",
+      "Si ta production globale s'affaisse, verifie d'abord la workforce."
+    ],
+    tipsEn: [
+      "Only scale it once carbon, titanium and osmium are already solid.",
+      "Do not build it for collection value: build it for a goal.",
+      "If total output drops, check workforce first."
+    ]
+  },
+  aetherium: {
+    roleFr: "Ressource haut de gamme pour les structures et technologies d'excellence.",
+    roleEn: "Premium resource for high-end structures and advanced technologies.",
+    detailsFr: [
+      "Sert a franchir des caps de compte plus ambitieux.",
+      "Devient utile quand le reste de l'economie tourne deja en continu.",
+      "Peut facilement cannibaliser ta workforce si tu l'ouvres trop vite."
+    ],
+    detailsEn: [
+      "Helps push the account through more ambitious tiers.",
+      "Becomes useful once the rest of your economy already runs smoothly.",
+      "Can easily cannibalize workforce if unlocked too early."
+    ],
+    tipsFr: [
+      "Attends d'avoir une bonne stabilite et une nourriture confortable.",
+      "Monte-le progressivement, pas avant d'avoir absorbe les couts precedents.",
+      "Si tu veux plus d'equipage, ce n'est jamais la priorite."
+    ],
+    tipsEn: [
+      "Wait until stability and food are comfortable.",
+      "Scale it progressively, not before you have absorbed previous costs.",
+      "If you need more crew, this is never the first priority."
+    ]
+  },
+  isotope7: {
+    roleFr: "Ressource rare pour les paliers lourds et les projets de fin de milieu de partie.",
+    roleEn: "Rare resource for heavy tiers and late-mid-game projects.",
+    detailsFr: [
+      "Demande deja un compte bien stabilise.",
+      "Cree peu de valeur si ta base economique reste bancale.",
+      "Son cout de mise a niveau doit etre compense par un vrai besoin."
+    ],
+    detailsEn: [
+      "Requires a well-stabilized account first.",
+      "Creates little value if your core economy is still shaky.",
+      "Its upgrade cost should answer a real need."
+    ],
+    tipsFr: [
+      "Priorise ce batiment seulement quand ton ecosysteme population/ressources tient seul.",
+      "Si tu bloques sur l'equipage, reporte-le sans hesiter.",
+      "Il sert a accelerer une fin de plan, pas a sauver un debut fragile."
+    ],
+    tipsEn: [
+      "Prioritize it only once your population/resource ecosystem stands on its own.",
+      "If crew is the issue, postpone it immediately.",
+      "It accelerates the end of a plan, not a fragile early game."
+    ]
+  },
+  singulite: {
+    roleFr: "Sommet de la chaine industrielle. Ressource d'elite et de prestige.",
+    roleEn: "Peak of the industrial chain. Elite and prestige resource.",
+    detailsFr: [
+      "Ne devient rentable que tres tard, avec une economie enorme derriere.",
+      "Mobilise beaucoup de temps, de couts et de travailleurs.",
+      "C'est un batiment de cap final, pas de transition."
+    ],
+    detailsEn: [
+      "Only becomes worthwhile very late with a massive economy behind it.",
+      "Consumes a lot of time, costs and workers.",
+      "It is a final-cap building, not a transition tool."
+    ],
+    tipsFr: [
+      "Ne le construis que si tout le reste tient deja sans tension.",
+      "Chaque niveau doit servir un objectif concret de late game.",
+      "Si tu veux simplement respirer en economie, investis ailleurs d'abord."
+    ],
+    tipsEn: [
+      "Only build it when everything else already runs without strain.",
+      "Each level should serve a concrete late-game goal.",
+      "If you just need breathing room in your economy, invest elsewhere first."
+    ]
+  },
+  quartiers_residentiels: {
+    roleFr: "Batiment cle de la population : plus de capacite, donc plus d'habitants, plus de travailleurs et plus d'equipages.",
+    roleEn: "Key population building: more housing means more people, more workers and more crews.",
+    detailsFr: [
+      "Augmente la capacite habitation. Si ta population depasse cette capacite, tu subis des malus.",
+      "Ajoute aussi un peu de stabilite et d'attractivite.",
+      "C'est le batiment numero un pour debloquer plus de main-d'oeuvre libre."
+    ],
+    detailsEn: [
+      "Raises housing capacity. If population exceeds this cap, you take penalties.",
+      "Also adds a bit of stability and attractiveness.",
+      "It is the number one building for unlocking more free workforce."
+    ],
+    tipsFr: [
+      "Si tu manques d'equipage, commence ici.",
+      "Si tu vois un malus de surpopulation, c'est ta priorite absolue.",
+      "Monte-le avant d'ajouter trop de nouvelles lignes de production."
+    ],
+    tipsEn: [
+      "If you lack crew, start here.",
+      "If you see an overcapacity penalty, this is absolute priority.",
+      "Upgrade it before adding too many new production lines."
+    ]
+  },
+  cantine_hydroponique: {
+    roleFr: "Le moteur alimentaire de ta colonie. Sans nourriture, la croissance s'effondre.",
+    roleEn: "Your colony's food engine. Without food, growth collapses.",
+    detailsFr: [
+      "Produit la nourriture horaire necessaire a la population.",
+      "Soutient aussi la stabilite et un peu l'attractivite.",
+      "Une balance nourriture negative finit par bloquer ta croissance."
+    ],
+    detailsEn: [
+      "Produces the hourly food your population needs.",
+      "Also supports stability and a bit of attractiveness.",
+      "A negative food balance eventually stops your growth."
+    ],
+    tipsFr: [
+      "Garde toujours une balance nourriture positive.",
+      "Si ta population ne monte plus, verifie d'abord cette ligne.",
+      "Monte-la en tandem avec Quartiers residentiels."
+    ],
+    tipsEn: [
+      "Keep your food balance positive at all times.",
+      "If population stopped growing, check this first.",
+      "Upgrade it alongside Residential Quarters."
+    ]
+  },
+  centre_medical: {
+    roleFr: "Batiment de croissance et de fiabilisation sociale.",
+    roleEn: "Growth and social reliability building.",
+    detailsFr: [
+      "Ameliore la croissance naturelle via le bonus de sante.",
+      "Apporte aussi de la stabilite.",
+      "Devient important quand tu veux accelerer une vraie montee en population."
+    ],
+    detailsEn: [
+      "Improves natural growth through health bonuses.",
+      "Also provides stability.",
+      "Becomes important when you want to truly accelerate population growth."
+    ],
+    tipsFr: [
+      "Monte-le quand ton socle Quartiers + Cantine est deja en place.",
+      "Tres utile si tu veux soutenir plus de workforce sans crise.",
+      "Bon investissement apres 500 population."
+    ],
+    tipsEn: [
+      "Upgrade it once Residential Quarters + Canteen are already online.",
+      "Very useful if you want more workforce without crises.",
+      "A strong investment after 500 population."
+    ]
+  },
+  parc_orbital: {
+    roleFr: "Stabilite, loisirs et attractivite : il rend la colonie plus saine et plus accueillante.",
+    roleEn: "Stability, leisure and attractiveness: it makes the colony healthier and more appealing.",
+    detailsFr: [
+      "Ameliore fortement la stabilite sociale.",
+      "Augmente aussi l'attractivite, donc la migration positive.",
+      "Reduit le risque de crise ou de colonie sous tension."
+    ],
+    detailsEn: [
+      "Strongly improves social stability.",
+      "Also boosts attractiveness and therefore positive migration.",
+      "Reduces the risk of crises or a colony under strain."
+    ],
+    tipsFr: [
+      "Excellent batiment de confort quand tu pousses la population.",
+      "Tres bon choix si tes malus viennent surtout de la stabilite.",
+      "Ne remplace pas Quartiers et Cantine : il les complete."
+    ],
+    tipsEn: [
+      "Excellent comfort building when pushing population upward.",
+      "Very good if your penalties mostly come from stability.",
+      "It does not replace Quarters or Canteen: it complements them."
+    ]
+  },
+  academie_technique: {
+    roleFr: "Convertit une partie de la population en ingenieurs pour accelerer la construction.",
+    roleEn: "Converts part of your population into engineers to speed up construction.",
+    detailsFr: [
+      "Augmente la part d'ingenieurs dans la population.",
+      "Plus d'ingenieurs = meilleures vitesses de construction.",
+      "Mais cette specialisation peut reduire la part de travailleurs libres."
+    ],
+    detailsEn: [
+      "Increases the share of engineers within the population.",
+      "More engineers means faster construction speeds.",
+      "But this specialization can reduce the share of free workers."
+    ],
+    tipsFr: [
+      "Tres fort si tu chaines les constructions en continu.",
+      "A eviter trop tot si ton probleme principal est l'equipage.",
+      "Monte-le quand ton economie et ta population sont deja stables."
+    ],
+    tipsEn: [
+      "Very strong if you chain building queues continuously.",
+      "Avoid it too early if your main problem is crew.",
+      "Upgrade it when your economy and population are already stable."
+    ]
+  },
+  universite_orbitale: {
+    roleFr: "Convertit une partie de la population en scientifiques pour accelerer la recherche.",
+    roleEn: "Converts part of your population into scientists to speed up research.",
+    detailsFr: [
+      "Augmente la part de scientifiques.",
+      "Plus de scientifiques = recherches plus rapides.",
+      "Comme l'Academie, elle peut reduire la part de travailleurs et donc l'equipage disponible."
+    ],
+    detailsEn: [
+      "Increases the scientist share.",
+      "More scientists means faster research.",
+      "Like the Academy, it can reduce the worker share and therefore available crew."
+    ],
+    tipsFr: [
+      "Monte-la pour une phase de technologie, pas pour relancer une economie bloquee.",
+      "Si ton equipage est tendu, ce batiment n'est pas prioritaire.",
+      "Tres forte une fois ta population haute et stable."
+    ],
+    tipsEn: [
+      "Upgrade it for a technology phase, not to rescue a blocked economy.",
+      "If crew is tight, this building is not a priority.",
+      "Very strong once your population is high and stable."
+    ]
+  },
+  entrepot: {
+    roleFr: "Infrastructure de stockage. Il protege ton rythme economique et aide aussi la capacite globale de la colonie.",
+    roleEn: "Storage infrastructure. It protects your economic tempo and also helps colony capacity.",
+    detailsFr: [
+      "Augmente la reserve maximale de ressources.",
+      "Empeche les blocages de production quand les stocks touchent le plafond.",
+      "Contribue aussi indirectement a la capacite de la colonie dans la formule population."
+    ],
+    detailsEn: [
+      "Raises maximum resource storage.",
+      "Prevents production blocks when stockpiles hit the cap.",
+      "Also contributes indirectly to colony capacity in the population formula."
+    ],
+    tipsFr: [
+      "A monter des que tu commences a saturer tes ressources.",
+      "Excellent batiment de confort pour soutenir une economie en croissance.",
+      "Tres rentable avant une session longue hors ligne."
+    ],
+    tipsEn: [
+      "Upgrade it as soon as your resources start capping.",
+      "Excellent comfort building to support a growing economy.",
+      "Very efficient before a long offline session."
+    ]
+  }
 };
 
 const roomDisplayName = (type: RoomType, language: UILanguage): string =>
@@ -2977,6 +3628,167 @@ const getPlanetSpriteStyle = (worldType: SectorWorld["worldType"]): CSSPropertie
   };
 };
 
+const MISSION_WORLD_SHADER_NOISE = `
+  vec3 mod289(vec3 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
+  vec4 mod289(vec4 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
+  vec4 permute(vec4 x) { return mod289(((x * 34.0) + 1.0) * x); }
+  vec4 taylorInvSqrt(vec4 r) { return 1.79284291400159 - 0.85373472095314 * r; }
+
+  float snoise(vec3 v) {
+    const vec2 C = vec2(1.0 / 6.0, 1.0 / 3.0);
+    const vec4 D = vec4(0.0, 0.5, 1.0, 2.0);
+    vec3 i = floor(v + dot(v, C.yyy));
+    vec3 x0 = v - i + dot(i, C.xxx);
+    vec3 g = step(x0.yzx, x0.xyz);
+    vec3 l = 1.0 - g;
+    vec3 i1 = min(g.xyz, l.zxy);
+    vec3 i2 = max(g.xyz, l.zxy);
+    vec3 x1 = x0 - i1 + C.xxx;
+    vec3 x2 = x0 - i2 + C.yyy;
+    vec3 x3 = x0 - D.yyy;
+    i = mod289(i);
+    vec4 p = permute(permute(permute(
+      i.z + vec4(0.0, i1.z, i2.z, 1.0))
+      + i.y + vec4(0.0, i1.y, i2.y, 1.0))
+      + i.x + vec4(0.0, i1.x, i2.x, 1.0));
+    float n_ = 0.142857142857;
+    vec3 ns = n_ * D.wyz - D.xzx;
+    vec4 j = p - 49.0 * floor(p * ns.z * ns.z);
+    vec4 x_ = floor(j * ns.z);
+    vec4 y_ = floor(j - 7.0 * x_);
+    vec4 x = x_ * ns.x + ns.yyyy;
+    vec4 y = y_ * ns.x + ns.yyyy;
+    vec4 h = 1.0 - abs(x) - abs(y);
+    vec4 b0 = vec4(x.xy, y.xy);
+    vec4 b1 = vec4(x.zw, y.zw);
+    vec4 s0 = floor(b0) * 2.0 + 1.0;
+    vec4 s1 = floor(b1) * 2.0 + 1.0;
+    vec4 sh = -step(h, vec4(0.0));
+    vec4 a0 = b0.xzyw + s0.xzyw * sh.xxyy;
+    vec4 a1 = b1.xzyw + s1.xzyw * sh.zzww;
+    vec3 p0 = vec3(a0.xy, h.x);
+    vec3 p1 = vec3(a0.zw, h.y);
+    vec3 p2 = vec3(a1.xy, h.z);
+    vec3 p3 = vec3(a1.zw, h.w);
+    vec4 norm = taylorInvSqrt(vec4(dot(p0, p0), dot(p1, p1), dot(p2, p2), dot(p3, p3)));
+    p0 *= norm.x;
+    p1 *= norm.y;
+    p2 *= norm.z;
+    p3 *= norm.w;
+    vec4 m = max(0.6 - vec4(dot(x0, x0), dot(x1, x1), dot(x2, x2), dot(x3, x3)), 0.0);
+    m = m * m;
+    return 42.0 * dot(m * m, vec4(dot(p0, x0), dot(p1, x1), dot(p2, x2), dot(p3, x3)));
+  }
+
+  float fbm(vec3 p) {
+    float total = 0.0;
+    float amplitude = 0.5;
+    float frequency = 1.0;
+    for (int i = 0; i < 3; i++) {
+      total += snoise(p * frequency) * amplitude;
+      amplitude *= 0.5;
+      frequency *= 2.0;
+    }
+    return total;
+  }
+`;
+
+const MISSION_WORLD_SHELL_VERTEX = `
+  varying vec3 vNormal;
+  varying vec3 vViewPosition;
+
+  void main() {
+    vNormal = normalize(normalMatrix * normal);
+    vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+    vViewPosition = -mvPosition.xyz;
+    gl_Position = projectionMatrix * mvPosition;
+  }
+`;
+
+const MISSION_WORLD_SHELL_FRAGMENT = `
+  varying vec3 vNormal;
+  varying vec3 vViewPosition;
+  uniform vec3 uColor;
+  uniform float uOpacity;
+
+  void main() {
+    float fresnel = pow(1.0 - dot(normalize(vNormal), normalize(vViewPosition)), 2.5);
+    gl_FragColor = vec4(uColor, fresnel * uOpacity);
+  }
+`;
+
+const MISSION_WORLD_PLASMA_VERTEX = `
+  varying vec3 vPosition;
+  varying vec3 vNormal;
+  varying vec3 vViewPosition;
+
+  void main() {
+    vPosition = position;
+    vNormal = normalize(normalMatrix * normal);
+    vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+    vViewPosition = -mvPosition.xyz;
+    gl_Position = projectionMatrix * mvPosition;
+  }
+`;
+
+const MISSION_WORLD_PLASMA_FRAGMENT = `
+  uniform float uTime;
+  uniform float uScale;
+  uniform float uBrightness;
+  uniform float uThreshold;
+  uniform vec3 uColorDeep;
+  uniform vec3 uColorMid;
+  uniform vec3 uColorBright;
+
+  varying vec3 vPosition;
+  varying vec3 vNormal;
+  varying vec3 vViewPosition;
+
+  ${MISSION_WORLD_SHADER_NOISE}
+
+  void main() {
+    vec3 p = vPosition * uScale;
+    vec3 q = vec3(
+      fbm(p + vec3(0.0, uTime * 0.05, 0.0)),
+      fbm(p + vec3(5.2, 1.3, 2.8) + uTime * 0.05),
+      fbm(p + vec3(2.2, 8.4, 0.5) - uTime * 0.02)
+    );
+    float density = fbm(p + 2.0 * q);
+    float t = (density + 0.4) * 0.8;
+    float alpha = smoothstep(uThreshold, 0.7, t);
+    vec3 color = mix(uColorDeep, uColorMid, smoothstep(uThreshold, 0.5, t));
+    color = mix(color, uColorBright, smoothstep(0.5, 0.8, t));
+    color = mix(color, vec3(1.0), smoothstep(0.8, 1.0, t));
+    float facing = dot(normalize(vNormal), normalize(vViewPosition));
+    float depthFactor = (facing + 1.0) * 0.5;
+    float finalAlpha = alpha * (0.03 + 0.97 * depthFactor);
+    gl_FragColor = vec4(color * uBrightness, finalAlpha);
+  }
+`;
+
+const MAP_ORB_PRESETS = {
+  world: {
+    colorDeep: 0x001433,
+    colorMid: 0x0084ff,
+    colorBright: 0x00ffe1,
+    brightness: 1.31,
+    threshold: 0.072,
+    scale: 0.1404,
+    timeScale: 0.78,
+    particleColor: 0xcaf5ff
+  },
+  resource: {
+    colorDeep: 0x2a0008,
+    colorMid: 0xff2348,
+    colorBright: 0xff7a3d,
+    brightness: 1.22,
+    threshold: 0.078,
+    scale: 0.1404,
+    timeScale: 0.78,
+    particleColor: 0xffd4c6
+  }
+} as const;
+
 type ResourceSection = "construction" | "research";
 type ResourceDef = {
   id: string;
@@ -3044,6 +3856,10 @@ type InboxMessage = {
     streakDay?: number;
     rewardGenerated?: boolean;
     openedAt?: number;
+    titleFr?: string;
+    titleEn?: string;
+    bodyFr?: string;
+    bodyEn?: string;
   } | null;
 };
 
@@ -3129,6 +3945,17 @@ const getResourceMenuSpriteStyle = (resourceId: string): CSSProperties => {
   return {
     backgroundPosition: `${-coords.x * RESOURCE_MENU_SPRITE_SCALE}px ${-coords.y * RESOURCE_MENU_SPRITE_SCALE}px`,
     backgroundSize: `${RESOURCE_MENU_SPRITE_WIDTH * RESOURCE_MENU_SPRITE_SCALE}px ${RESOURCE_MENU_SPRITE_HEIGHT * RESOURCE_MENU_SPRITE_SCALE}px`
+  };
+};
+
+const TOPBAR_RESOURCE_MENU_SPRITE_SCALE = 0.285;
+const TOPBAR_RESOURCE_MENU_SPRITE_Y_OFFSET = 8;
+
+const getTopbarResourceSpriteStyle = (resourceId: string): CSSProperties => {
+  const coords = RESOURCE_MENU_SPRITES[resourceId] ?? { x: 10, y: 10 };
+  return {
+    backgroundPosition: `${-coords.x * TOPBAR_RESOURCE_MENU_SPRITE_SCALE}px ${-(coords.y - TOPBAR_RESOURCE_MENU_SPRITE_Y_OFFSET) * TOPBAR_RESOURCE_MENU_SPRITE_SCALE}px`,
+    backgroundSize: `${RESOURCE_MENU_SPRITE_WIDTH * TOPBAR_RESOURCE_MENU_SPRITE_SCALE}px ${RESOURCE_MENU_SPRITE_HEIGHT * TOPBAR_RESOURCE_MENU_SPRITE_SCALE}px`
   };
 };
 
@@ -3308,6 +4135,23 @@ const extractInventoryItemNotificationsFromClaim = (claimPayload: any): { total:
   return { total, byItemId };
 };
 
+const extractInventoryItemNotificationsFromMapReport = (reportPayload: any): { total: number; byItemId: Record<string, number> } => {
+  const source = reportPayload && typeof reportPayload === "object" ? reportPayload : {};
+  const items = Array.isArray(source.items) ? source.items : [];
+  const byItemId: Record<string, number> = {};
+  let total = 0;
+
+  for (const item of items) {
+    const itemId = String(item?.itemId || "").trim();
+    const quantity = Math.max(0, Math.floor(Number(item?.quantity ?? 0)));
+    if (!itemId || quantity <= 0) continue;
+    byItemId[itemId] = Math.max(0, Math.floor(Number(byItemId[itemId] ?? 0))) + quantity;
+    total += quantity;
+  }
+
+  return { total, byItemId };
+};
+
 const normalizeHangarRpcSnapshot = (rpcResponse: any): HangarRpcSnapshot | null => {
   const parsed = parseJsonObject(rpcResponse?.payload ?? rpcResponse);
   const nested = parseJsonObject(parsed?.payload);
@@ -3433,6 +4277,8 @@ export default function App() {
   const [session, setSession] = useState<Session | null>(null);
   const [authChecking, setAuthChecking] = useState(true);
   const [showAuth, setShowAuth] = useState(false);
+  const [showLoginIntro, setShowLoginIntro] = useState(false);
+  const [loginIntroPlayerName, setLoginIntroPlayerName] = useState("");
   const [authMode, setAuthMode] = useState<"login" | "signup">("login");
   const [authEmail, setAuthEmail] = useState("");
   const [authPassword, setAuthPassword] = useState("");
@@ -3447,7 +4293,9 @@ export default function App() {
   const [profileUsername, setProfileUsername] = useState("");
   const [profileEmail, setProfileEmail] = useState("");
   const [profileLanguage, setProfileLanguage] = useState<"fr" | "en">("fr");
-  const [profileAvatar, setProfileAvatar] = useState("/avatars/avatar-01.png");
+  const [profileAvatar, setProfileAvatar] = useState(COMMANDER_DEFS[DEFAULT_COMMANDER_ID].image);
+  const [profileCommanderId, setProfileCommanderId] = useState<CommanderId>(DEFAULT_COMMANDER_ID);
+  const [activeCommanderId, setActiveCommanderId] = useState<CommanderId>(DEFAULT_COMMANDER_ID);
   const [profileServerEmail, setProfileServerEmail] = useState("");
   const [profileLoading, setProfileLoading] = useState(false);
   const [profileError, setProfileError] = useState("");
@@ -3492,6 +4340,7 @@ export default function App() {
   const [vaultHydratedUserId, setVaultHydratedUserId] = useState<string>("");
   const [populationState, setPopulationState] = useState<PopulationState>(() => defaultPopulationState());
   const [mainMissionState, setMainMissionState] = useState<MainMissionState>(() => defaultMainMissionState());
+  const [persistedMapCache, setPersistedMapCache] = useState<Record<string, any> | null>(null);
   const processedMapSyncReportIdsRef = useRef<Record<string, boolean>>({});
 
   const client = useMemo(() => createClient(), []);
@@ -3501,11 +4350,22 @@ export default function App() {
   const rankingRpcBackoffUntilRef = useRef(0);
   const l = (fr: string, en: string) => (uiLanguage === "en" ? en : fr);
   const inventoryMenuBadgeCount = Math.max(0, inventoryServerBadgeCount + inventoryInboxBadgeCount);
-  const mapWarmCommandementEscadreLevel = Math.max(0, Math.floor(Number(technologyLevels.commandement_escadre ?? 0)));
   const mapWarmCacheKey = useMemo(
     () => (session?.user_id ? `hsg_map_cache_v1_${String(session.user_id)}` : ""),
     [session?.user_id]
   );
+  useEffect(() => {
+    if (!mapWarmCacheKey) {
+      setPersistedMapCache(null);
+      return;
+    }
+    try {
+      const parsed = parseJsonObject(sessionStorage.getItem(mapWarmCacheKey));
+      setPersistedMapCache(Object.keys(parsed).length > 0 ? parsed : null);
+    } catch {
+      setPersistedMapCache(null);
+    }
+  }, [mapWarmCacheKey]);
   const roomByType = useMemo(() => {
     const map: Partial<Record<RoomType, Room>> = {};
     for (const room of rooms) map[room.type] = room;
@@ -3520,12 +4380,21 @@ export default function App() {
     setAuthPassword("");
     setProfileSaved("");
     setProfileError("");
+    setProfileAvatar(COMMANDER_DEFS[DEFAULT_COMMANDER_ID].image);
+    setProfileCommanderId(DEFAULT_COMMANDER_ID);
+    setActiveCommanderId(DEFAULT_COMMANDER_ID);
     setShowAuth(false);
+    setShowLoginIntro(false);
+    setLoginIntroPlayerName("");
     setAuthChecking(false);
     processedMapSyncReportIdsRef.current = {};
   }, []);
   const entrepotLevel = roomByType.entrepot?.level ?? 1;
   const productionBonusesByResource = useMemo(() => technologyProductionBonuses(technologyLevels), [technologyLevels]);
+  const commanderBonus = useMemo(
+    () => COMMANDER_DEFS[activeCommanderId] ?? COMMANDER_DEFS[DEFAULT_COMMANDER_ID],
+    [activeCommanderId]
+  );
   const buildingCostReductionFactor = useMemo(() => {
     const lvl = techLevelValue(technologyLevels, "automatisation_industrielle");
     const reduction = Math.min(0.3, lvl * 0.02);
@@ -3536,7 +4405,10 @@ export default function App() {
     const reduction = Math.min(0.3, lvl * 0.02);
     return 1 - reduction;
   }, [technologyLevels]);
-  const storageCapacity = useMemo(() => computeStorageCapacity(entrepotLevel), [entrepotLevel]);
+  const storageCapacity = useMemo(
+    () => Math.max(0, Math.floor(computeStorageCapacity(entrepotLevel) * (commanderBonus.storageMultiplier ?? 1))),
+    [commanderBonus.storageMultiplier, entrepotLevel]
+  );
   const baseResourceRates = useMemo(() => {
     const map: Record<string, number> = {};
     for (const r of RESOURCE_DEFS) {
@@ -3551,43 +4423,39 @@ export default function App() {
     [baseResourceRates, populationState, rooms, unlockedResourceIds.length]
   );
   const buildingTimeReductionFactor = useMemo(
-    () => clampNumber(buildingTimeReductionFactorFromTech * populationSnapshot.constructionTimeFactor, 0.4, 2.2),
-    [buildingTimeReductionFactorFromTech, populationSnapshot.constructionTimeFactor]
+    () =>
+      clampNumber(
+        buildingTimeReductionFactorFromTech * populationSnapshot.constructionTimeFactor * (commanderBonus.buildingTimeFactor ?? 1),
+        0.4,
+        2.2
+      ),
+    [buildingTimeReductionFactorFromTech, commanderBonus.buildingTimeFactor, populationSnapshot.constructionTimeFactor]
   );
   const researchTimeFactor = useMemo(
-    () => clampNumber(populationSnapshot.researchTimeFactor, 0.4, 2.2),
-    [populationSnapshot.researchTimeFactor]
+    () => clampNumber(populationSnapshot.researchTimeFactor * (commanderBonus.researchTimeFactor ?? 1), 0.4, 2.2),
+    [commanderBonus.researchTimeFactor, populationSnapshot.researchTimeFactor]
   );
   const resourceRates = useMemo(() => {
     const map: Record<string, number> = {};
     for (const r of RESOURCE_DEFS) {
       const baseRate = Number(baseResourceRates[r.id] ?? 0);
-      map[r.id] = Math.max(0, baseRate * populationSnapshot.productionMultiplier);
+      map[r.id] = Math.max(0, baseRate * populationSnapshot.productionMultiplier * (commanderBonus.productionMultiplier ?? 1));
     }
     return map;
-  }, [baseResourceRates, populationSnapshot.productionMultiplier]);
+  }, [baseResourceRates, commanderBonus.productionMultiplier, populationSnapshot.productionMultiplier]);
   const resourceAmountsRef = useRef<Record<string, number>>({});
   const resourceUnlockedRef = useRef<string[]>(BASE_UNLOCKED_RESOURCE_IDS);
   const resourceTickRef = useRef<number>(Date.now());
   const resourceRatesRef = useRef<Record<string, number>>({});
   const storageCapacityRef = useRef<number>(storageCapacity);
   const populationStateRef = useRef<PopulationState>(defaultPopulationState());
-  const avatarOptions = useMemo(
-    () => [
-      "/avatars/avatar-01.png",
-      "/avatars/avatar-02.png",
-      "/avatars/avatar-03.png",
-      "/avatars/avatar-04.png",
-      "/avatars/avatar-05.png",
-      "/avatars/avatar-06.png"
-    ],
-    []
-  );
+  const commanderOptions = useMemo(() => COMMANDER_IDS.map((id) => COMMANDER_DEFS[id]), []);
 
   const applyAccount = (account: Awaited<ReturnType<Client["getAccount"]>>, fallbackSession: Session | null) => {
     const username = account.user?.username ?? fallbackSession?.username ?? fallbackSession?.user_id ?? "player";
     const lang = account.user?.lang_tag === "en" ? "en" : "fr";
-    const avatar = account.user?.avatar_url?.trim() ? account.user.avatar_url : "/avatars/avatar-01.png";
+    const avatar = account.user?.avatar_url?.trim() ? account.user.avatar_url : COMMANDER_DEFS[DEFAULT_COMMANDER_ID].image;
+    const commanderId = commanderIdFromAvatar(avatar);
     const draftEmail = localStorage.getItem(PROFILE_EMAIL_DRAFT_KEY);
     const email = (draftEmail?.trim() || account.email || "").trim();
 
@@ -3595,10 +4463,17 @@ export default function App() {
     setProfileUsername(username);
     setProfileLanguage(lang);
     setUiLanguage(lang);
-    setProfileAvatar(avatar);
+    setProfileAvatar(COMMANDER_DEFS[commanderId].image);
+    setProfileCommanderId(commanderId);
+    setActiveCommanderId(commanderId);
     setProfileEmail(email);
     setProfileServerEmail(account.email ?? "");
   };
+
+  const finishLoginIntro = useCallback(() => {
+    setShowLoginIntro(false);
+    setScreen("game");
+  }, []);
 
   const grantCreditsToServer = useCallback(
     async (amount: number, claimId?: string) => {
@@ -3657,6 +4532,26 @@ export default function App() {
       }
     }
   }, [client, invalidateSession, session]);
+
+  const loadCommanderProfile = useCallback(async () => {
+    if (!session) return;
+    try {
+      const read = await client.readStorageObjects(session, {
+        object_ids: [{ collection: PROFILE_COMMANDER_COLLECTION, key: PROFILE_COMMANDER_KEY, user_id: session.user_id }]
+      });
+      const stored = read.objects?.[0]?.value as { commanderId?: string } | undefined;
+      const nextCommanderId = COMMANDER_IDS.includes(stored?.commanderId as CommanderId)
+        ? (stored!.commanderId as CommanderId)
+        : commanderIdFromAvatar(profileAvatar);
+      setProfileCommanderId(nextCommanderId);
+      setActiveCommanderId(nextCommanderId);
+      setProfileAvatar(COMMANDER_DEFS[nextCommanderId].image);
+    } catch (err) {
+      if (isUnauthorizedError(err)) {
+        invalidateSession();
+      }
+    }
+  }, [client, invalidateSession, profileAvatar, session]);
 
   const applyResourceProduction = (base: Record<string, number>, seconds: number, unlocked: string[]) => {
     if (seconds <= 0) return base;
@@ -4371,6 +5266,12 @@ export default function App() {
 
   useEffect(() => {
     if (!session) return;
+    void loadCommanderProfile();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session?.user_id]);
+
+  useEffect(() => {
+    if (!session) return;
     if (screen !== "inventory" && screen !== "hangar" && screen !== "technology") return;
     void loadInventory(screen === "inventory");
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -4718,7 +5619,6 @@ export default function App() {
     if (!session || !session.user_id || !mapWarmCacheKey) return;
     let cancelled = false;
     let playersInFlight = false;
-    let stateInFlight = false;
     let lastPlayersWarmAt = 0;
 
     const writeMapWarmCache = (patch: Record<string, any>) => {
@@ -4734,6 +5634,7 @@ export default function App() {
           next.serverNowTs = Math.max(0, Math.floor(serverNowTs));
         }
         sessionStorage.setItem(mapWarmCacheKey, JSON.stringify(next));
+        setPersistedMapCache(next);
       } catch {
         // ignore sessionStorage failures
       }
@@ -4772,65 +5673,17 @@ export default function App() {
       }
     };
 
-    const warmMapState = async () => {
-      if (stateInFlight) return;
-      stateInFlight = true;
-      try {
-        const rpc = await client.rpc(
-          session,
-          "rpc_map_fields_state",
-          JSON.stringify({ commandementEscadreLevel: mapWarmCommandementEscadreLevel })
-        );
-        if (cancelled) return;
-        const parsed = parseJsonObject((rpc as any)?.payload ?? rpc);
-        const nested = parseJsonObject(parsed?.payload);
-        const source = Object.keys(nested).length > 0 ? nested : parsed;
-
-        const expeditionsRaw = Array.isArray(source?.expeditions) ? source.expeditions : [];
-        const fallbackExpedition = parseJsonObject(source?.expedition);
-        let serverNowTs = 0;
-        for (const row of expeditionsRaw) {
-          const expedition = parseJsonObject(row);
-          serverNowTs = Math.max(serverNowTs, Math.max(0, Math.floor(Number(expedition?.serverNowTs ?? 0))));
-        }
-        if (serverNowTs <= 0 && Object.keys(fallbackExpedition).length > 0) {
-          serverNowTs = Math.max(0, Math.floor(Number(fallbackExpedition?.serverNowTs ?? 0)));
-        }
-        if (serverNowTs <= 0) {
-          serverNowTs = Math.floor(Date.now() / 1000);
-        }
-
-        writeMapWarmCache({
-          fields: Array.isArray(source?.fields) ? source.fields : [],
-          expedition: source?.expedition ?? null,
-          expeditions: expeditionsRaw,
-          reports: Array.isArray(source?.reports) ? source.reports : [],
-          harvestInventory: Array.isArray(source?.harvestInventory) ? source.harvestInventory : [],
-          maxActiveExpeditions: Math.max(1, Math.floor(Number(source?.maxActiveExpeditions ?? 1))),
-          serverNowTs
-        });
-      } catch (err) {
-        if (isUnauthorizedError(err) && !cancelled) {
-          invalidateSession();
-        }
-      } finally {
-        stateInFlight = false;
-      }
-    };
-
     void warmPlayers(true);
-    void warmMapState();
 
     const interval = window.setInterval(() => {
       void warmPlayers(screen === "starmap");
-      void warmMapState();
     }, screen === "starmap" ? 6000 : 15000);
 
     return () => {
       cancelled = true;
       window.clearInterval(interval);
     };
-  }, [client, invalidateSession, mapWarmCacheKey, mapWarmCommandementEscadreLevel, screen, session]);
+  }, [client, invalidateSession, mapWarmCacheKey, screen, session]);
 
   useEffect(() => {
     if (!constructionJob) return;
@@ -4932,19 +5785,28 @@ export default function App() {
         ? await client.authenticateEmail(email, password, true, username, { lang: language })
         : await client.authenticateEmail(email, password, false);
 
+      let nextPlayerName = (nextSession.username ?? nextSession.user_id ?? "player").slice(0, 20);
+      let nextUiLanguage = authMode === "signup" ? language : uiLanguage;
       saveSession(nextSession);
       setSession(nextSession);
       try {
         const account = await client.getAccount(nextSession);
         applyAccount(account, nextSession);
+        nextPlayerName = (account.user?.username ?? nextSession.username ?? nextSession.user_id ?? "player").slice(0, 20);
+        nextUiLanguage = account.user?.lang_tag === "en" ? "en" : "fr";
       } catch {
         setPlayerId((nextSession.username ?? nextSession.user_id ?? "player").slice(0, 20));
       }
       setNakamaStatus("online");
       setAuthPassword("");
       setShowAuth(false);
-      setUiLanguage(language);
-      setScreen("game");
+      setUiLanguage(nextUiLanguage);
+      if (authMode === "login") {
+        setLoginIntroPlayerName(nextPlayerName);
+        setShowLoginIntro(true);
+      } else {
+        setScreen("game");
+      }
     } catch (err) {
       setNakamaStatus("offline");
       const status = getErrorStatusCode(err);
@@ -4984,6 +5846,60 @@ export default function App() {
     setScreen("home");
   };
 
+  const topbarAudioCtxRef = useRef<AudioContext | null>(null);
+  const playTopbarClickSound = useCallback(() => {
+    if (typeof window === "undefined") return;
+    const AudioCtor = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!AudioCtor) return;
+    try {
+      if (!topbarAudioCtxRef.current) {
+        topbarAudioCtxRef.current = new AudioCtor();
+      }
+      const ctx = topbarAudioCtxRef.current;
+      if (!ctx) return;
+      if (ctx.state === "suspended") {
+        void ctx.resume().catch(() => undefined);
+      }
+
+      const now = ctx.currentTime;
+      const master = ctx.createGain();
+      master.gain.setValueAtTime(0.0001, now);
+      master.gain.exponentialRampToValueAtTime(0.085, now + 0.012);
+      master.gain.exponentialRampToValueAtTime(0.0001, now + 0.18);
+      master.connect(ctx.destination);
+
+      const oscA = ctx.createOscillator();
+      const oscB = ctx.createOscillator();
+      const filter = ctx.createBiquadFilter();
+      filter.type = "bandpass";
+      filter.frequency.setValueAtTime(1600, now);
+      filter.Q.value = 1.6;
+
+      oscA.type = "square";
+      oscB.type = "triangle";
+      oscA.frequency.setValueAtTime(1320, now);
+      oscA.frequency.exponentialRampToValueAtTime(960, now + 0.12);
+      oscB.frequency.setValueAtTime(880, now);
+      oscB.frequency.exponentialRampToValueAtTime(660, now + 0.16);
+
+      oscA.connect(filter);
+      oscB.connect(filter);
+      filter.connect(master);
+
+      oscA.start(now);
+      oscB.start(now);
+      oscA.stop(now + 0.16);
+      oscB.stop(now + 0.18);
+    } catch {
+      // Ignore audio failures; navigation must stay responsive.
+    }
+  }, []);
+
+  const navigateFromTopbar = useCallback((nextScreen: UIScreen) => {
+    playTopbarClickSound();
+    setScreen(nextScreen);
+  }, [playTopbarClickSound]);
+
   const saveProfile = async (e: FormEvent) => {
     e.preventDefault();
     if (!session) return;
@@ -5001,13 +5917,27 @@ export default function App() {
     setProfileSaved("");
 
     try {
+      const commander = COMMANDER_DEFS[profileCommanderId] ?? COMMANDER_DEFS[DEFAULT_COMMANDER_ID];
       await client.updateAccount(session, {
         username,
         lang_tag: profileLanguage,
-        avatar_url: profileAvatar
+        avatar_url: commander.image
       });
+      await client.writeStorageObjects(session, [
+        {
+          collection: PROFILE_COMMANDER_COLLECTION,
+          key: PROFILE_COMMANDER_KEY,
+          permission_read: 1,
+          permission_write: 1,
+          value: {
+            commanderId: commander.id
+          }
+        }
+      ]);
 
       setPlayerId(username.slice(0, 20));
+      setProfileAvatar(commander.image);
+      setActiveCommanderId(commander.id);
       localStorage.setItem(PROFILE_EMAIL_DRAFT_KEY, email);
 
       if (email && profileServerEmail && email.toLowerCase() !== profileServerEmail.toLowerCase()) {
@@ -5406,7 +6336,7 @@ export default function App() {
       rows.push({
         id: "building",
         target: "building",
-        label: `${l("Batiment", "Building")} • ${roomDisplayName(constructionJob.roomType, uiLanguage)}`,
+        label: `${l("Batiment", "Building")} � ${roomDisplayName(constructionJob.roomType, uiLanguage)}`,
         detail:
           constructionJob.mode === "build"
             ? l("Construction en cours", "Construction in progress")
@@ -5422,7 +6352,7 @@ export default function App() {
         id: `hangar_${active.id}`,
         target: "hangar",
         queueId: active.id,
-        label: `${l("Hangar", "Hangar")} • ${unitName} x${active.quantity}`,
+        label: `${l("Hangar", "Hangar")} � ${unitName} x${active.quantity}`,
         detail: l("Production en cours", "Production in progress"),
         remainingSeconds: Math.max(0, Math.floor((active.endAt - nowMs) / 1000))
       });
@@ -5435,7 +6365,7 @@ export default function App() {
       rows.push({
         id: "research",
         target: "research_local",
-        label: `${l("Recherche", "Research")} • ${techName} Lv.${researchJob.targetLevel}`,
+        label: `${l("Recherche", "Research")} � ${techName} Lv.${researchJob.targetLevel}`,
         detail: l("Recherche active", "Research active"),
         remainingSeconds: Math.max(0, Math.floor((researchJob.endAt - nowMs) / 1000))
       });
@@ -5720,30 +6650,59 @@ export default function App() {
     }
   }
 
+  const topbarNavItems: Array<{
+    screen: UIScreen;
+    label: string;
+    icon: typeof Play;
+    badge?: number;
+  }> = [
+    { screen: "game", label: l("Jeu", "Game"), icon: Play },
+    { screen: "hangar", label: l("Hangar", "Hangar"), icon: Swords },
+    { screen: "population", label: l("Population", "Population"), icon: Users },
+    { screen: "starmap", label: l("Carte", "Map"), icon: Navigation },
+    { screen: "resources", label: l("Ressources", "Resources"), icon: Coins },
+    { screen: "technology", label: l("Technologie", "Technology"), icon: Hexagon },
+    { screen: "alliance", label: l("Alliance", "Alliance"), icon: Shield },
+    { screen: "ranking", label: l("Classement", "Ranking"), icon: ArrowUpCircle },
+    { screen: "wiki", label: l("Wiki", "Wiki"), icon: BookOpen },
+    { screen: "inventory", label: l("Inventaire", "Inventory"), icon: Package, badge: inventoryMenuBadgeCount },
+    { screen: "inbox", label: l("Inbox", "Inbox"), icon: Mail, badge: inboxUnreadCount },
+    { screen: "chat", label: l("Chat", "Chat"), icon: MessageCircle }
+  ];
+
   const renderUnifiedMenu = () => (
-    <div className="status-wrap">
-      <button className="ghost-btn" onClick={() => setScreen("game")}><Play size={15} /> {l("Jeu", "Game")}</button>
-      <button className="ghost-btn" onClick={() => setScreen("hangar")}><Swords size={15} /> {l("Hangar", "Hangar")}</button>
-      <button className="ghost-btn" onClick={() => setScreen("population")}><Users size={15} /> {l("Population", "Population")}</button>
-      <button className="ghost-btn" onClick={() => setScreen("starmap")}><Navigation size={15} /> {l("Carte", "Map")}</button>
-      <button className="ghost-btn" onClick={() => setScreen("resources")}><Coins size={15} /> {l("Ressources", "Resources")}</button>
-      <button className="ghost-btn" onClick={() => setScreen("technology")}><Hexagon size={15} /> {l("Technologie", "Technology")}</button>
-      <button className="ghost-btn" onClick={() => setScreen("alliance")}><Shield size={15} /> {l("Alliance", "Alliance")}</button>
-      <button className="ghost-btn" onClick={() => setScreen("ranking")}><ArrowUpCircle size={15} /> {l("Classement", "Ranking")}</button>
-      <button className="ghost-btn" onClick={() => setScreen("wiki")}><BookOpen size={15} /> {l("Wiki", "Wiki")}</button>
-      <button className="ghost-btn inbox-btn" onClick={() => setScreen("inventory")}>
-        <Package size={15} /> {l("Inventaire", "Inventory")}
-        {inventoryMenuBadgeCount > 0 ? <span className="menu-badge">{inventoryMenuBadgeCount > 99 ? "99+" : inventoryMenuBadgeCount}</span> : null}
-      </button>
-      <button className="ghost-btn inbox-btn" onClick={() => setScreen("inbox")}>
-        <Mail size={15} /> {l("Inbox", "Inbox")}
-        {inboxUnreadCount > 0 ? <span className="menu-badge">{inboxUnreadCount > 99 ? "99+" : inboxUnreadCount}</span> : null}
-      </button>
-      <button className="ghost-btn" onClick={() => setScreen("chat")}><MessageCircle size={15} /> {l("Chat", "Chat")}</button>
-      <div className="user-menu">
-        <button className="ghost-btn profile-chip" onClick={() => setScreen("profile")}><UserRound size={15} /> {playerId || l("Profil", "Profile")}</button>
+    <div className="status-wrap topbar-nav">
+      {topbarNavItems.map((item) => {
+        const Icon = item.icon;
+        const isActive = screen === item.screen;
+        const badge = Math.max(0, Math.floor(Number(item.badge ?? 0)));
+        return (
+          <button
+            key={item.screen}
+            className={`topbar-nav-btn${isActive ? " topbar-nav-btn--active" : ""}${badge > 0 ? " topbar-nav-btn--with-badge" : ""}`}
+            onClick={() => navigateFromTopbar(item.screen)}
+          >
+            <Icon size={15} />
+            <span>{item.label}</span>
+            {badge > 0 ? <span className="menu-badge">{badge > 99 ? "99+" : badge}</span> : null}
+          </button>
+        );
+      })}
+      <div className="user-menu topbar-user-menu">
+        <button className={`topbar-nav-btn topbar-profile-btn${screen === "profile" ? " topbar-nav-btn--active" : ""}`} onClick={() => navigateFromTopbar("profile")}>
+          <UserRound size={15} />
+          <span>{playerId || l("Profil", "Profile")}</span>
+        </button>
         {session ? (
-          <button className="user-logout-btn" onClick={logout}><LogOut size={14} /> {l("Deconnexion", "Logout")}</button>
+          <button
+            className="user-logout-btn"
+            onClick={() => {
+              playTopbarClickSound();
+              logout();
+            }}
+          >
+            <LogOut size={14} /> {l("Deconnexion", "Logout")}
+          </button>
         ) : null}
       </div>
     </div>
@@ -5754,11 +6713,10 @@ export default function App() {
     amountSource: Record<string, number> = resourceAmounts
   ): { state: "normal" | "warn" | "critical" | "blocked"; color: string } => {
     const amount = Number(amountSource[resourceId] ?? 0);
-    const rate = Number(resourceRates[resourceId] ?? 0);
     const cap = Math.max(1, storageCapacity);
     const fillRatio = Math.max(0, Math.min(1, amount / cap));
 
-    if (rate > 0 && amount >= cap) {
+    if (amount >= cap) {
       return { state: "blocked", color: "#ff4d5d" };
     }
 
@@ -5783,8 +6741,16 @@ export default function App() {
     <header className="topbar">
       <div className="topbar-main">
         <div className="brand-wrap">
-          <h1>{l("Hyperstructure Command", "Hyperstructure Command")}</h1>
-          <span className="server-clock">{l("Heure serveur", "Server time")}: {serverClockLabel}</span>
+          <button type="button" className="brand-link" onClick={() => navigateFromTopbar("game")}>
+            <span className="brand-link__eyebrow">{l("Protocole orbital", "Orbital protocol")}</span>
+            <span className="brand-link__wordmark">
+              Hyper<span>strux</span>
+            </span>
+          </button>
+          <div className="server-clock-panel" aria-label={l("Heure serveur", "Server time")}>
+            <span className="server-clock-label">{l("Heure serveur", "Server time")}</span>
+            <strong className="server-clock-value">{serverClockLabel}</strong>
+          </div>
         </div>
         {renderUnifiedMenu()}
       </div>
@@ -5803,7 +6769,7 @@ export default function App() {
             const resourceName = resourceDisplayName(r.id, uiLanguage);
             return (
               <span key={r.id} className="top-resource-item" title={resourceName}>
-                <span className="top-resource-icon" style={getResourceMenuSpriteStyle(r.id)} />
+                <span className="top-resource-icon" style={getTopbarResourceSpriteStyle(r.id)} />
                 <span className="top-resource-meta">
                   <small>{resourceName}</small>
                   <span className="top-resource-amount-wrap">
@@ -5828,22 +6794,110 @@ export default function App() {
               </span>
             );
           })}
+          <span className="top-credit-item" title="Credits">
+            <span className="top-credit-icon">
+              <Coins size={16} />
+            </span>
+            <span className="top-credit-meta">
+              <small>Credits</small>
+              <strong>{credits.toLocaleString()} Credits</strong>
+            </span>
+          </span>
         </div>
         <div className="topbar-credits">
-          <div className="pill score">
-            <Shield size={14} />
-            {l("Score", "Score")}: {displayedScorePoints.toLocaleString()}
-            <span className="score-rank">{l("Rang", "Rank")} #{playerScoreRank > 0 ? playerScoreRank : "-"}</span>
+          <div className="top-score-panel">
+            <span className="top-score-panel__label">{l("Score global", "Global score")}</span>
+            <div className="top-score-panel__value-row">
+              <strong className="top-score-panel__value">{displayedScorePoints.toLocaleString()}</strong>
+              <span className="top-score-panel__rank">{l("Rang", "Rank")} #{playerScoreRank > 0 ? playerScoreRank : "-"}</span>
+            </div>
           </div>
-          <div className="pill gold"><Coins size={15} /> {credits} Credits</div>
         </div>
       </div>
     </header>
   );
 
+  const starmapPanel = (
+    <>
+      {renderUnifiedHeader()}
+
+      <SectorMapScreen
+        active={screen === "starmap"}
+        language={uiLanguage}
+        client={client}
+        session={session}
+        currentUserId={session?.user_id ?? ""}
+        currentUsername={profileUsername || playerId || ""}
+        hangarInventory={hangarInventory}
+        technologyLevels={technologyLevels}
+        carbonProductionPerSec={Number(resourceRates.carbone ?? 0)}
+        initialMapCache={persistedMapCache}
+        onPersistMapCache={setPersistedMapCache}
+        onGrantCredits={(amount, claimId) => {
+          void grantCreditsToServer(amount, claimId);
+        }}
+        onMapStateSync={(payload) => {
+          const nextCredits = Number(payload?.credits ?? NaN);
+          if (Number.isFinite(nextCredits) && nextCredits >= 0) {
+            setCredits(Math.floor(nextCredits));
+          }
+          const syncReportId = String(payload?.syncReport?.id || "").trim();
+          if (syncReportId && !processedMapSyncReportIdsRef.current[syncReportId]) {
+            processedMapSyncReportIdsRef.current[syncReportId] = true;
+            const syncResources =
+              payload?.syncReport?.resources && typeof payload.syncReport.resources === "object"
+                ? payload.syncReport.resources
+                : null;
+            if (syncResources) {
+              setResourceAmounts((prev) => {
+                const next = { ...prev };
+                for (const def of RESOURCE_DEFS) {
+                  const gain = Math.max(0, Math.floor(Number(syncResources[def.id] ?? 0)));
+                  if (gain <= 0) continue;
+                  next[def.id] = Math.max(0, Number(next[def.id] ?? 0)) + gain;
+                }
+                return next;
+              });
+            }
+            const mapDropNotifications = Number(payload?.mapDropNotifications ?? NaN);
+            if (Number.isFinite(mapDropNotifications) && mapDropNotifications >= 0) {
+              setInventoryServerBadgeCount(Math.max(0, Math.floor(mapDropNotifications)));
+            }
+            const mapItemNotif = extractInventoryItemNotificationsFromMapReport(payload?.syncReport);
+            if (mapItemNotif.total > 0) {
+              if (screen === "inventory") {
+                setInventoryVisibleItemNotifications((prev) => {
+                  const next = { ...prev };
+                  for (const [itemId, qtyRaw] of Object.entries(mapItemNotif.byItemId)) {
+                    const qty = Math.max(0, Math.floor(Number(qtyRaw ?? 0)));
+                    if (!itemId || qty <= 0) continue;
+                    next[itemId] = Math.max(0, Math.floor(Number(next[itemId] ?? 0))) + qty;
+                  }
+                  return next;
+                });
+                void loadInventory(true);
+              } else {
+                setInventoryPendingItemNotifications((prev) => {
+                  const next = { ...prev };
+                  for (const [itemId, qtyRaw] of Object.entries(mapItemNotif.byItemId)) {
+                    const qty = Math.max(0, Math.floor(Number(qtyRaw ?? 0)));
+                    if (!itemId || qty <= 0) continue;
+                    next[itemId] = Math.max(0, Math.floor(Number(next[itemId] ?? 0))) + qty;
+                  }
+                  return next;
+                });
+              }
+            }
+            void refreshInboxUnread(true);
+          }
+        }}
+      />
+    </>
+  );
+
   return (
     <div className="app-shell">
-      {screen === "home" ? (
+      {screen === "starmap" ? null : screen === "home" ? (
         <HomeLanding
           session={session}
           authChecking={authChecking}
@@ -5882,50 +6936,6 @@ export default function App() {
             onQueue={launchHangarProduction}
             onCancelQueueItem={cancelHangarProduction}
             onUseBoost={onUseInventoryItem}
-          />
-        </>
-      ) : screen === "starmap" ? (
-        <>
-          {renderUnifiedHeader()}
-
-          <SectorMapScreen
-            language={uiLanguage}
-            client={client}
-            session={session}
-            currentUserId={session?.user_id ?? ""}
-            currentUsername={profileUsername || playerId || ""}
-            hangarInventory={hangarInventory}
-            technologyLevels={technologyLevels}
-            carbonProductionPerSec={Number(resourceRates.carbone ?? 0)}
-            onGrantCredits={(amount, claimId) => {
-              void grantCreditsToServer(amount, claimId);
-            }}
-            onMapStateSync={(payload) => {
-              const nextResources = payload?.resources;
-              if (nextResources && typeof nextResources === "object") {
-                setResourceAmounts((prev) => {
-                  const merged = { ...prev };
-                  for (const def of RESOURCE_DEFS) {
-                    const value = Number(nextResources[def.id] ?? merged[def.id] ?? 0);
-                    if (Number.isFinite(value) && value >= 0) merged[def.id] = value;
-                  }
-                  return merged;
-                });
-              }
-              const nextCredits = Number(payload?.credits ?? NaN);
-              if (Number.isFinite(nextCredits) && nextCredits >= 0) {
-                setCredits(Math.floor(nextCredits));
-              }
-              const syncReportId = String(payload?.syncReport?.id || "").trim();
-              if (syncReportId && !processedMapSyncReportIdsRef.current[syncReportId]) {
-                processedMapSyncReportIdsRef.current[syncReportId] = true;
-                const mapDropNotifications = Number(payload?.mapDropNotifications ?? NaN);
-                if (Number.isFinite(mapDropNotifications) && mapDropNotifications >= 0) {
-                  setInventoryServerBadgeCount(Math.max(0, Math.floor(mapDropNotifications)));
-                }
-                void refreshInboxUnread(true);
-              }
-            }}
           />
         </>
       ) : screen === "chat" ? (
@@ -6092,7 +7102,8 @@ export default function App() {
             profileEmail={profileEmail}
             profileLanguage={profileLanguage}
             profileAvatar={profileAvatar}
-            avatarOptions={avatarOptions}
+            profileCommanderId={profileCommanderId}
+            commanderOptions={commanderOptions}
             profileError={profileError}
             profileSaved={profileSaved}
             profileLoading={profileLoading}
@@ -6102,7 +7113,10 @@ export default function App() {
               setProfileLanguage(lang);
               setUiLanguage(lang);
             }}
-            onAvatarChange={setProfileAvatar}
+            onCommanderChange={(commanderId) => {
+              setProfileCommanderId(commanderId);
+              setProfileAvatar(COMMANDER_DEFS[commanderId].image);
+            }}
             onSubmit={saveProfile}
           />
         </>
@@ -6268,7 +7282,7 @@ export default function App() {
                     <p className="main-mission-meta">
                       {l("Objectifs valides", "Validated objectives")}:{" "}
                       {(mainMissionState.completedCount + mainMissionState.skippedCount).toLocaleString()} / {MAIN_MISSION_PLAN.length.toLocaleString()}
-                      {" • "}
+                      {" � "}
                       {l("Credits gagnes", "Credits earned")}: {mainMissionState.totalRewardCredits.toLocaleString()}
                     </p>
                     {mainMissionState.finished ? (
@@ -6293,7 +7307,7 @@ export default function App() {
                             >
                               <header>
                                 <strong>
-                                  {roomDisplayName(mission.roomType, uiLanguage)} • Lv.{mission.targetLevel}
+                                  {roomDisplayName(mission.roomType, uiLanguage)} � Lv.{mission.targetLevel}
                                 </strong>
                                 <span>{MAIN_MISSION_REWARD_MIN} - {MAIN_MISSION_REWARD_MAX} Credits</span>
                               </header>
@@ -6576,11 +7590,25 @@ export default function App() {
         </>
       )}
 
+      {session ? (
+        <div style={{ display: screen === "starmap" ? "block" : "none" }} aria-hidden={screen !== "starmap"}>
+          {starmapPanel}
+        </div>
+      ) : null}
+
       {chestLootSummary ? (
         <ChestLootModal
           language={uiLanguage}
           summary={chestLootSummary}
           onClose={() => setChestLootSummary(null)}
+        />
+      ) : null}
+
+      {showLoginIntro && session ? (
+        <LoginIntroCinematic
+          language={uiLanguage}
+          playerName={loginIntroPlayerName || profileUsername || playerId}
+          onComplete={finishLoginIntro}
         />
       ) : null}
 
@@ -6735,6 +7763,7 @@ function HomeLanding({
 }
 
 function SectorMapScreen({
+  active,
   language,
   client,
   session,
@@ -6743,9 +7772,12 @@ function SectorMapScreen({
   hangarInventory,
   technologyLevels,
   carbonProductionPerSec,
+  initialMapCache,
+  onPersistMapCache,
   onMapStateSync,
   onGrantCredits
 }: {
+  active: boolean;
   language: UILanguage;
   client: Client;
   session: Session | null;
@@ -6754,6 +7786,8 @@ function SectorMapScreen({
   hangarInventory: Record<string, number>;
   technologyLevels: Record<TechnologyId, number>;
   carbonProductionPerSec: number;
+  initialMapCache?: Record<string, any> | null;
+  onPersistMapCache?: (payload: Record<string, any> | null) => void;
   onMapStateSync?: (payload: {
     resources?: Partial<Record<ResourceId, number>>;
     credits?: number;
@@ -6812,6 +7846,8 @@ function SectorMapScreen({
   const [viewportSize, setViewportSize] = useState({ width: 0, height: 0 });
   const [cameraCenter, setCameraCenter] = useState(() => mapPlayerToPlanetCoordinates(String(currentUserId || "guest")));
   const [mapCacheHydrated, setMapCacheHydrated] = useState(false);
+  const [mapLiveStateHydrated, setMapLiveStateHydrated] = useState(false);
+  const initialMapCacheRef = useRef<Record<string, any> | null>(initialMapCache ?? null);
 
   const commandementEscadreLevel = Math.max(0, Math.floor(Number(technologyLevels.commandement_escadre ?? 0)));
   const mapCacheKey = useMemo(() => `hsg_map_cache_v1_${String(currentUserId || "guest")}`, [currentUserId]);
@@ -6896,7 +7932,89 @@ function SectorMapScreen({
     };
   };
 
+  const cachedMapPayload = useMemo(() => {
+    const propSeed = initialMapCache && Object.keys(initialMapCache).length > 0 ? initialMapCache : null;
+    if (propSeed) return parseJsonObject(propSeed);
+    if (typeof window === "undefined") return {};
+    return parseJsonObject(sessionStorage.getItem(mapCacheKey));
+  }, [initialMapCache, mapCacheKey]);
+
+  const cachedMapPlayers = useMemo(
+    () =>
+      (Array.isArray(cachedMapPayload.players) ? cachedMapPayload.players : [])
+        .map((row: any) => ({
+          userId: String(row?.userId || "").trim(),
+          username: String(row?.username || "").trim()
+        }))
+        .filter((row: { userId: string; username: string }) => row.userId.length > 0)
+        .map((row: { userId: string; username: string }) => ({
+          ...row,
+          username: row.username || row.userId.slice(0, 8)
+        })),
+    [cachedMapPayload]
+  );
+
+  const cachedMapFields = useMemo(
+    () =>
+      (Array.isArray(cachedMapPayload.fields) ? cachedMapPayload.fields : [])
+        .map((row: any) => {
+          const occupiedByPlayerId = normalizeMapEntityId(row?.occupiedByPlayerId);
+          const occupyingFleetId = normalizeMapEntityId(row?.occupyingFleetId);
+          const id = String(row?.id || "").trim();
+          if (!id) return null;
+          return {
+            id,
+            x: Math.floor(Number(row?.x ?? 0)),
+            y: Math.floor(Number(row?.y ?? 0)),
+            rarityTier: String(row?.rarityTier || "COMMON").toUpperCase() as MapFieldServerDto["rarityTier"],
+            qualityTier: String(row?.qualityTier || "STANDARD").toUpperCase() as MapFieldServerDto["qualityTier"],
+            resources: Array.isArray(row?.resources)
+              ? row.resources
+                  .map((res: any) => ({
+                    resourceId: String(res?.resourceId || "").trim(),
+                    totalAmount: Math.max(0, Math.floor(Number(res?.totalAmount ?? 0))),
+                    remainingAmount: Math.max(0, Math.floor(Number(res?.remainingAmount ?? 0)))
+                  }))
+                  .filter((res: any) => res.resourceId.length > 0)
+              : [],
+            totalExtractionWork: Math.max(0, Math.floor(Number(row?.totalExtractionWork ?? 0))),
+            remainingExtractionWork: Math.max(0, Math.floor(Number(row?.remainingExtractionWork ?? 0))),
+            spawnedAt: Math.max(0, Math.floor(Number(row?.spawnedAt ?? 0))),
+            expiresAt: Math.max(0, Math.floor(Number(row?.expiresAt ?? 0))),
+            occupiedByPlayerId,
+            occupiedByUsername: String(row?.occupiedByUsername || ""),
+            occupyingFleetId,
+            isOccupied: normalizeMapOccupiedFlag(row?.isOccupied, occupiedByPlayerId, occupyingFleetId),
+            isVisible: parseBooleanFlag(row?.isVisible, true),
+            hiddenDetails: parseBooleanFlag(row?.hiddenDetails, false)
+          };
+        })
+        .filter((row: MapFieldServerDto | null): row is MapFieldServerDto => Boolean(row)),
+    [cachedMapPayload]
+  );
+
+  const cachedDisplayedMapExpeditions = useMemo(() => {
+    const expeditionsRaw = Array.isArray(cachedMapPayload.expeditions) ? cachedMapPayload.expeditions : [];
+    const parsedExpeditions = expeditionsRaw
+      .map((row: any) => parseMapExpeditionRow(parseJsonObject(row)))
+      .filter((row: MapExpeditionDto | null): row is MapExpeditionDto => Boolean(row));
+    if (parsedExpeditions.length > 0) return parsedExpeditions;
+    const fallbackExpedition = parseMapExpeditionRow(parseJsonObject(cachedMapPayload.expedition));
+    return fallbackExpedition ? [fallbackExpedition] : [];
+  }, [cachedMapPayload]);
+
+  const liveDisplayedMapExpeditions = useMemo(
+    () => (mapExpeditions.length > 0 ? mapExpeditions : (mapExpedition ? [mapExpedition] : [])),
+    [mapExpedition, mapExpeditions]
+  );
+  const displayedMapPlayers = mapPlayers.length > 0 ? mapPlayers : cachedMapPlayers;
+  const displayedMapFields = mapFields.length > 0 ? mapFields : cachedMapFields;
+  const hasTrackedMapExpedition =
+    liveDisplayedMapExpeditions.length > 0 || (!mapLiveStateHydrated && cachedDisplayedMapExpeditions.length > 0);
+  const mapStateRefreshIntervalMs = hasTrackedMapExpedition ? 4000 : 25000;
+
   useEffect(() => {
+    if (!active) return;
     if (!session) {
       setMapPlayers([]);
       return;
@@ -6946,9 +8064,10 @@ function SectorMapScreen({
       cancelled = true;
       clearInterval(interval);
     };
-  }, [client, session]);
+  }, [active, client, session]);
 
   useEffect(() => {
+    if (!active) return;
     if (!session) {
       setMapFields([]);
       setMapExpedition(null);
@@ -7069,6 +8188,7 @@ function SectorMapScreen({
           setMapHarvestInventory(nextHarvestInventory);
           setMapServerMaxActiveExpeditions(maxActiveExpeditions);
           setMapLoadError("");
+          setMapLiveStateHydrated(true);
           onMapStateSync?.({
             resources: stateResources,
             credits: Number.isFinite(stateCredits) ? Math.max(0, Math.floor(stateCredits)) : undefined,
@@ -7101,12 +8221,12 @@ function SectorMapScreen({
     if (!mapActionBusy) void loadMapState();
     const interval = setInterval(() => {
       if (!mapActionBusy) void loadMapState();
-    }, 12000);
+    }, mapStateRefreshIntervalMs);
     return () => {
       cancelled = true;
       clearInterval(interval);
     };
-  }, [client, commandementEscadreLevel, session, language, mapActionBusy]);
+  }, [active, client, commandementEscadreLevel, session, language, mapActionBusy, mapStateRefreshIntervalMs]);
 
   useEffect(() => {
     const tick = setInterval(() => setMapNowMs(Date.now()), 1000);
@@ -7141,18 +8261,18 @@ function SectorMapScreen({
   const sectorPlayerPlanets = useMemo(() => {
     const selfId = String(currentUserId || "").trim();
     const selfUsername = String(currentUsername || "").trim() || selfId.slice(0, 8);
-    const rows = Array.isArray(mapPlayers)
-      ? mapPlayers.filter((player) => String(player.userId || "").trim() !== selfId)
+    const rows = Array.isArray(displayedMapPlayers)
+      ? displayedMapPlayers.filter((player) => String(player.userId || "").trim() !== selfId)
       : [];
     if (selfId) {
       rows.unshift({ userId: selfId, username: selfUsername });
     }
     return computeSectorPlayerPlanets(rows, currentUserId);
-  }, [currentUserId, currentUsername, mapPlayers]);
+  }, [currentUserId, currentUsername, displayedMapPlayers]);
 
   const mapResourceEntities = useMemo(
-    () => mapFields.map((field) => mapFieldToSectorEntity(field, language)),
-    [language, mapFields]
+    () => displayedMapFields.map((field) => mapFieldToSectorEntity(field, language)),
+    [displayedMapFields, language]
   );
 
   const sectorEntities = useMemo(
@@ -7260,6 +8380,10 @@ function SectorMapScreen({
     mapAutoCenterKeyRef.current = "";
   }, [currentUserId]);
 
+  useEffect(() => {
+    initialMapCacheRef.current = initialMapCache ?? null;
+  }, [currentUserId, initialMapCache]);
+
   useLayoutEffect(() => {
     if (!session || !currentUserId) return;
     const centerKey = `${currentUserId}:${Math.round(selfPlanetCoords.x)}:${Math.round(selfPlanetCoords.y)}`;
@@ -7334,8 +8458,8 @@ function SectorMapScreen({
   }, [currentUserId, fleetDraft, harvestAvailability, selectedFieldEntity]);
 
   const displayedMapExpeditions = useMemo(
-    () => (mapExpeditions.length > 0 ? mapExpeditions : (mapExpedition ? [mapExpedition] : [])),
-    [mapExpedition, mapExpeditions]
+    () => (liveDisplayedMapExpeditions.length > 0 ? liveDisplayedMapExpeditions : (!mapLiveStateHydrated ? cachedDisplayedMapExpeditions : [])),
+    [cachedDisplayedMapExpeditions, liveDisplayedMapExpeditions, mapLiveStateHydrated]
   );
 
   const derivedDisplayedMapExpeditions = useMemo(
@@ -7367,7 +8491,7 @@ function SectorMapScreen({
     () =>
       derivedDisplayedMapExpeditions
         .map(({ expedition, timeline }) => {
-          const field = mapFields.find((row) => row.id === expedition.fieldId);
+          const field = displayedMapFields.find((row) => row.id === expedition.fieldId);
           if (!field) return null;
           const status = timeline.status;
           if (status !== "travel_to_field" && status !== "returning") return null;
@@ -7406,7 +8530,7 @@ function SectorMapScreen({
             angle: number;
           } => Boolean(visual)
         ),
-    [derivedDisplayedMapExpeditions, mapFields, selfPlanetCoords]
+    [derivedDisplayedMapExpeditions, displayedMapFields, selfPlanetCoords]
   );
 
   const mapExtractionVisuals = useMemo(
@@ -7414,7 +8538,7 @@ function SectorMapScreen({
       derivedDisplayedMapExpeditions
         .map(({ expedition, timeline }) => {
           if (timeline.status !== "extracting") return null;
-          const field = mapFields.find((row) => row.id === expedition.fieldId);
+          const field = displayedMapFields.find((row) => row.id === expedition.fieldId);
           if (!field) return null;
           return {
             id: expedition.id,
@@ -7431,7 +8555,7 @@ function SectorMapScreen({
             currentY: number;
           } => Boolean(visual)
         ),
-    [derivedDisplayedMapExpeditions, mapFields]
+    [derivedDisplayedMapExpeditions, displayedMapFields]
   );
 
   const entityLabelById = useMemo(() => {
@@ -7439,6 +8563,93 @@ function SectorMapScreen({
     for (const entity of sectorEntities) output[entity.id] = sectorEntityDisplayName(entity, language);
     return output;
   }, [language, sectorEntities]);
+
+  const mapInFlightHarvestSummaryById = useMemo(() => {
+    const validResourceIds = new Set<ResourceId>(RESOURCE_DEFS.map((def) => def.id as ResourceId));
+    const normalizeResourceId = (raw: unknown): ResourceId | null => {
+      const value = String(raw || "").trim().toLowerCase();
+      if (!value || !validResourceIds.has(value as ResourceId)) return null;
+      return value as ResourceId;
+    };
+    const toInt = (raw: unknown) => Math.max(0, Math.floor(Number(raw ?? 0)));
+    const output: Record<
+      string,
+      {
+        rows: Array<{ resourceId: ResourceId; amount: number }>;
+        cargoUsed: number;
+        cargoCapacity: number;
+      }
+    > = {};
+
+    for (const { expedition, timeline } of derivedDisplayedMapExpeditions) {
+      if (timeline.status !== "extracting" && timeline.status !== "returning") continue;
+      const field = displayedMapFields.find((row) => row.id === expedition.fieldId);
+
+      const mergedSnapshot: Partial<Record<ResourceId, number>> = {};
+      if (field && Array.isArray(field.resources)) {
+        for (const row of field.resources) {
+          const rid = normalizeResourceId(row.resourceId);
+          if (!rid) continue;
+          mergedSnapshot[rid] = toInt(row.totalAmount);
+        }
+      }
+      if (expedition.snapshotResources && typeof expedition.snapshotResources === "object") {
+        for (const [ridRaw, amountRaw] of Object.entries(expedition.snapshotResources)) {
+          const rid = normalizeResourceId(ridRaw);
+          if (!rid) continue;
+          mergedSnapshot[rid] = toInt(amountRaw);
+        }
+      }
+
+      const liveCollected: Partial<Record<ResourceId, number>> = {};
+      if (expedition.collectedResources && typeof expedition.collectedResources === "object") {
+        for (const [ridRaw, amountRaw] of Object.entries(expedition.collectedResources)) {
+          const rid = normalizeResourceId(ridRaw);
+          if (!rid) continue;
+          liveCollected[rid] = toInt(amountRaw);
+        }
+      }
+
+      if (timeline.status === "extracting") {
+        const localEstimate = estimateMapExpeditionCollected(expedition, mergedSnapshot, mapNowTs);
+        for (const [ridRaw, amountRaw] of Object.entries(localEstimate)) {
+          const rid = normalizeResourceId(ridRaw);
+          if (!rid) continue;
+          liveCollected[rid] = Math.max(toInt(liveCollected[rid] ?? 0), toInt(amountRaw));
+        }
+      }
+
+      const orderedIds: ResourceId[] = [];
+      const seen = new Set<ResourceId>();
+      const addId = (raw: unknown) => {
+        const rid = normalizeResourceId(raw);
+        if (!rid || seen.has(rid)) return;
+        seen.add(rid);
+        orderedIds.push(rid);
+      };
+      if (field && Array.isArray(field.resources)) {
+        for (const row of field.resources) addId(row.resourceId);
+      }
+      for (const rid of Object.keys(mergedSnapshot)) addId(rid);
+      for (const rid of Object.keys(liveCollected)) addId(rid);
+
+      output[expedition.id] = {
+        rows: orderedIds
+          .map((resourceId) => ({
+            resourceId,
+            amount: toInt(liveCollected[resourceId] ?? 0)
+          }))
+          .filter((row) => row.amount > 0),
+        cargoUsed: Object.values(liveCollected).reduce(
+          (sum, value) => sum + Math.max(0, Math.floor(Number(value || 0))),
+          0
+        ),
+        cargoCapacity: Math.max(0, Math.floor(Number(expedition.totalTransportCapacity || 0)))
+      };
+    }
+
+    return output;
+  }, [derivedDisplayedMapExpeditions, displayedMapFields, mapNowTs]);
 
   const inFlightRows = useMemo(() => {
     const rows: Array<{
@@ -7452,6 +8663,9 @@ function SectorMapScreen({
       canRecall?: boolean;
       expeditionId?: string;
       targetCoords?: { x: number; y: number };
+      harvestRows?: Array<{ resourceId: ResourceId; amount: number }>;
+      cargoUsed?: number;
+      cargoCapacity?: number;
     }> = fleets
       .map((fleet) => {
         const missionLabel = fleet.missionType === "attack"
@@ -7464,7 +8678,7 @@ function SectorMapScreen({
         return {
           id: fleet.id,
           title: missionLabel,
-          route: `${sourceName} → ${targetName}`,
+          route: `${sourceName} -> ${targetName}`,
           detail: `${Math.max(0, Math.min(100, Math.round(fleet.progress * 100)))}%`,
           progress: Math.max(0, Math.min(1, fleet.progress))
         };
@@ -7472,7 +8686,7 @@ function SectorMapScreen({
       .filter((row) => row.progress < 1);
 
     for (const { expedition, timeline } of derivedDisplayedMapExpeditions) {
-      const field = mapFields.find((row) => row.id === expedition.fieldId);
+      const field = displayedMapFields.find((row) => row.id === expedition.fieldId);
       const fieldName = field ? mapFieldDisplayName(field.id, language) : mapFieldDisplayName(expedition.fieldId, language);
       const fieldCoords = field ? { x: field.x, y: field.y } : undefined;
       const status = timeline.status;
@@ -7482,28 +8696,32 @@ function SectorMapScreen({
           ? (language === "en" ? "Returning fleet" : "Flotte en retour")
           : (language === "en" ? "Traveling fleet" : "Flotte en trajet");
       const route = status === "extracting"
-        ? `${fieldName} • ${language === "en" ? "Harvesting in progress" : "Exploitation en cours"}`
+        ? `${fieldName} - ${language === "en" ? "Harvesting in progress" : "Exploitation en cours"}`
         : status === "returning"
-          ? `${fieldName} → ${language === "en" ? "Your planet" : "Votre planète"}`
-          : `${language === "en" ? "Your planet" : "Votre planète"} → ${fieldName}`;
+          ? `${fieldName} -> ${language === "en" ? "Your planet" : "Votre planete"}`
+          : `${language === "en" ? "Your planet" : "Votre planete"} -> ${fieldName}`;
       const etaTs = timeline.endAt;
       const remainingSeconds = Math.max(0, etaTs - mapNowTs);
       if (remainingSeconds <= 0) continue;
+      const harvestSummary = mapInFlightHarvestSummaryById[expedition.id];
       rows.unshift({
         id: `expedition_${expedition.id}`,
         title: statusLabel,
         route: fieldCoords ? `${route} [${fieldCoords.x}, ${fieldCoords.y}]` : route,
-        detail: `${language === "en" ? "ETA" : "Arrivée"} ${new Date(etaTs * 1000).toLocaleTimeString()}`,
+        detail: `${language === "en" ? "ETA" : "Arrivee"} ${new Date(etaTs * 1000).toLocaleTimeString()}`,
         progress: timeline.progress,
         remainingSeconds,
         etaTs,
         canRecall: status !== "returning",
         expeditionId: expedition.id,
-        targetCoords: fieldCoords
+        targetCoords: fieldCoords,
+        harvestRows: harvestSummary?.rows ?? [],
+        cargoUsed: harvestSummary?.cargoUsed ?? 0,
+        cargoCapacity: harvestSummary?.cargoCapacity ?? 0
       });
     }
     return rows;
-  }, [derivedDisplayedMapExpeditions, entityLabelById, fleets, language, mapFields, mapNowTs]);
+  }, [derivedDisplayedMapExpeditions, displayedMapFields, entityLabelById, fleets, language, mapInFlightHarvestSummaryById, mapNowTs]);
 
   const mapLiveExtractionOverlays = useMemo(() => {
     const validResourceIds = new Set<ResourceId>(RESOURCE_DEFS.map((def) => def.id as ResourceId));
@@ -7517,7 +8735,7 @@ function SectorMapScreen({
     return derivedDisplayedMapExpeditions
       .map(({ expedition, timeline }) => {
         if (timeline.status !== "extracting") return null;
-        const field = mapFields.find((row) => row.id === expedition.fieldId);
+        const field = displayedMapFields.find((row) => row.id === expedition.fieldId);
         if (!field) return null;
 
         const fieldSnapshot: Partial<Record<ResourceId, number>> = {};
@@ -7603,7 +8821,7 @@ function SectorMapScreen({
           rows: Array<{ resourceId: ResourceId; amount: number }>;
         } => Boolean(overlay)
       );
-  }, [derivedDisplayedMapExpeditions, mapFields, mapNowTs]);
+  }, [derivedDisplayedMapExpeditions, displayedMapFields, mapNowTs]);
 
   const primaryDisplayedExpedition = useMemo(() => {
     if (derivedDisplayedMapExpeditions.length <= 0) return null;
@@ -8095,6 +9313,7 @@ function SectorMapScreen({
 
   useEffect(() => {
     setMapCacheHydrated(false);
+    setMapLiveStateHydrated(false);
   }, [currentUserId, mapCacheKey]);
 
   useLayoutEffect(() => {
@@ -8103,8 +9322,11 @@ function SectorMapScreen({
       return;
     }
     try {
-      const raw = sessionStorage.getItem(mapCacheKey);
-      const parsed = parseJsonObject(raw);
+      const seed =
+        initialMapCacheRef.current && Object.keys(initialMapCacheRef.current).length > 0
+          ? initialMapCacheRef.current
+          : parseJsonObject(sessionStorage.getItem(mapCacheKey));
+      const parsed = parseJsonObject(seed);
       const cachedAtMs = Math.max(0, Math.floor(Number(parsed?.cachedAtMs ?? 0)));
       const cachedServerNowTs = Math.max(0, Math.floor(Number(parsed?.serverNowTs ?? 0)));
       if (cachedAtMs > 0 && cachedServerNowTs > 0) {
@@ -8135,43 +9357,42 @@ function SectorMapScreen({
   useEffect(() => {
     if (!session || !currentUserId || !mapCacheHydrated) return;
     try {
-      sessionStorage.setItem(
-        mapCacheKey,
-        JSON.stringify({
-          cachedAtMs: Date.now(),
-          serverNowTs: mapNowTs,
-          players: mapPlayers,
-          fields: mapFields,
-          expedition: mapExpedition,
-          expeditions: mapExpeditions,
-          reports: mapReports,
-          harvestInventory: mapHarvestInventory,
-          maxActiveExpeditions: mapServerMaxActiveExpeditions
-        })
-      );
+      const nextCachePayload = {
+        cachedAtMs: Date.now(),
+        serverNowTs: mapNowTs,
+        players: displayedMapPlayers,
+        fields: displayedMapFields,
+        expedition: liveDisplayedMapExpeditions[0] ?? null,
+        expeditions: liveDisplayedMapExpeditions,
+        reports: mapReports,
+        harvestInventory: mapHarvestInventory,
+        maxActiveExpeditions: mapServerMaxActiveExpeditions
+      };
+      sessionStorage.setItem(mapCacheKey, JSON.stringify(nextCachePayload));
+      onPersistMapCache?.(nextCachePayload);
     } catch {
       // ignore storage quota errors
     }
   }, [
     currentUserId,
     mapCacheKey,
-    mapExpedition,
-    mapExpeditions,
-    mapFields,
+    displayedMapFields,
+    displayedMapPlayers,
+    liveDisplayedMapExpeditions,
     mapHarvestInventory,
-    mapPlayers,
     mapReports,
     mapServerMaxActiveExpeditions,
     mapCacheHydrated,
+    onPersistMapCache,
     session
   ]);
 
   useEffect(() => {
+    if (!active) return;
     if (!session || mapActionBusy) return;
-    const displayedExpeditions = mapExpeditions.length > 0 ? mapExpeditions : (mapExpedition ? [mapExpedition] : []);
-    if (displayedExpeditions.length <= 0) return;
+    if (displayedMapExpeditions.length <= 0) return;
 
-    const hasOverdue = displayedExpeditions.some((expedition) => {
+    const hasOverdue = displayedMapExpeditions.some((expedition) => {
       const status = String(expedition?.status || "").trim().toLowerCase();
       const etaTs =
         status === "extracting"
@@ -8216,7 +9437,7 @@ function SectorMapScreen({
     return () => {
       cancelled = true;
     };
-  }, [applyMapPayload, client, commandementEscadreLevel, mapActionBusy, mapExpedition, mapExpeditions, mapNowTs, session]);
+  }, [active, applyMapPayload, client, commandementEscadreLevel, displayedMapExpeditions, mapActionBusy, mapNowTs, session]);
 
   const launchHarvestOnField = async (fieldId: string) => {
     if (!session) return;
@@ -8443,6 +9664,15 @@ function SectorMapScreen({
     );
   }, [pan.x, pan.y, selfPlanetCoords.x, selfPlanetCoords.y, viewportSize.height, viewportSize.width, zoom]);
 
+  const visibleMapOrbEntities = useMemo(
+    () =>
+      sectorEntities.filter(
+        (entity): entity is SectorWorld | SectorResource =>
+          (entity.type === "world" || entity.type === "resource") && isVisible(entity)
+      ),
+    [isVisible, sectorEntities]
+  );
+
   return (
     <main className={`sector-shell ${sidebarOpen ? "" : "sidebar-collapsed"}`}>
       <section
@@ -8471,7 +9701,7 @@ function SectorMapScreen({
                 </span>
                 <span className="sector-flight-summary-right">
                   <span>{inFlightRows.length}</span>
-                  <span className="sector-flight-summary-caret">▾</span>
+                  <span className="sector-flight-summary-caret">v</span>
                 </span>
               </summary>
               <div className="sector-flight-list">
@@ -8492,11 +9722,31 @@ function SectorMapScreen({
                         {row.remainingSeconds == null ? <small>{row.detail}</small> : null}
                       </header>
                       <p>{row.route}</p>
+                      {row.harvestRows && row.harvestRows.length > 0 ? (
+                        <div className="sector-flight-resource-meta">
+                          <span className="sector-flight-resource-title">
+                            {l("Ressources recoltees", "Harvested resources")}
+                          </span>
+                          <div className="sector-flight-resource-list">
+                            {row.harvestRows.map((resourceRow) => (
+                              <div key={`${row.id}_${resourceRow.resourceId}`} className="sector-flight-resource-row">
+                                <span>{resourceDisplayName(resourceRow.resourceId, language)}</span>
+                                <strong>+{resourceRow.amount.toLocaleString()}</strong>
+                              </div>
+                            ))}
+                          </div>
+                          {typeof row.cargoCapacity === "number" && row.cargoCapacity > 0 ? (
+                            <small className={`sector-flight-resource-cargo ${typeof row.cargoUsed === "number" && row.cargoUsed >= row.cargoCapacity ? "full" : ""}`}>
+                              {l("Soute", "Cargo")}: {Math.max(0, Math.floor(Number(row.cargoUsed ?? 0))).toLocaleString()} / {row.cargoCapacity.toLocaleString()}
+                            </small>
+                          ) : null}
+                        </div>
+                      ) : null}
                       {row.remainingSeconds != null && row.etaTs != null ? (
                         <div className="sector-flight-time-meta">
                           <span>{l("Temps restant", "Time left")}</span>
                           <strong className="sector-flight-time-value">{formatFlightCountdown(row.remainingSeconds)}</strong>
-                          <span>{l("Arrivée", "Arrival")}</span>
+                          <span>{l("Arrivee", "Arrival")}</span>
                           <strong className="sector-flight-time-value">{formatFlightEtaClock(row.etaTs)}</strong>
                         </div>
                       ) : null}
@@ -8536,7 +9786,7 @@ function SectorMapScreen({
                 </span>
                 <span className="sector-daily-summary-right">
                   <span className="sector-daily-badge">{dailyAvailableCount}</span>
-                  <span className="sector-daily-summary-caret">▾</span>
+                  <span className="sector-daily-summary-caret">v</span>
                 </span>
               </summary>
               <p className="sector-daily-reset">{dailyHarvestQuestResetLabel}</p>
@@ -8679,7 +9929,7 @@ function SectorMapScreen({
               className="sector-field-live-overlay"
               style={{ left: overlay.x, top: overlay.y - 68 }}
             >
-              <p>{l("Ressources cumulées", "Accumulated resources")}</p>
+              <p>{l("Ressources cumulees", "Accumulated resources")}</p>
               {overlay.rows.length <= 0 ? (
                 <small>{l("Extraction en cours...", "Extraction in progress...")}</small>
               ) : (
@@ -8693,7 +9943,7 @@ function SectorMapScreen({
                   <small className={`sector-field-live-capacity ${overlay.cargoCapacity > 0 && overlay.cargoUsed >= overlay.cargoCapacity ? "full" : ""}`}>
                     {l("Soute", "Cargo")}: {overlay.cargoUsed.toLocaleString()} / {overlay.cargoCapacity.toLocaleString()}
                     {overlay.cargoCapacity > 0 && overlay.cargoUsed >= overlay.cargoCapacity
-                      ? ` • ${l("Pleine", "Full")}`
+                      ? ` - ${l("Pleine", "Full")}`
                       : ""}
                   </small>
                   {overlay.cargoCapacity > 0 && overlay.cargoUsed >= overlay.cargoCapacity ? (
@@ -8731,7 +9981,7 @@ function SectorMapScreen({
                   e.stopPropagation();
                   handleEntityClick(entity);
                 }}
-                className={`sector-entity ${targetable ? "targetable" : ""} ${visible ? "" : "muted"}`}
+                className={`sector-entity ${entity.type === "world" || entity.type === "resource" ? "orb-entity" : ""} ${entity.type === "world" ? "world-entity" : ""} ${entity.type === "resource" ? "resource-entity" : ""} ${targetable ? "targetable" : ""} ${visible ? "" : "muted"}`}
                 style={{ left: entity.x, top: entity.y }}
               >
                 {selected ? <span className="sector-select-ring" /> : null}
@@ -8743,27 +9993,24 @@ function SectorMapScreen({
                   </span>
                 ) : null}
 
-                {entity.type === "world" ? (
-                  <span className="sector-world">
-                    <span className="sector-world-sprite" style={getPlanetSpriteStyle(entity.worldType)} />
-                  </span>
+                {entity.type === "world" || entity.type === "resource" ? (
+                  <span
+                    className={`sector-world sector-mission-world-anchor ${entity.type === "resource" ? "sector-resource-orb-anchor" : ""}`}
+                  />
                 ) : null}
 
-                {entity.type === "resource" ? (
-                  <span className={`sector-resource ${resourceClass(entity.resourceType)}`}>
-                    <Gem size={34} />
-                  </span>
-                ) : null}
-
-                <span className="sector-label">
+                <span
+                  className={`sector-label ${entity.type === "world" ? "mission-world-label" : ""} ${entity.type === "resource" ? "resource-orb-label" : ""}`}
+                >
                   <strong>{sectorEntityDisplayName(entity, language)}</strong>
-                  <small>[{entity.x}, {entity.y}]</small>
+                  {entity.type !== "world" ? <small>[{entity.x}, {entity.y}]</small> : null}
                 </span>
               </button>
             );
           })}
           </div>
         </div>
+        <MissionWorldLayer orbs={visibleMapOrbEntities} pan={pan} zoom={zoom} viewportSize={viewportSize} />
       </section>
 
       <aside className={`sector-sidebar ${sidebarOpen ? "open" : "collapsed"}`}>
@@ -8858,7 +10105,7 @@ function SectorMapScreen({
                   </div>
                   {primaryExpeditionState.status === "extracting" ? (
                     <div className="sector-map-live-gains">
-                      <p>{l("Ressources cumulées", "Accumulated resources")}</p>
+                      <p>{l("Ressources cumulees", "Accumulated resources")}</p>
                       {mapLiveCollectedRows.length <= 0 ? (
                         <small>{l("Extraction en cours...", "Extraction in progress...")}</small>
                       ) : (
@@ -8874,7 +10121,7 @@ function SectorMapScreen({
                               <small className={`sector-field-live-capacity ${primaryLiveExtractionOverlay.cargoCapacity > 0 && primaryLiveExtractionOverlay.cargoUsed >= primaryLiveExtractionOverlay.cargoCapacity ? "full" : ""}`}>
                                 {l("Soute", "Cargo")}: {primaryLiveExtractionOverlay.cargoUsed.toLocaleString()} / {primaryLiveExtractionOverlay.cargoCapacity.toLocaleString()}
                                 {primaryLiveExtractionOverlay.cargoCapacity > 0 && primaryLiveExtractionOverlay.cargoUsed >= primaryLiveExtractionOverlay.cargoCapacity
-                                  ? ` • ${l("Pleine", "Full")}`
+                                  ? ` - ${l("Pleine", "Full")}`
                                   : ""}
                               </small>
                               {primaryLiveExtractionOverlay.cargoCapacity > 0 && primaryLiveExtractionOverlay.cargoUsed >= primaryLiveExtractionOverlay.cargoCapacity ? (
@@ -8996,7 +10243,7 @@ function SectorMapScreen({
                       <p>
                         {entityTypeLabel(selectedEntity.type)}
                         {selectedEntity.type === "station"
-                          ? ` • ${l("Proprietaire", "Owner")}: ${sectorStationOwnerDisplay(selectedEntity, language)}`
+                          ? ` - ${l("Proprietaire", "Owner")}: ${sectorStationOwnerDisplay(selectedEntity, language)}`
                           : ""}
                       </p>
                     </div>
@@ -9048,8 +10295,8 @@ function SectorMapScreen({
                     </p>
                   ) : (
                     <>
-                      <div><span>{l("Rareté", "Rarity")}</span><strong>{mapFieldRarityDisplay(selectedEntity.rarityTier, language)}</strong></div>
-                      <div><span>{l("Qualité", "Quality")}</span><strong>{mapFieldQualityDisplay(selectedEntity.qualityTier, language)}</strong></div>
+                      <div><span>{l("Rarete", "Rarity")}</span><strong>{mapFieldRarityDisplay(selectedEntity.rarityTier, language)}</strong></div>
+                      <div><span>{l("Qualite", "Quality")}</span><strong>{mapFieldQualityDisplay(selectedEntity.qualityTier, language)}</strong></div>
                       <div><span>{l("Rendement restant", "Remaining yield")}</span><strong>{Math.max(0, Math.floor(Number(selectedEntity.amount ?? 0))).toLocaleString()}</strong></div>
                       {(selectedEntity.resources ?? []).map((row) => (
                         <div key={`rf_res_${selectedEntity.id}_${row.resourceId}`}>
@@ -9154,7 +10401,7 @@ function SectorMapScreen({
               <div>
                 <h4>{sectorEntityDisplayName(fieldPopupEntity, language)}</h4>
                 <p>
-                  {l("Champ de ressources", "Resource field")} • [{fieldPopupEntity.x}, {fieldPopupEntity.y}]
+                  {l("Champ de ressources", "Resource field")} - [{fieldPopupEntity.x}, {fieldPopupEntity.y}]
                 </p>
               </div>
               <button type="button" onClick={() => setFieldPopupId(null)}><X size={18} /></button>
@@ -9162,109 +10409,304 @@ function SectorMapScreen({
 
             {mapActionError ? <p className="sector-map-error">{mapActionError}</p> : null}
 
-            <div className="sector-detail-list">
-              <div><span>{l("Type", "Type")}</span><strong>{resourceTypeLabel(fieldPopupEntity.resourceType)}</strong></div>
-              <div><span>{l("Occupation", "Occupation")}</span><strong>{fieldPopupEntity.isOccupied ? l("Occupe", "Occupied") : l("Libre", "Free")}</strong></div>
-              {fieldPopupEntity.isOccupied && fieldPopupEntity.occupiedByUsername ? (
-                <div><span>{l("Exploitant", "Operator")}</span><strong>{fieldPopupEntity.occupiedByUsername}</strong></div>
-              ) : null}
-              {fieldPopupEntity.hiddenDetails ? (
-                <p className="sector-empty">
-                  {l(
-                    "Contenu masque: ce champ est exploite par une flotte rivale.",
-                    "Hidden content: this field is being harvested by a rival fleet."
-                  )}
-                </p>
-              ) : (
-                <>
-                  <div><span>{l("Rareté", "Rarity")}</span><strong>{mapFieldRarityDisplay(fieldPopupEntity.rarityTier, language)}</strong></div>
-                  <div><span>{l("Qualité", "Quality")}</span><strong>{mapFieldQualityDisplay(fieldPopupEntity.qualityTier, language)}</strong></div>
-                  <div><span>{l("Rendement restant", "Remaining yield")}</span><strong>{Math.max(0, Math.floor(Number(fieldPopupEntity.amount ?? 0))).toLocaleString()}</strong></div>
-                  {(fieldPopupEntity.resources ?? []).map((row) => (
-                    <div key={`rf_modal_res_${fieldPopupEntity.id}_${row.resourceId}`}>
-                      <span>{resourceDisplayName(row.resourceId, language)}</span>
-                      <strong>{Math.floor(row.remainingAmount).toLocaleString()} / {Math.floor(row.totalAmount).toLocaleString()}</strong>
-                    </div>
-                  ))}
-                  <div>
-                    <span>{l("Travail restant", "Remaining work")}</span>
-                    <strong>{Math.floor(Number(fieldPopupEntity.remainingExtractionWork ?? 0)).toLocaleString()}</strong>
-                  </div>
-                  {selectedFieldPlan ? (
+            <div className="sector-field-modal-body">
+              <section className="sector-field-priority">
+                <div className="sector-field-priority-head">
+                  <span className={`sector-field-status-badge ${fieldPopupEntity.isOccupied ? "occupied" : "free"}`}>
+                    {fieldPopupEntity.isOccupied ? l("Occupe", "Occupied") : l("Libre", "Free")}
+                  </span>
+                  <span className="sector-field-type-badge">{resourceTypeLabel(fieldPopupEntity.resourceType)}</span>
+                  {!fieldPopupEntity.hiddenDetails ? (
                     <>
-                      <div><span>{l("Trajet estime", "Estimated travel")}</span><strong>{Math.floor(selectedFieldPlan.travelSeconds / 60)}m {selectedFieldPlan.travelSeconds % 60}s</strong></div>
-                      <div><span>{l("Extraction estimee", "Estimated extraction")}</span><strong>{Math.floor(selectedFieldPlan.extractionSeconds / 60)}m</strong></div>
-                      <div><span>{l("Capacite cargo", "Cargo capacity")}</span><strong>{selectedFieldPlan.totalCapacity.toLocaleString()}</strong></div>
+                      <span className="sector-field-info-badge">{mapFieldRarityDisplay(fieldPopupEntity.rarityTier, language)}</span>
+                      <span className="sector-field-info-badge">{mapFieldQualityDisplay(fieldPopupEntity.qualityTier, language)}</span>
                     </>
                   ) : null}
-                  {fieldPopupEntity.fieldId && !fieldPopupEntity.isOccupied ? (
-                    <div className="sector-field-actions">
-                      <div className="sector-field-actions-head">
-                        <p>{l("Flotte de collecte", "Harvest fleet")}</p>
-                        <span className="sector-field-slot-pill">
-                          {l("Slots", "Slots")} {mapActiveBlockingExpeditions}/{mapMaxActiveExpeditions}
-                        </span>
-                      </div>
-                      <div className="sector-field-grid">
-                        {["argo", "pegase", "arche_spatiale"].map((unitId) => {
-                          const available = Math.max(0, Math.floor(Number(harvestAvailability[unitId] ?? 0)));
-                          const raw = fleetDraft[unitId] ?? "0";
-                          return (
-                            <label key={`fleet_modal_${unitId}`} className="sector-field-unit-row">
-                              <span className="sector-field-unit-meta">
-                                <strong>{hangarUnitDisplayName(unitId, unitId, language)}</strong>
-                                <em>{l("Disponibles", "Available")}: {available}</em>
-                              </span>
-                              <input
-                                type="number"
-                                min={0}
-                                max={available}
-                                value={raw}
-                                onChange={(e) => {
-                                  const next = Math.max(0, Math.min(available, Math.floor(Number(e.target.value || 0))));
-                                  setFleetDraft((prev) => ({ ...prev, [unitId]: String(next) }));
-                                }}
+                </div>
+
+                {fieldPopupEntity.isOccupied && fieldPopupEntity.occupiedByUsername ? (
+                  <p className="sector-field-operator">
+                    {l("Exploite par", "Harvested by")} <strong>{fieldPopupEntity.occupiedByUsername}</strong>
+                  </p>
+                ) : null}
+
+                {fieldPopupEntity.hiddenDetails ? (
+                  <p className="sector-empty">
+                    {l(
+                      "Contenu masque: ce champ est exploite par une flotte rivale.",
+                      "Hidden content: this field is being harvested by a rival fleet."
+                    )}
+                  </p>
+                ) : (
+                  <div className="sector-field-resource-strip">
+                    {(fieldPopupEntity.resources ?? []).map((row) => (
+                      <article key={`rf_modal_res_${fieldPopupEntity.id}_${row.resourceId}`} className="sector-field-resource-card">
+                        <span>{resourceDisplayName(row.resourceId, language)}</span>
+                        <strong>{Math.floor(row.remainingAmount).toLocaleString()}</strong>
+                        <small>{l("sur", "of")} {Math.floor(row.totalAmount).toLocaleString()}</small>
+                      </article>
+                    ))}
+                  </div>
+                )}
+              </section>
+
+              {!fieldPopupEntity.hiddenDetails && fieldPopupEntity.fieldId && !fieldPopupEntity.isOccupied ? (
+                <section className="sector-field-command-panel">
+                  <div className="sector-field-command-head">
+                    <div>
+                      <h5>{l("Envoi de flotte", "Fleet dispatch")}</h5>
+                      <p>{l("Composez votre flotte de collecte et lancez l'exploitation.", "Build your harvesting fleet and launch the operation.")}</p>
+                    </div>
+                    <span className="sector-field-slot-pill">
+                      {l("Slots", "Slots")} {mapActiveBlockingExpeditions}/{mapMaxActiveExpeditions}
+                    </span>
+                  </div>
+
+                  <div className="sector-field-compare">
+                    {["pegase", "argo", "arche_spatiale"].map((unitId) => {
+                      const stats = MAP_HARVEST_UNIT_STATS[unitId];
+                      const shipImage = HANGAR_SHIP_IMAGE_MAP[unitId];
+                      const maxHarvest = Math.max(...["pegase", "argo", "arche_spatiale"].map((id) => Number(MAP_HARVEST_UNIT_STATS[id]?.harvestSpeed ?? 0)));
+                      const maxCargo = Math.max(...["pegase", "argo", "arche_spatiale"].map((id) => Number(MAP_HARVEST_UNIT_STATS[id]?.harvestCapacity ?? 0)));
+                      const maxSpeed = Math.max(...["pegase", "argo", "arche_spatiale"].map((id) => Number(MAP_HARVEST_UNIT_STATS[id]?.mapSpeed ?? 0)));
+                      return (
+                        <article key={`fleet_compare_${unitId}`} className={`sector-field-compare-card ${unitId.replace(/_/g, "-")}`}>
+                          <div className="sector-field-compare-head">
+                            {shipImage ? (
+                              <img
+                                src={shipImage}
+                                alt={hangarUnitDisplayName(unitId, unitId, language)}
+                                className="sector-field-compare-ship"
                               />
-                            </label>
-                          );
-                        })}
-                      </div>
-                      <button
-                        type="button"
-                        className="sector-war-btn"
-                        onClick={() => void launchHarvestOnField(fieldPopupEntity.fieldId!)}
-                        disabled={
-                          mapActionBusy ||
-                          !canLaunchAnotherMapExpedition ||
-                          !hasValidHarvestFleetSelection
-                        }
-                      >
-                        {mapActionBusy
-                          ? l("Lancement...", "Launching...")
-                          : !canLaunchAnotherMapExpedition
-                            ? l("Slots max atteints", "Slots full")
-                            : l("Lancer l'exploitation", "Start harvesting")}
-                      </button>
-                      {!canLaunchAnotherMapExpedition ? (
-                        <p className="sector-empty">
-                          {l(
+                            ) : null}
+                            <div>
+                              <strong>{hangarUnitDisplayName(unitId, unitId, language)}</strong>
+                              <small>{hangarUnitDisplayDescription(unitId, unitId, language)}</small>
+                            </div>
+                          </div>
+                          <div className="sector-field-compare-meters">
+                            <div>
+                              <span>{l("Recolte", "Harvest")}</span>
+                              <b>{Math.max(0, Math.floor(Number(stats?.harvestSpeed ?? 0)))}</b>
+                              <i><em style={{ width: `${maxHarvest > 0 ? (Number(stats?.harvestSpeed ?? 0) / maxHarvest) * 100 : 0}%` }} /></i>
+                            </div>
+                            <div>
+                              <span>{l("Cargo", "Cargo")}</span>
+                              <b>{Math.max(0, Math.floor(Number(stats?.harvestCapacity ?? 0))).toLocaleString()}</b>
+                              <i><em style={{ width: `${maxCargo > 0 ? (Number(stats?.harvestCapacity ?? 0) / maxCargo) * 100 : 0}%` }} /></i>
+                            </div>
+                            <div>
+                              <span>{l("Vitesse", "Speed")}</span>
+                              <b>{Math.max(0, Math.floor(Number(stats?.mapSpeed ?? 0)))}</b>
+                              <i><em style={{ width: `${maxSpeed > 0 ? (Number(stats?.mapSpeed ?? 0) / maxSpeed) * 100 : 0}%` }} /></i>
+                            </div>
+                          </div>
+                        </article>
+                      );
+                    })}
+                  </div>
+
+                  <div className="sector-field-command-stats">
+                    <article>
+                      <span>{l("Trajet estime", "Estimated travel")}</span>
+                      <strong>
+                        {selectedFieldPlan
+                          ? `${Math.floor(selectedFieldPlan.travelSeconds / 60)}m ${selectedFieldPlan.travelSeconds % 60}s`
+                          : "--"}
+                      </strong>
+                    </article>
+                    <article>
+                      <span>{l("Extraction estimee", "Estimated extraction")}</span>
+                      <strong>
+                        {selectedFieldPlan
+                          ? `${Math.floor(selectedFieldPlan.extractionSeconds / 60)}m`
+                          : "--"}
+                      </strong>
+                    </article>
+                    <article>
+                      <span>{l("Capacite cargo", "Cargo capacity")}</span>
+                      <strong>{selectedFieldPlan ? selectedFieldPlan.totalCapacity.toLocaleString() : "--"}</strong>
+                    </article>
+                    <article>
+                      <span>{l("Debit total", "Total harvest speed")}</span>
+                      <strong>{selectedFieldPlan ? selectedFieldPlan.totalHarvestSpeed.toLocaleString() : "--"}</strong>
+                    </article>
+                  </div>
+
+                  <div className="sector-field-command-grid">
+                    {["argo", "pegase", "arche_spatiale"].map((unitId) => {
+                      const available = Math.max(0, Math.floor(Number(harvestAvailability[unitId] ?? 0)));
+                      const raw = fleetDraft[unitId] ?? "0";
+                      const currentQty = Math.max(0, Math.min(available, Math.floor(Number(raw || 0))));
+                      const stats = MAP_HARVEST_UNIT_STATS[unitId];
+                      const shipImage = HANGAR_SHIP_IMAGE_MAP[unitId];
+                      const selectedHarvest = currentQty * Math.max(0, Math.floor(Number(stats?.harvestSpeed ?? 0)));
+                      const selectedCargo = currentQty * Math.max(0, Math.floor(Number(stats?.harvestCapacity ?? 0)));
+                      const selectedSpeed = currentQty > 0 ? Math.max(0, Math.floor(Number(stats?.mapSpeed ?? 0))) : 0;
+                      const unitRole = unitId === "pegase"
+                        ? l("Collecte rapide", "Rapid harvester")
+                        : unitId === "argo"
+                          ? l("Convoyeur equilibre", "Balanced convoy")
+                          : l("Cargo massif", "Heavy cargo");
+                      return (
+                        <article
+                          key={`fleet_modal_${unitId}`}
+                          className={`sector-field-unit-card ${currentQty > 0 ? "selected" : ""} ${unitId.replace(/_/g, "-")}`}
+                        >
+                          <div className="sector-field-unit-media">
+                            {shipImage ? (
+                              <img
+                                src={shipImage}
+                                alt={hangarUnitDisplayName(unitId, unitId, language)}
+                                className="sector-field-unit-ship"
+                              />
+                            ) : null}
+                            <span className="sector-field-unit-role">{unitRole}</span>
+                            <span className="sector-field-unit-available">
+                              {available.toLocaleString()} {l("disponibles", "available")}
+                            </span>
+                            <span className="sector-field-unit-count">
+                              {l("Selection", "Selected")} {currentQty}
+                            </span>
+                          </div>
+
+                          <div className="sector-field-unit-card-head">
+                            <div>
+                              <strong>{hangarUnitDisplayName(unitId, unitId, language)}</strong>
+                              <p>
+                                {hangarUnitDisplayDescription(
+                                  unitId,
+                                  l("Vaisseau dedie a l'exploitation des champs.", "Ship specialized in field harvesting."),
+                                  language
+                                )}
+                              </p>
+                              <small>{l("En reserve", "In reserve")}: {available}</small>
+                            </div>
+                            <span className="sector-field-unit-tag">{available > 0 ? l("Pret", "Ready") : l("Vide", "Empty")}</span>
+                          </div>
+
+                          <div className="sector-field-unit-stats">
+                            <span>
+                              <small>{l("Recolte", "Harvest")}</small>
+                              <b>{Math.max(0, Math.floor(Number(stats?.harvestSpeed ?? 0)))}</b>
+                            </span>
+                            <span>
+                              <small>{l("Cargo", "Cargo")}</small>
+                              <b>{Math.max(0, Math.floor(Number(stats?.harvestCapacity ?? 0))).toLocaleString()}</b>
+                            </span>
+                            <span>
+                              <small>{l("Vitesse", "Speed")}</small>
+                              <b>{Math.max(0, Math.floor(Number(stats?.mapSpeed ?? 0)))}</b>
+                            </span>
+                          </div>
+
+                          <div className="sector-field-quantity-picker">
+                            <button
+                              type="button"
+                              onClick={() => setFleetDraft((prev) => ({ ...prev, [unitId]: String(Math.max(0, currentQty - 1)) }))}
+                              disabled={mapActionBusy || currentQty <= 0}
+                            >
+                              -
+                            </button>
+                            <input
+                              type="number"
+                              min={0}
+                              max={available}
+                              value={raw}
+                              onChange={(e) => {
+                                const next = Math.max(0, Math.min(available, Math.floor(Number(e.target.value || 0))));
+                                setFleetDraft((prev) => ({ ...prev, [unitId]: String(next) }));
+                              }}
+                            />
+                            <button
+                              type="button"
+                              onClick={() => setFleetDraft((prev) => ({ ...prev, [unitId]: String(Math.min(available, currentQty + 1)) }))}
+                              disabled={mapActionBusy || currentQty >= available}
+                            >
+                              +
+                            </button>
+                          </div>
+
+                          <div className="sector-field-unit-contrib">
+                            <span>
+                              <small>{l("Debit mission", "Mission harvest")}</small>
+                              <b>{selectedHarvest.toLocaleString()}</b>
+                            </span>
+                            <span>
+                              <small>{l("Cargo mission", "Mission cargo")}</small>
+                              <b>{selectedCargo.toLocaleString()}</b>
+                            </span>
+                            <span>
+                              <small>{l("Vitesse mission", "Mission speed")}</small>
+                              <b>{selectedSpeed.toLocaleString()}</b>
+                            </span>
+                          </div>
+                        </article>
+                      );
+                    })}
+                  </div>
+
+                  <div className="sector-field-command-foot">
+                    <button
+                      type="button"
+                      className="sector-war-btn sector-field-launch-btn"
+                      onClick={() => void launchHarvestOnField(fieldPopupEntity.fieldId!)}
+                      disabled={
+                        mapActionBusy ||
+                        !canLaunchAnotherMapExpedition ||
+                        !hasValidHarvestFleetSelection
+                      }
+                    >
+                      {mapActionBusy
+                        ? l("Lancement...", "Launching...")
+                        : !canLaunchAnotherMapExpedition
+                          ? l("Slots max atteints", "Slots full")
+                          : l("Envoyer la flotte", "Send fleet")}
+                    </button>
+                    <p>
+                      {!canLaunchAnotherMapExpedition
+                        ? l(
                             "Nombre maximal de flottes actives atteint. Attendez un retour ou augmentez Commandement d'Escadre.",
                             "Maximum active fleet slots reached. Wait for a fleet return or increase Squadron Command."
-                          )}
-                        </p>
-                      ) : null}
-                    </div>
-                  ) : null}
-                  {fieldPopupEntity.fieldId && fieldPopupEntity.isOccupied ? (
-                    <p className="sector-empty">
-                      {l(
-                        "Ce champ est deja occupe. Choisissez un champ libre.",
-                        "This field is already occupied. Choose a free field."
-                      )}
+                          )
+                        : !hasValidHarvestFleetSelection
+                          ? l("Selectionnez au moins un vaisseau de collecte.", "Select at least one harvesting ship.")
+                          : l("Verifiez le trajet, le cargo et le debit avant d'envoyer la flotte.", "Check travel time, cargo and harvest speed before dispatching the fleet.")}
                     </p>
+                  </div>
+                </section>
+              ) : null}
+
+              {fieldPopupEntity.fieldId && fieldPopupEntity.isOccupied ? (
+                <p className="sector-empty">
+                  {l(
+                    "Ce champ est deja occupe. Choisissez un champ libre.",
+                    "This field is already occupied. Choose a free field."
+                  )}
+                </p>
+              ) : null}
+
+              <details className="sector-field-spoiler">
+                <summary>{l("Details du champ", "Field details")}</summary>
+                <div className="sector-detail-list">
+                  <div><span>{l("Type", "Type")}</span><strong>{resourceTypeLabel(fieldPopupEntity.resourceType)}</strong></div>
+                  <div><span>{l("Occupation", "Occupation")}</span><strong>{fieldPopupEntity.isOccupied ? l("Occupe", "Occupied") : l("Libre", "Free")}</strong></div>
+                  {fieldPopupEntity.isOccupied && fieldPopupEntity.occupiedByUsername ? (
+                    <div><span>{l("Exploitant", "Operator")}</span><strong>{fieldPopupEntity.occupiedByUsername}</strong></div>
                   ) : null}
-                </>
-              )}
+                  {!fieldPopupEntity.hiddenDetails ? (
+                    <>
+                      <div><span>{l("Rarete", "Rarity")}</span><strong>{mapFieldRarityDisplay(fieldPopupEntity.rarityTier, language)}</strong></div>
+                      <div><span>{l("Qualite", "Quality")}</span><strong>{mapFieldQualityDisplay(fieldPopupEntity.qualityTier, language)}</strong></div>
+                      <div><span>{l("Rendement restant", "Remaining yield")}</span><strong>{Math.max(0, Math.floor(Number(fieldPopupEntity.amount ?? 0))).toLocaleString()}</strong></div>
+                      <div>
+                        <span>{l("Travail restant", "Remaining work")}</span>
+                        <strong>{Math.floor(Number(fieldPopupEntity.remainingExtractionWork ?? 0)).toLocaleString()}</strong>
+                      </div>
+                    </>
+                  ) : null}
+                </div>
+              </details>
             </div>
           </div>
         </div>
@@ -10170,7 +11612,7 @@ function AllianceScreenV2({
         <div>
           <h2>{l("Alliance", "Alliance")}</h2>
           <p>{l("Gestion d'alliance serveur autoritaire (Nakama).", "Server-authoritative alliance management (Nakama).")}</p>
-          <small>{l("Joueur", "Player")}: {playerId || "-"} • {new Date(nowMs).toLocaleTimeString()}</small>
+          <small>{l("Joueur", "Player")}: {playerId || "-"} � {new Date(nowMs).toLocaleTimeString()}</small>
         </div>
       </section>
 
@@ -10529,7 +11971,7 @@ function AllianceScreenV2({
                     <div key={`log_live_${idx}_${log.at || 0}`} className="alliance-log-item">
                       <span>{String(log.message || "-")}</span>
                       <small>
-                        {new Date((Number(log.at || 0) || 0) * 1000).toLocaleString()} • {String(log.by || "-")}
+                        {new Date((Number(log.at || 0) || 0) * 1000).toLocaleString()} � {String(log.by || "-")}
                       </small>
                     </div>
                   ))}
@@ -10729,8 +12171,8 @@ function AllianceScreen({
   ]);
 
   const plannedAttacks = [
-    { id: "atk1", target: "Forteresse Sigma-19", impactAt: nowMs + 34 * 60 * 1000, joined: 5, window: "±5 min" },
-    { id: "atk2", target: "Relais de guerre K-412", impactAt: nowMs + 3 * 60 * 60 * 1000, joined: 3, window: "±5 min" }
+    { id: "atk1", target: "Forteresse Sigma-19", impactAt: nowMs + 34 * 60 * 1000, joined: 5, window: "�5 min" },
+    { id: "atk2", target: "Relais de guerre K-412", impactAt: nowMs + 3 * 60 * 60 * 1000, joined: 3, window: "�5 min" }
   ];
 
   const stationedReinforcements = [
@@ -11545,7 +12987,7 @@ function WikiScreen({ language }: { language: UILanguage }) {
             id: "t_h1_1",
             title: l("Minute 0-15", "Minute 0-15"),
             text: l(
-              "Optimisez Carbone/Titane, lancez vos premieres ameliorations et gardez le zoom sur le quadrillage pour enchaîner.",
+              "Optimisez Carbone/Titane, lancez vos premieres ameliorations et gardez le zoom sur le quadrillage pour encha�ner.",
               "Optimize Carbon/Titanium, start first upgrades, and stay focused on the grid to chain actions."
             )
           },
@@ -12601,7 +14043,7 @@ returnedAmount = min(collectedAmount, fleetTransportCapacity)`}
                 </td>
                 <td>
                   {l(
-                    "Prendre plusieurs champs moyens plutot qu'un gros champ risqué.",
+                    "Prendre plusieurs champs moyens plutot qu'un gros champ risqu�.",
                     "Chain multiple medium fields instead of one risky large field."
                   )}
                 </td>
@@ -13794,6 +15236,18 @@ function InboxScreen({
     return l("Classique", "Classic");
   };
 
+  const inboxDisplayTitle = (message: InboxMessage) => {
+    const meta = message.meta && typeof message.meta === "object" ? message.meta : null;
+    const localized = language === "en" ? String(meta?.titleEn || "").trim() : String(meta?.titleFr || "").trim();
+    return localized || message.title;
+  };
+
+  const inboxDisplayBody = (message: InboxMessage) => {
+    const meta = message.meta && typeof message.meta === "object" ? message.meta : null;
+    const localized = language === "en" ? String(meta?.bodyEn || "").trim() : String(meta?.bodyFr || "").trim();
+    return localized || message.body;
+  };
+
   const parseAttachmentItem = (itemId: string, quantity: number): InventoryViewItem => {
     const safeId = String(itemId || "").trim();
     const normalized = safeId.toUpperCase();
@@ -14486,13 +15940,13 @@ function InboxScreen({
                   </label>
                   <div className="inbox-item-main">
                     <div className="inbox-item-top">
-                      <strong>{msg.title}</strong>
+                      <strong>{inboxDisplayTitle(msg)}</strong>
                       {!msg.read ? <span className="inbox-dot" /> : null}
                     </div>
                     <span className="inbox-item-meta">
-                      {msg.type} • {new Date(msg.createdAt * 1000).toLocaleString()}
+                      {msg.type} - {new Date(msg.createdAt * 1000).toLocaleString()}
                     </span>
-                    <p>{msg.body.slice(0, 120)}{msg.body.length > 120 ? "..." : ""}</p>
+                    <p>{inboxDisplayBody(msg).slice(0, 120)}{inboxDisplayBody(msg).length > 120 ? "..." : ""}</p>
                   </div>
                 </article>
               ))}
@@ -14585,7 +16039,7 @@ function InboxScreen({
         ) : selectedMessage ? (
           <div className="inbox-detail">
             <header className="inbox-detail-head">
-              <h3>{selectedMessage.title}</h3>
+              <h3>{inboxDisplayTitle(selectedMessage)}</h3>
               <span className={`inbox-type-badge type-${selectedMessage.type.toLowerCase()}`}>{selectedMessage.type}</span>
             </header>
             <div className="inbox-detail-meta">
@@ -14598,7 +16052,7 @@ function InboxScreen({
                 <em>{new Date(selectedMessage.createdAt * 1000).toLocaleString()}</em>
               </span>
             </div>
-            <p className="inbox-body">{selectedMessage.body}</p>
+            <p className="inbox-body">{inboxDisplayBody(selectedMessage)}</p>
 
             {selectedMessage.combatReport ? (
               <details className="inbox-spoiler">
@@ -15510,20 +16964,254 @@ function AuthOverlay({
   );
 }
 
+function LoginIntroCinematic({
+  language,
+  playerName,
+  onComplete
+}: {
+  language: UILanguage;
+  playerName: string;
+  onComplete: () => void;
+}) {
+  const [sceneIndex, setSceneIndex] = useState(0);
+  const [displayedText, setDisplayedText] = useState("");
+  const [typing, setTyping] = useState(true);
+  const typingTimerRef = useRef<number | null>(null);
+  const autoAdvanceTimerRef = useRef<number | null>(null);
+  const typingRef = useRef(true);
+  const textRef = useRef("");
+  const sceneIndexRef = useRef(0);
+  const autoAdvanceMsRef = useRef<number | undefined>(undefined);
+  const playerLabel = playerName.trim().length > 0 ? playerName.trim() : language === "en" ? "Commander" : "Commandant";
+  const scene = LOGIN_INTRO_SCENES[sceneIndex] ?? LOGIN_INTRO_SCENES[0];
+  const fullText = (language === "en" ? scene.textEn : scene.textFr).replace(/\{player\}/g, playerLabel);
+  const isTitle = scene.speaker === "title";
+  const isSystem = scene.speaker === "system";
+  const progressPct = ((sceneIndex + 1) / LOGIN_INTRO_SCENES.length) * 100;
+
+  const clearIntroTimers = useCallback(() => {
+    if (typingTimerRef.current !== null) {
+      window.clearTimeout(typingTimerRef.current);
+      typingTimerRef.current = null;
+    }
+    if (autoAdvanceTimerRef.current !== null) {
+      window.clearTimeout(autoAdvanceTimerRef.current);
+      autoAdvanceTimerRef.current = null;
+    }
+  }, []);
+
+  const advanceScene = useCallback(() => {
+    clearIntroTimers();
+    const currentIndex = sceneIndexRef.current;
+    if (typingRef.current) {
+      setDisplayedText(textRef.current);
+      setTyping(false);
+      typingRef.current = false;
+      const autoAdvanceMs = autoAdvanceMsRef.current;
+      if (typeof autoAdvanceMs === "number" && autoAdvanceMs > 0) {
+        autoAdvanceTimerRef.current = window.setTimeout(() => {
+          if (currentIndex >= LOGIN_INTRO_SCENES.length - 1) onComplete();
+          else setSceneIndex(currentIndex + 1);
+        }, autoAdvanceMs);
+      }
+      return;
+    }
+    if (currentIndex >= LOGIN_INTRO_SCENES.length - 1) {
+      onComplete();
+      return;
+    }
+    setSceneIndex(currentIndex + 1);
+  }, [clearIntroTimers, onComplete]);
+
+  useEffect(() => {
+    textRef.current = fullText;
+    sceneIndexRef.current = sceneIndex;
+    autoAdvanceMsRef.current = scene.autoAdvanceMs;
+  }, [fullText, scene.autoAdvanceMs, sceneIndex]);
+
+  useEffect(() => {
+    clearIntroTimers();
+    setDisplayedText("");
+    setTyping(true);
+    typingRef.current = true;
+    let cursor = 0;
+    const stepDelay = isTitle ? 34 : isSystem ? 18 : 24;
+
+    const tick = () => {
+      cursor += 1;
+      if (cursor >= fullText.length) {
+        setDisplayedText(fullText);
+        setTyping(false);
+        typingRef.current = false;
+        if (typeof scene.autoAdvanceMs === "number" && scene.autoAdvanceMs > 0) {
+          autoAdvanceTimerRef.current = window.setTimeout(() => {
+            if (sceneIndex >= LOGIN_INTRO_SCENES.length - 1) onComplete();
+            else setSceneIndex(sceneIndex + 1);
+          }, scene.autoAdvanceMs);
+        }
+        return;
+      }
+      setDisplayedText(fullText.slice(0, cursor));
+      typingTimerRef.current = window.setTimeout(tick, stepDelay);
+    };
+
+    typingTimerRef.current = window.setTimeout(tick, 180);
+
+    return clearIntroTimers;
+  }, [clearIntroTimers, fullText, isSystem, isTitle, onComplete, scene.autoAdvanceMs, sceneIndex]);
+
+  useEffect(() => {
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, []);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.code === "Space" || event.code === "Enter" || event.code === "ArrowRight") {
+        event.preventDefault();
+        advanceScene();
+      } else if (event.code === "Escape") {
+        event.preventDefault();
+        onComplete();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [advanceScene, onComplete]);
+
+  useEffect(() => () => clearIntroTimers(), [clearIntroTimers]);
+
+  const speakerLabel =
+    scene.speaker === "kael"
+      ? language === "en"
+        ? "Dr Kael Ardent"
+        : "Dr Kael Ardent"
+      : scene.speaker === "lyra"
+        ? language === "en"
+          ? "Dr Lyra Nova"
+          : "Dr Lyra Nova"
+        : "";
+
+  return (
+    <div className="login-intro-overlay" onClick={advanceScene}>
+      <div className="login-intro-backdrop" style={LOGIN_INTRO_BACKDROP_STYLES[scene.backdrop]} />
+      <div className="login-intro-stars login-intro-stars-a" />
+      <div className="login-intro-stars login-intro-stars-b" />
+      <div className={`login-intro-atmo login-intro-atmo-${scene.backdrop}`} />
+      <div className="login-intro-vignette" />
+      <div className="login-intro-letterbox login-intro-letterbox-top" />
+      <div className="login-intro-letterbox login-intro-letterbox-bottom" />
+      <div className="login-intro-scanline" />
+
+      <button
+        type="button"
+        className="login-intro-skip"
+        onClick={(event) => {
+          event.stopPropagation();
+          onComplete();
+        }}
+      >
+        <X size={14} />
+        <span>{language === "en" ? "Skip intro" : "Passer l'intro"}</span>
+      </button>
+
+      {!isTitle ? (
+        <>
+          <div className="login-intro-hud">
+            <span>{language === "en" ? "Authentication complete" : "Connexion authentifiee"}</span>
+            <strong>{language === "en" ? "Command uplink" : "Liaison de commandement"}</strong>
+          </div>
+          <div className="login-intro-progress">
+            <div className="login-intro-progress-bar" style={{ width: `${progressPct}%` }} />
+          </div>
+        </>
+      ) : null}
+
+      {!isTitle ? (
+        <div className="login-intro-portraits">
+          <div className={`login-intro-portrait login-intro-portrait-left ${scene.speaker === "kael" ? "active" : ""}`}>
+            <div className="login-intro-portrait-frame">
+              <img src={COMMANDER_DEFS.kael_ardent.image} alt="Dr Kael Ardent" />
+            </div>
+            <span>KAEL ARDENT</span>
+          </div>
+          <div className={`login-intro-portrait login-intro-portrait-right ${scene.speaker === "lyra" ? "active" : ""}`}>
+            <div className="login-intro-portrait-frame">
+              <img src={COMMANDER_DEFS.lyra_nova.image} alt="Dr Lyra Nova" />
+            </div>
+            <span>LYRA NOVA</span>
+          </div>
+        </div>
+      ) : null}
+
+      <div className={`login-intro-stage ${isTitle ? "title" : isSystem ? "system" : "dialogue"}`}>
+        {isTitle ? (
+          <div className="login-intro-title-card">
+            <div className="login-intro-title-kicker">
+              {language === "en" ? "Heimy Game presents" : "Heimy Game presente"}
+            </div>
+            <div className="login-intro-title-main">
+              {displayedText.split("\n").map((line, index) => (
+                <span key={`${line}_${index}`}>{line}</span>
+              ))}
+            </div>
+            <div className="login-intro-title-sub">
+              {typing ? (language === "en" ? "Decrypting..." : "Decryptage...") : language === "en" ? "Launching command deck" : "Ouverture du pont de commandement"}
+            </div>
+          </div>
+        ) : isSystem ? (
+          <div className="login-intro-system-card">
+            <div className="login-intro-system-tag">{language === "en" ? "System relay" : "Relais systeme"}</div>
+            <p>{displayedText}</p>
+          </div>
+        ) : (
+          <div className={`login-intro-dialog-card ${scene.accent === "amber" ? "amber" : "cyan"}`}>
+            <div className="login-intro-dialog-header">
+              <span>{speakerLabel}</span>
+              <small>{scene.accent === "amber" ? (language === "en" ? "Operations" : "Operations") : language === "en" ? "Research" : "Recherche"}</small>
+            </div>
+            <p>{displayedText}</p>
+            {!typing ? (
+              <div className="login-intro-continue">
+                <ChevronRight size={14} />
+                <span>{language === "en" ? "Continue" : "Continuer"}</span>
+              </div>
+            ) : null}
+          </div>
+        )}
+      </div>
+
+      <div className="login-intro-footer">
+        <div className="login-intro-seq">
+          {language === "en" ? "Sequence" : "Sequence"} {String(sceneIndex + 1).padStart(2, "0")} / {String(LOGIN_INTRO_SCENES.length).padStart(2, "0")}
+        </div>
+        <div className="login-intro-hint">
+          <Play size={12} />
+          <span>{language === "en" ? "Click, Enter or Space" : "Clique, Entree ou Espace"}</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ProfileScreen({
   language,
   profileUsername,
   profileEmail,
   profileLanguage,
   profileAvatar,
-  avatarOptions,
+  profileCommanderId,
+  commanderOptions,
   profileError,
   profileSaved,
   profileLoading,
   onUsernameChange,
   onEmailChange,
   onLanguageChange,
-  onAvatarChange,
+  onCommanderChange,
   onSubmit
 }: {
   language: UILanguage;
@@ -15531,17 +17219,19 @@ function ProfileScreen({
   profileEmail: string;
   profileLanguage: "fr" | "en";
   profileAvatar: string;
-  avatarOptions: string[];
+  profileCommanderId: CommanderId;
+  commanderOptions: CommanderDef[];
   profileError: string;
   profileSaved: string;
   profileLoading: boolean;
   onUsernameChange: (v: string) => void;
   onEmailChange: (v: string) => void;
   onLanguageChange: (v: "fr" | "en") => void;
-  onAvatarChange: (v: string) => void;
+  onCommanderChange: (v: CommanderId) => void;
   onSubmit: (e: FormEvent) => void;
 }) {
   const l = (fr: string, en: string) => (language === "en" ? en : fr);
+  const activeCommander = COMMANDER_DEFS[profileCommanderId] ?? COMMANDER_DEFS[DEFAULT_COMMANDER_ID];
   return (
     <main className="profile-layout">
       <form className="profile-card" onSubmit={onSubmit}>
@@ -15550,17 +17240,17 @@ function ProfileScreen({
 
         <div className="profile-grid">
           <label>
-            {l("Pseudo", "Username")}
+            <span className="profile-field-label"><UserRound size={14} /> {l("Pseudo", "Username")}</span>
             <input value={profileUsername} onChange={(e) => onUsernameChange(e.target.value)} minLength={3} required />
           </label>
 
           <label>
-            Email
+            <span className="profile-field-label"><Mail size={14} /> Email</span>
             <input value={profileEmail} onChange={(e) => onEmailChange(e.target.value)} type="email" required />
           </label>
 
           <label>
-            <Globe size={14} /> {l("Langue", "Language")}
+            <span className="profile-field-label"><Globe size={14} /> {l("Langue", "Language")}</span>
             <select value={profileLanguage} onChange={(e) => onLanguageChange(e.target.value === "en" ? "en" : "fr")}>
               <option value="fr">{l("Francais", "French")}</option>
               <option value="en">English</option>
@@ -15569,26 +17259,21 @@ function ProfileScreen({
         </div>
 
         <div className="avatar-block">
-          <p>{l("Choisir un avatar", "Choose an avatar")}</p>
-          <div className="avatar-grid">
-            {avatarOptions.map((avatar, idx) => (
-              <button
-                type="button"
-                key={avatar}
-                className={`avatar-option ${profileAvatar === avatar ? "active" : ""}`}
-                onClick={() => onAvatarChange(avatar)}
-                title={`Avatar ${idx + 1}`}
-              >
-                <img
-                  src={avatar}
-                  alt={`Avatar ${idx + 1}`}
-                  onError={(e) => {
-                    (e.currentTarget as HTMLImageElement).style.display = "none";
-                  }}
-                />
-                <span>{idx + 1}</span>
-              </button>
-            ))}
+          <p>{l("Choisir un commandant", "Choose a commander")}</p>
+          <CommanderSelect
+            language={language}
+            commanderId={profileCommanderId}
+            commanderOptions={commanderOptions}
+            onChange={onCommanderChange}
+          />
+          <div className="profile-commander-summary" style={{ ["--commander-accent" as string]: activeCommander.accent }}>
+            <CommanderPortrait commanderId={activeCommander.id} className="profile-commander-portrait" />
+            <div>
+              <strong>{commanderLabel(activeCommander.id, language)}</strong>
+              <small>{commanderTitle(activeCommander.id, language)}</small>
+              <p>{commanderDescription(activeCommander.id, language)}</p>
+              <em>{commanderBonusLabel(activeCommander.id, language)}</em>
+            </div>
           </div>
         </div>
 
@@ -15607,6 +17292,366 @@ function ProfileScreen({
       </form>
     </main>
   );
+}
+
+function CommanderSelect({
+  language,
+  commanderId,
+  commanderOptions,
+  onChange
+}: {
+  language: UILanguage;
+  commanderId: CommanderId;
+  commanderOptions: CommanderDef[];
+  onChange: (id: CommanderId) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const l = (fr: string, en: string) => (language === "en" ? en : fr);
+  const selected = COMMANDER_DEFS[commanderId] ?? COMMANDER_DEFS[DEFAULT_COMMANDER_ID];
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (event: MouseEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onPointerDown);
+    return () => document.removeEventListener("mousedown", onPointerDown);
+  }, [open]);
+
+  return (
+    <div className={`commander-select ${open ? "open" : ""}`} ref={rootRef}>
+      <button
+        type="button"
+        className="commander-select-trigger"
+        style={{ ["--commander-accent" as string]: selected.accent }}
+        onClick={() => setOpen((prev) => !prev)}
+      >
+        <CommanderPortrait commanderId={selected.id} className="commander-select-avatar" />
+        <div className="commander-select-copy">
+          <span>{l("Commandant actif", "Active commander")}</span>
+          <strong>{commanderLabel(selected.id, language)}</strong>
+          <small>{commanderTitle(selected.id, language)}</small>
+          <em>{commanderBonusLabel(selected.id, language)}</em>
+        </div>
+        <span className="commander-select-toggle">
+          <ChevronRight size={18} className="commander-select-chevron" />
+        </span>
+      </button>
+
+      {open ? (
+        <div className="commander-picker-panel">
+          {commanderOptions.map((commander) => (
+            <button
+              type="button"
+              key={commander.id}
+              className={`commander-option ${commanderId === commander.id ? "active" : ""}`}
+              style={{ ["--commander-accent" as string]: commander.accent }}
+              onClick={() => {
+                onChange(commander.id);
+                setOpen(false);
+              }}
+            >
+              <CommanderPortrait commanderId={commander.id} className="commander-option-portrait" />
+              <div className="commander-option-copy">
+                <small>{commanderTitle(commander.id, language)}</small>
+                <strong>{commanderLabel(commander.id, language)}</strong>
+                <em>{commanderBonusLabel(commander.id, language)}</em>
+              </div>
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function CommanderPortrait({
+  commanderId,
+  className
+}: {
+  commanderId: CommanderId;
+  className: string;
+}) {
+  const commander = COMMANDER_DEFS[commanderId] ?? COMMANDER_DEFS[DEFAULT_COMMANDER_ID];
+  return (
+    <img
+      className={className}
+      src={commander.image}
+      alt={commander.nameEn}
+      loading="lazy"
+      decoding="async"
+    />
+  );
+}
+
+function MissionWorldLayer({
+  orbs,
+  pan,
+  zoom,
+  viewportSize
+}: {
+  orbs: Array<SectorWorld | SectorResource>;
+  pan: { x: number; y: number };
+  zoom: number;
+  viewportSize: { width: number; height: number };
+}) {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const latestStateRef = useRef({ orbs, pan, zoom, viewportSize });
+
+  useEffect(() => {
+    latestStateRef.current = { orbs, pan, zoom, viewportSize };
+  }, [orbs, pan, viewportSize, zoom]);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const renderer = new THREE.WebGLRenderer({
+      canvas,
+      alpha: true,
+      antialias: true,
+      powerPreference: "high-performance"
+    });
+    renderer.setClearColor(0x000000, 0);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
+
+    const scene = new THREE.Scene();
+    const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 1000);
+    camera.position.z = 120;
+
+    const coreGeo = new THREE.SphereGeometry(0.9, 56, 56);
+
+    const plasmaGeo = new THREE.SphereGeometry(0.988, 74, 74);
+    const particleCount = 140;
+    const particlePositions = new Float32Array(particleCount * 3);
+    const particleSizes = new Float32Array(particleCount);
+    for (let i = 0; i < particleCount; i += 1) {
+      const radius = 0.9 * Math.cbrt(Math.random());
+      const theta = Math.random() * Math.PI * 2;
+      const phi = Math.acos(2 * Math.random() - 1);
+      particlePositions[i * 3] = radius * Math.sin(phi) * Math.cos(theta);
+      particlePositions[i * 3 + 1] = radius * Math.sin(phi) * Math.sin(theta);
+      particlePositions[i * 3 + 2] = radius * Math.cos(phi);
+      particleSizes[i] = Math.random();
+    }
+
+    const particleGeo = new THREE.BufferGeometry();
+    particleGeo.setAttribute("position", new THREE.BufferAttribute(particlePositions, 3));
+    particleGeo.setAttribute("aSize", new THREE.BufferAttribute(particleSizes, 1));
+
+    const createParticleMaterial = (particleColor: number) =>
+      new THREE.ShaderMaterial({
+        uniforms: {
+          uTime: { value: 0 },
+          uColor: { value: new THREE.Color(particleColor) }
+        },
+        vertexShader: `
+          uniform float uTime;
+          attribute float aSize;
+          varying float vAlpha;
+
+          void main() {
+            vec3 pos = position;
+            pos.y += sin(uTime * 0.2 + pos.x) * 0.02;
+            pos.x += cos(uTime * 0.15 + pos.z) * 0.02;
+            vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);
+            gl_Position = projectionMatrix * mvPosition;
+            float baseSize = 7.0 * aSize + 3.0;
+            gl_PointSize = baseSize;
+            vAlpha = 0.76 + 0.24 * sin(uTime + aSize * 10.0);
+          }
+        `,
+        fragmentShader: `
+          uniform vec3 uColor;
+          varying float vAlpha;
+
+          void main() {
+            vec2 uv = gl_PointCoord - vec2(0.5);
+            float dist = length(uv);
+            if (dist > 0.5) discard;
+            float glow = 1.0 - (dist * 2.0);
+            glow = pow(glow, 1.8);
+            gl_FragColor = vec4(uColor, glow * vAlpha);
+          }
+        `,
+        transparent: true,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false
+      });
+
+    const createMaterialSet = (preset: (typeof MAP_ORB_PRESETS)[keyof typeof MAP_ORB_PRESETS]) => ({
+      coreMat: new THREE.MeshBasicMaterial({
+        color: new THREE.Color(preset.colorMid),
+        transparent: true,
+        opacity: 0.34
+      }),
+      plasmaMat: new THREE.ShaderMaterial({
+        uniforms: {
+          uTime: { value: 0 },
+          uScale: { value: preset.scale },
+          uBrightness: { value: preset.brightness },
+          uThreshold: { value: preset.threshold },
+          uColorDeep: { value: new THREE.Color(preset.colorDeep) },
+          uColorMid: { value: new THREE.Color(preset.colorMid) },
+          uColorBright: { value: new THREE.Color(preset.colorBright) }
+        },
+        vertexShader: MISSION_WORLD_PLASMA_VERTEX,
+        fragmentShader: MISSION_WORLD_PLASMA_FRAGMENT,
+        transparent: true,
+        blending: THREE.AdditiveBlending,
+        side: THREE.DoubleSide,
+        depthWrite: false
+      }),
+      particleMat: createParticleMaterial(preset.particleColor)
+    });
+
+    const materialSets = {
+      world: createMaterialSet(MAP_ORB_PRESETS.world),
+      resource: createMaterialSet(MAP_ORB_PRESETS.resource)
+    } as const;
+    const worldGroups = new Map<
+      string,
+      {
+        group: THREE.Group;
+        plasma: THREE.Mesh;
+        particles: THREE.Points;
+        kind: "world" | "resource";
+        spinX: number;
+        spinY: number;
+      }
+    >();
+    let lastWidth = 0;
+    let lastHeight = 0;
+
+    const ensureSize = (width: number, height: number) => {
+      const safeWidth = Math.max(1, Math.floor(width));
+      const safeHeight = Math.max(1, Math.floor(height));
+      if (safeWidth === lastWidth && safeHeight === lastHeight) return;
+      lastWidth = safeWidth;
+      lastHeight = safeHeight;
+      renderer.setSize(safeWidth, safeHeight, false);
+      camera.left = -safeWidth / 2;
+      camera.right = safeWidth / 2;
+      camera.top = safeHeight / 2;
+      camera.bottom = -safeHeight / 2;
+      camera.updateProjectionMatrix();
+    };
+
+    const createWorldGroup = (worldId: string, kind: "world" | "resource") => {
+      const group = new THREE.Group();
+      const materials = materialSets[kind];
+      const core = new THREE.Mesh(coreGeo, materials.coreMat);
+      const plasma = new THREE.Mesh(plasmaGeo, materials.plasmaMat);
+      const particles = new THREE.Points(particleGeo, materials.particleMat);
+      core.frustumCulled = false;
+      plasma.frustumCulled = false;
+      particles.frustumCulled = false;
+      group.add(core);
+      group.add(plasma);
+      group.add(particles);
+      const hash = Array.from(worldId).reduce((acc, char) => acc + char.charCodeAt(0), 0);
+      const entry = {
+        group,
+        plasma,
+        particles,
+        kind,
+        spinX: 0.0012 + (hash % 5) * 0.00016,
+        spinY: 0.0034 + (hash % 7) * 0.00018
+      };
+      scene.add(group);
+      worldGroups.set(worldId, entry);
+      return entry;
+    };
+
+    const syncWorldGroups = (nextWorlds: Array<SectorWorld | SectorResource>) => {
+      const nextIds = new Set(nextWorlds.map((world) => world.id));
+      for (const world of nextWorlds) {
+        const kind = world.type === "resource" ? "resource" : "world";
+        if (!worldGroups.has(world.id)) createWorldGroup(world.id, kind);
+      }
+      for (const [worldId, entry] of worldGroups.entries()) {
+        if (nextIds.has(worldId)) continue;
+        scene.remove(entry.group);
+        worldGroups.delete(worldId);
+      }
+    };
+
+    const clock = new THREE.Clock();
+    let frameId = 0;
+    let destroyed = false;
+
+    const animate = () => {
+      if (destroyed) return;
+      const elapsed = clock.getElapsedTime();
+      const current = latestStateRef.current;
+      ensureSize(current.viewportSize.width, current.viewportSize.height);
+      syncWorldGroups(current.orbs);
+
+      materialSets.world.plasmaMat.uniforms.uTime.value = elapsed * MAP_ORB_PRESETS.world.timeScale;
+      materialSets.resource.plasmaMat.uniforms.uTime.value = elapsed * MAP_ORB_PRESETS.resource.timeScale;
+      materialSets.world.particleMat.uniforms.uTime.value = elapsed;
+      materialSets.resource.particleMat.uniforms.uTime.value = elapsed;
+
+      const sphereDiameter = Math.max(12, 76 * current.zoom);
+      const sphereScale = sphereDiameter / 1.976;
+      const particleScale = Math.max(0.72, Math.min(1.85, 0.78 + current.zoom * 0.4));
+
+      for (const world of current.orbs) {
+        const entry = worldGroups.get(world.id);
+        if (!entry) continue;
+        const screenX = current.pan.x + world.x * current.zoom;
+        const screenY = current.pan.y + world.y * current.zoom;
+        const visible =
+          screenX >= -90 &&
+          screenX <= current.viewportSize.width + 90 &&
+          screenY >= -90 &&
+          screenY <= current.viewportSize.height + 90;
+
+        entry.group.visible = visible;
+        if (!visible) continue;
+
+        entry.group.position.set(
+          screenX - current.viewportSize.width / 2,
+          current.viewportSize.height / 2 - screenY,
+          0
+        );
+        entry.group.scale.setScalar(sphereScale);
+        entry.particles.scale.setScalar(particleScale);
+        entry.plasma.rotation.y = elapsed * 0.08;
+        entry.group.rotation.x += entry.spinX;
+        entry.group.rotation.y += entry.spinY;
+      }
+
+      renderer.render(scene, camera);
+      frameId = window.requestAnimationFrame(animate);
+    };
+
+    animate();
+
+    return () => {
+      destroyed = true;
+      if (frameId) window.cancelAnimationFrame(frameId);
+      for (const entry of worldGroups.values()) {
+        scene.remove(entry.group);
+      }
+      worldGroups.clear();
+      coreGeo.dispose();
+      particleGeo.dispose();
+      plasmaGeo.dispose();
+      materialSets.world.coreMat.dispose();
+      materialSets.world.plasmaMat.dispose();
+      materialSets.world.particleMat.dispose();
+      materialSets.resource.coreMat.dispose();
+      materialSets.resource.plasmaMat.dispose();
+      materialSets.resource.particleMat.dispose();
+      renderer.dispose();
+    };
+  }, []);
+
+  return <canvas ref={canvasRef} className="sector-mission-world-layer" aria-hidden="true" />;
 }
 
 function StatLine({ icon, label, value }: { icon: JSX.Element; label: string; value: number }) {
@@ -15704,6 +17749,7 @@ function BuildModal({
         <div className="room-grid">
           {visibleTypes.map((type) => {
             const cfg = ROOM_CONFIG[type];
+            const guide = BUILD_GUIDE_CONTENT[type];
             const cost = costForLevel(type, 1, buildingCostReductionFactor);
             const affordable = canAffordCost(resourceAmounts, cost);
             const fits = cfg.width <= free.width;
@@ -15712,25 +17758,100 @@ function BuildModal({
               ? POPULATION_BUILD_UNLOCK_MIN[type as PopulationBuildingId] ?? 0
               : 0;
             const disabled = !affordable || !fits || !populationUnlocked || Boolean(constructionJob);
+            const guideRole = guide ? l(guide.roleFr, guide.roleEn) : "";
+            const guideDetails = guide ? (language === "en" ? guide.detailsEn : guide.detailsFr) : [];
+            const guideTips = guide ? (language === "en" ? guide.tipsEn : guide.tipsFr) : [];
+            const buildWarnings = [
+              !populationUnlocked
+                ? `${l("Population requise", "Population required")} ${populationRequired.toLocaleString()}`
+                : null,
+              !fits ? l("Espace horizontal insuffisant", "Not enough horizontal space") : null,
+              !affordable ? l("Ressources insuffisantes", "Not enough resources") : null,
+              constructionJob ? l("File de construction occupee", "Construction queue busy") : null
+            ].filter(Boolean) as string[];
 
             return (
-              <button key={type} className={`build-item ${disabled ? "disabled" : ""}`} disabled={disabled} onClick={() => onBuild(type)}>
-                <span className={`dot ${cfg.color}`}>{cfg.icon}</span>
-                <span className="title">{roomDisplayName(type, language)}</span>
-                <span>{l("Largeur", "Width")} {cfg.width}</span>
-                <div className="build-item-cost">
-                  <ResourceCostDisplay cost={cost} available={resourceAmounts} language={language} compact />
+              <article key={type} className={`build-item ${disabled ? "disabled" : ""}`}>
+                <div className="build-item-bg" style={{ backgroundImage: `url(${cfg.image})` }} aria-hidden="true" />
+                <div className="build-item-overlay" aria-hidden="true" />
+                <div className="build-item-shell">
+                  <div className="build-item-head">
+                    <div className="build-item-title-wrap">
+                      <span className={`dot ${cfg.color}`}>{cfg.icon}</span>
+                      <span className="title">{roomDisplayName(type, language)}</span>
+                    </div>
+                    <span className="build-item-group">
+                      {cfg.buildGroup === "population"
+                        ? l("Population", "Population")
+                        : cfg.buildGroup === "infrastructure"
+                          ? l("Infrastructure", "Infrastructure")
+                          : l("Production", "Production")}
+                    </span>
+                  </div>
+
+                  <div className="build-item-stats">
+                    <div className="build-item-stat">
+                      <small>{l("Largeur", "Width")}</small>
+                      <strong>{cfg.width}</strong>
+                    </div>
+                    <div className="build-item-stat">
+                      <small>{l("Temps", "Time")}</small>
+                      <strong>{formatDuration(buildSecondsForLevel(type, 1, buildingTimeReductionFactor))}</strong>
+                    </div>
+                    <div className="build-item-stat">
+                      <small>{l("Cap", "Cap")}</small>
+                      <strong>{cfg.maxLevel >= 9999 ? l("Libre", "Open") : cfg.maxLevel}</strong>
+                    </div>
+                  </div>
+
+                  {guideRole ? <p className="build-item-role">{guideRole}</p> : null}
+
+                  <div className="build-item-cost">
+                    <ResourceCostDisplay cost={cost} available={resourceAmounts} language={language} compact />
+                  </div>
+
+                  {guide ? (
+                    <details className="build-item-spoiler">
+                      <summary>{l("Comprendre ce batiment", "Understand this building")}</summary>
+                      <div className="build-item-spoiler-body">
+                        <section className="build-item-section">
+                          <h4>{l("Utilite", "Purpose")}</h4>
+                          <ul>
+                            {guideDetails.map((entry, index) => (
+                              <li key={`${type}-detail-${index}`}>{entry}</li>
+                            ))}
+                          </ul>
+                        </section>
+                        <section className="build-item-section">
+                          <h4>{l("Conseils strategiques", "Strategic advice")}</h4>
+                          <ul>
+                            {guideTips.map((entry, index) => (
+                              <li key={`${type}-tip-${index}`}>{entry}</li>
+                            ))}
+                          </ul>
+                        </section>
+                      </div>
+                    </details>
+                  ) : null}
+
+                  {buildWarnings.length > 0 ? (
+                    <div className="build-item-warnings">
+                      {buildWarnings.map((warning) => (
+                        <em key={`${type}-${warning}`}>{warning}</em>
+                      ))}
+                    </div>
+                  ) : null}
+
+                  <button
+                    type="button"
+                    className="build-item-action"
+                    disabled={disabled}
+                    onClick={() => onBuild(type)}
+                  >
+                    {disabled ? l("Indisponible", "Unavailable") : l("Construire", "Build")}
+                  </button>
                 </div>
-                <span>{l("Temps", "Time")} {formatDuration(buildSecondsForLevel(type, 1, buildingTimeReductionFactor))}</span>
-                {!populationUnlocked ? (
-                  <em>
-                    {l("Population requise", "Population required")} {populationRequired.toLocaleString()}
-                  </em>
-                ) : null}
-                {!fits && <em>{l("Espace horizontal insuffisant", "Not enough horizontal space")}</em>}
-                {!affordable && <em>{l("Ressources insuffisantes", "Not enough resources")}</em>}
-                {constructionJob ? <em>{l("File de construction occupee", "Construction queue busy")}</em> : null}
-              </button>
+              </article>
             );
           })}
           {visibleTypes.length === 0 ? (
@@ -16016,4 +18137,5 @@ function UpgradeModal({
     </div>
   );
 }
+
 

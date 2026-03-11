@@ -1,5 +1,5 @@
 {
-  "name": "hyperstructure-frontend",
+  "name": "hyperstructure-admin",
   "private": true,
   "version": "0.1.0",
   "type": "module",
@@ -14,11 +14,11 @@
     "@types/react-dom": "^19.2.3",
     "lucide-react": "^0.575.0",
     "react": "^19.2.4",
-    "react-dom": "^19.2.4",
-    "three": "^0.160.0"
+    "react-dom": "^19.2.4"
   },
   "devDependencies": {
     "typescript": "^5.6.3",
     "vite": "^7.3.1"
   }
 }
+
