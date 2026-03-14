@@ -1,5 +1,10 @@
 import { Client, Session } from "@heroiclabs/nakama-js";
 import * as THREE from "three";
+import AllianceCommandScreen from "./AllianceCommandScreen";
+import PopulationCommandScreen from "./PopulationCommandScreen";
+import ResourceCommandScreen from "./ResourceCommandScreen";
+import TechnologyCommandScreen from "./TechnologyCommandScreen";
+import WikiKnowledgeScreen from "./WikiKnowledgeScreen";
 import {
   ArrowUpCircle,
   Bed,
@@ -40,9 +45,21 @@ import {
   BookOpen,
   Heart,
   Smile,
-  ChevronRight
+  ChevronRight,
+  SlidersHorizontal
 } from "lucide-react";
-import { CSSProperties, FormEvent, Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  CSSProperties,
+  FocusEvent,
+  FormEvent,
+  Fragment,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState
+} from "react";
 
 type ResourceId =
   | "carbone"
@@ -299,7 +316,17 @@ const TIME_BOOST_IMAGE_BY_SECONDS: Record<number, string> = {
 const formatDisplayedScoreValue = (rawScore: number) => {
   const safe = Math.max(0, Number(rawScore || 0));
   if (safe <= 0) return 0;
-  return Math.max(1, Math.round(safe / SCORE_DISPLAY_DIVISOR));
+  const scaled = safe / SCORE_DISPLAY_DIVISOR;
+  return Math.max(0.01, Math.round(scaled * 100) / 100);
+};
+
+const formatDisplayedScoreLabel = (rawScore: number) => {
+  const safe = formatDisplayedScoreValue(rawScore);
+  if (safe <= 0) return "0";
+  return safe.toLocaleString(undefined, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  });
 };
 
 function resolveTimeBoostImage(durationSeconds?: number | null) {
@@ -525,6 +552,7 @@ type UIScreen =
   | "alliance"
   | "ranking"
   | "profile"
+  | "settings"
   | "starmap"
   | "chat"
   | "resources"
@@ -805,12 +833,12 @@ const BUILD_GUIDE_CONTENT: Partial<Record<RoomType, BuildGuideEntry>> = {
     tipsFr: [
       "Priorite debut de partie : garde toujours plusieurs niveaux d'avance sur tes besoins immediats.",
       "Monte-le avant de forcer les ressources avancees, sinon tu bloques toute ta progression.",
-      "Si ton equipage disponible baisse trop, tu as peut-etre surdeveloppe la production trop vite."
+      "Si ton personnel libre baisse trop, tu as peut-etre surdeveloppe la production trop vite."
     ],
     tipsEn: [
       "Early priority: keep it a few levels ahead of your immediate needs.",
       "Upgrade it before forcing advanced resources or your whole progression will choke.",
-      "If available crew drops too much, you likely expanded production too fast."
+      "If free staffing drops too much, you likely expanded production too fast."
     ]
   },
   titane: {
@@ -901,12 +929,12 @@ const BUILD_GUIDE_CONTENT: Partial<Record<RoomType, BuildGuideEntry>> = {
     tipsFr: [
       "Considere-la comme un luxe controle, pas comme une priorite debut/mid.",
       "Monte-la quand tu sais deja pourquoi tu en as besoin.",
-      "Si tes equipages manquent, ralentis ici avant de couper les batiments de base."
+      "Si ton personnel logistique manque, ralentis ici avant de couper les batiments de base."
     ],
     tipsEn: [
       "Treat it as controlled luxury, not as an early or mid-game priority.",
       "Upgrade it when you know exactly why you need it.",
-      "If crew is tight, slow this line before cutting core production."
+      "If staffing is tight, slow this line before cutting core production."
     ]
   },
   neodyme: {
@@ -925,12 +953,12 @@ const BUILD_GUIDE_CONTENT: Partial<Record<RoomType, BuildGuideEntry>> = {
     tipsFr: [
       "Monte-le quand tu prevois une vraie acceleration technologique ou hangar.",
       "N'essaie pas de le spam : quelques niveaux bien places suffisent souvent.",
-      "Associe-le a Quartiers residentiels si ton equipage descend trop."
+      "Associe-le a Quartiers residentiels si ton personnel libre descend trop."
     ],
     tipsEn: [
       "Scale it when you plan a real tech or hangar acceleration.",
       "Do not spam it: a few well-timed levels are often enough.",
-      "Pair it with Residential Quarters if crew availability drops too far."
+      "Pair it with Residential Quarters if free staffing drops too far."
     ]
   },
   chronium: {
@@ -973,12 +1001,12 @@ const BUILD_GUIDE_CONTENT: Partial<Record<RoomType, BuildGuideEntry>> = {
     tipsFr: [
       "Attends d'avoir une bonne stabilite et une nourriture confortable.",
       "Monte-le progressivement, pas avant d'avoir absorbe les couts precedents.",
-      "Si tu veux plus d'equipage, ce n'est jamais la priorite."
+      "Si tu manques de marge logistique, ce n'est jamais la priorite."
     ],
     tipsEn: [
       "Wait until stability and food are comfortable.",
       "Scale it progressively, not before you have absorbed previous costs.",
-      "If you need more crew, this is never the first priority."
+      "If you need more logistics headroom, this is never the first priority."
     ]
   },
   isotope7: {
@@ -1030,8 +1058,8 @@ const BUILD_GUIDE_CONTENT: Partial<Record<RoomType, BuildGuideEntry>> = {
     ]
   },
   quartiers_residentiels: {
-    roleFr: "Batiment cle de la population : plus de capacite, donc plus d'habitants, plus de travailleurs et plus d'equipages.",
-    roleEn: "Key population building: more housing means more people, more workers and more crews.",
+    roleFr: "Batiment cle de la population : plus de capacite, donc plus d'habitants, plus de travailleurs et plus de marge logistique.",
+    roleEn: "Key population building: more housing means more people, more workers and more logistics headroom.",
     detailsFr: [
       "Augmente la capacite habitation. Si ta population depasse cette capacite, tu subis des malus.",
       "Ajoute aussi un peu de stabilite et d'attractivite.",
@@ -1043,12 +1071,12 @@ const BUILD_GUIDE_CONTENT: Partial<Record<RoomType, BuildGuideEntry>> = {
       "It is the number one building for unlocking more free workforce."
     ],
     tipsFr: [
-      "Si tu manques d'equipage, commence ici.",
+      "Si ta colonie manque de marge logistique, commence ici.",
       "Si tu vois un malus de surpopulation, c'est ta priorite absolue.",
       "Monte-le avant d'ajouter trop de nouvelles lignes de production."
     ],
     tipsEn: [
-      "If you lack crew, start here.",
+      "If your colony lacks logistics headroom, start here.",
       "If you see an overcapacity penalty, this is absolute priority.",
       "Upgrade it before adding too many new production lines."
     ]
@@ -1140,12 +1168,12 @@ const BUILD_GUIDE_CONTENT: Partial<Record<RoomType, BuildGuideEntry>> = {
     ],
     tipsFr: [
       "Tres fort si tu chaines les constructions en continu.",
-      "A eviter trop tot si ton probleme principal est l'equipage.",
+      "A eviter trop tot si ton probleme principal est la marge workforce.",
       "Monte-le quand ton economie et ta population sont deja stables."
     ],
     tipsEn: [
       "Very strong if you chain building queues continuously.",
-      "Avoid it too early if your main problem is crew.",
+      "Avoid it too early if your main problem is workforce margin.",
       "Upgrade it when your economy and population are already stable."
     ]
   },
@@ -1155,21 +1183,21 @@ const BUILD_GUIDE_CONTENT: Partial<Record<RoomType, BuildGuideEntry>> = {
     detailsFr: [
       "Augmente la part de scientifiques.",
       "Plus de scientifiques = recherches plus rapides.",
-      "Comme l'Academie, elle peut reduire la part de travailleurs et donc l'equipage disponible."
+      "Comme l'Academie, elle peut reduire la part de travailleurs et donc la marge logistique disponible."
     ],
     detailsEn: [
       "Increases the scientist share.",
       "More scientists means faster research.",
-      "Like the Academy, it can reduce the worker share and therefore available crew."
+      "Like the Academy, it can reduce the worker share and therefore available logistics headroom."
     ],
     tipsFr: [
       "Monte-la pour une phase de technologie, pas pour relancer une economie bloquee.",
-      "Si ton equipage est tendu, ce batiment n'est pas prioritaire.",
+      "Si ta marge workforce est tendue, ce batiment n'est pas prioritaire.",
       "Tres forte une fois ta population haute et stable."
     ],
     tipsEn: [
       "Upgrade it for a technology phase, not to rescue a blocked economy.",
-      "If crew is tight, this building is not a priority.",
+      "If workforce margin is tight, this building is not a priority.",
       "Very strong once your population is high and stable."
     ]
   },
@@ -1822,6 +1850,14 @@ const populationStabilityBandLabel = (band: PopulationSnapshot["stabilityBand"],
 type ResourceCost = Partial<Record<ResourceId, number>>;
 
 type HangarCategory = "ship" | "defense";
+type HangarUnitFamily =
+  | "screening"
+  | "assault"
+  | "capital"
+  | "logistics"
+  | "point_defense"
+  | "heavy_battery"
+  | "shield_control";
 
 type HangarUnitDef = {
   id: string;
@@ -2208,6 +2244,168 @@ const HANGAR_DEFENSE_IMAGE_MAP: Record<string, string> = {
   lanceur_orbitral: "/room-images/Lanceur-Orbitral.png",
   champ_aegis: "/room-images/Champ-Aegis.png"
 };
+
+const HANGAR_UNIT_FAMILY_BY_ID: Record<string, HangarUnitFamily> = {
+  eclaireur_stellaire: "screening",
+  foudroyant: "screening",
+  aurore: "assault",
+  spectre: "assault",
+  tempest: "assault",
+  titanide: "capital",
+  colosse: "capital",
+  pegase: "logistics",
+  argo: "logistics",
+  arche_spatiale: "logistics",
+  projecteur_photonique: "point_defense",
+  tourelle_rafale: "point_defense",
+  batterie_eclat: "point_defense",
+  lame_de_plasma: "heavy_battery",
+  canon_ion_aiguillon: "heavy_battery",
+  lanceur_orbitral: "heavy_battery",
+  mine_orbitale_veille: "heavy_battery",
+  canon_rail_longue_vue: "heavy_battery",
+  lance_gravitationnel_ancre: "heavy_battery",
+  champ_aegis: "shield_control",
+  projecteur_emp_silence: "shield_control",
+  mur_photonique_prisme: "shield_control"
+};
+
+const HANGAR_UNIT_PRIORITY_BY_ID: Record<string, number> = {
+  eclaireur_stellaire: 10,
+  foudroyant: 20,
+  aurore: 30,
+  spectre: 40,
+  tempest: 50,
+  titanide: 60,
+  colosse: 70,
+  pegase: 80,
+  argo: 90,
+  arche_spatiale: 100,
+  projecteur_photonique: 10,
+  tourelle_rafale: 20,
+  batterie_eclat: 30,
+  lame_de_plasma: 40,
+  canon_ion_aiguillon: 50,
+  lanceur_orbitral: 60,
+  mine_orbitale_veille: 70,
+  canon_rail_longue_vue: 80,
+  projecteur_emp_silence: 90,
+  champ_aegis: 100,
+  mur_photonique_prisme: 110,
+  lance_gravitationnel_ancre: 120
+};
+
+const HANGAR_UNIT_FUEL_BASE_PER_1000: Record<string, number> = {
+  eclaireur_stellaire: 2,
+  foudroyant: 3,
+  aurore: 5,
+  spectre: 7,
+  tempest: 10,
+  titanide: 14,
+  colosse: 20,
+  pegase: 1,
+  argo: 2,
+  arche_spatiale: 4
+};
+
+const HANGAR_FAMILY_META: Record<
+  HangarUnitFamily,
+  {
+    labelFr: string;
+    labelEn: string;
+    summaryFr: string;
+    summaryEn: string;
+    tacticalFr: string;
+    tacticalEn: string;
+    importanceFr: string;
+    importanceEn: string;
+  }
+> = {
+  screening: {
+    labelFr: "Ecran & interception",
+    labelEn: "Screening & interception",
+    summaryFr: "Ouvre le combat, chasse les petits raids et protege vos lignes.",
+    summaryEn: "Starts the fight, hunts light raids, and protects your lines.",
+    tacticalFr: "Montez-les tot pour escorter vos recoltes et couper les transports adverses.",
+    tacticalEn: "Build them early to escort harvest fleets and cut enemy transports.",
+    importanceFr: "Escadre cle",
+    importanceEn: "Core wing"
+  },
+  assault: {
+    labelFr: "Assaut de ligne",
+    labelEn: "Line assault",
+    summaryFr: "Coeur offensif de votre flotte pour les combats de carte et les percees.",
+    summaryEn: "Main offensive line for map fights and breakthroughs.",
+    tacticalFr: "Base ideale pour attaquer des recolteurs et imposer le tempo.",
+    tacticalEn: "Ideal backbone to hit harvesters and dictate tempo.",
+    importanceFr: "Priorite offensive",
+    importanceEn: "Offensive priority"
+  },
+  capital: {
+    labelFr: "Capitaux & briseurs",
+    labelEn: "Capital ships & breakers",
+    summaryFr: "Pieces lourdes, lentes et cheres, mais decisives quand la ligne tient.",
+    summaryEn: "Heavy, slow and expensive pieces that decide fights once the line holds.",
+    tacticalFr: "Ajoutez-les apres une vraie base industrielle et une escorte solide.",
+    tacticalEn: "Add them after building a real industrial base and solid escort.",
+    importanceFr: "Endgame",
+    importanceEn: "Endgame"
+  },
+  logistics: {
+    labelFr: "Logistique & transport",
+    labelEn: "Logistics & transport",
+    summaryFr: "Soute, recolte et soutien. Faibles en combat, essentiels a l'economie.",
+    summaryEn: "Cargo, harvesting and support. Weak in combat, essential for economy.",
+    tacticalFr: "Montez-les regulierement pour accelerer la carte sans sacrifier toute votre production.",
+    tacticalEn: "Scale them steadily to accelerate map play without sacrificing all production.",
+    importanceFr: "Soutien",
+    importanceEn: "Support"
+  },
+  point_defense: {
+    labelFr: "Perimetre leger",
+    labelEn: "Light perimeter",
+    summaryFr: "Anti-raid rapide pour absorber les petites vagues et proteger l'orbite.",
+    summaryEn: "Fast anti-raid layer to absorb small waves and protect orbit.",
+    tacticalFr: "Parfait pour lisser les premieres menaces et couvrir vos structures fragiles.",
+    tacticalEn: "Ideal to smooth early threats and cover fragile structures.",
+    importanceFr: "Couche defensive",
+    importanceEn: "Defensive layer"
+  },
+  heavy_battery: {
+    labelFr: "Batteries lourdes",
+    labelEn: "Heavy batteries",
+    summaryFr: "Plateformes specialisees contre les escadres de ligne et les lourds.",
+    summaryEn: "Platforms specialized against line fleets and heavy units.",
+    tacticalFr: "A combiner avec des ecrans legers ou des boucliers pour durer.",
+    tacticalEn: "Pair with light screens or shields to hold longer.",
+    importanceFr: "Ancrage",
+    importanceEn: "Anchor"
+  },
+  shield_control: {
+    labelFr: "Boucliers & controle",
+    labelEn: "Shields & control",
+    summaryFr: "Absorbe, ralentit et verrouille le tempo des combats defensifs.",
+    summaryEn: "Absorbs, slows and controls the rhythm of defensive fights.",
+    tacticalFr: "Excellent pour faire tenir une defense lourde et gagner du temps.",
+    tacticalEn: "Excellent to make heavy defenses hold and buy time.",
+    importanceFr: "Support defensif",
+    importanceEn: "Defensive support"
+  }
+};
+
+const HANGAR_CATEGORY_FAMILY_ORDER: Record<HangarCategory, HangarUnitFamily[]> = {
+  ship: ["logistics", "screening", "assault", "capital"],
+  defense: ["point_defense", "shield_control", "heavy_battery"]
+};
+
+const hangarUnitFamilyOf = (unitId: string): HangarUnitFamily =>
+  HANGAR_UNIT_FAMILY_BY_ID[unitId] ?? "assault";
+
+const hangarUnitPriorityOf = (unitId: string): number =>
+  Number(HANGAR_UNIT_PRIORITY_BY_ID[unitId] ?? 999);
+
+const hangarUnitFuelBasePer1000 = (unitId: string): number =>
+  Math.max(0, Number(HANGAR_UNIT_FUEL_BASE_PER_1000[unitId] ?? 0));
 
 const BASE_BUILDING_RESOURCE_COSTS: Record<RoomType, ResourceCost> = {
   entrance: {},
@@ -2878,6 +3076,37 @@ const isHangarUnitUnlocked = (unitId: string, levels: Record<TechnologyId, numbe
   return true;
 };
 
+const hangarUnitUnlockHint = (unitId: string, language: UILanguage): string => {
+  const t = (fr: string, en: string) => (language === "en" ? en : fr);
+  if (unitId === "projecteur_photonique") return t("Requis: Amplification Photonique niv. 1", "Requires: Photonic Amplification lv. 1");
+  if (unitId === "lanceur_orbitral") return t("Requis: Balistique Orbitale niv. 1", "Requires: Orbital Ballistics lv. 1");
+  if (unitId === "lame_de_plasma") return t("Requis: Stabilisation Plasma niv. 1", "Requires: Plasma Stabilization lv. 1");
+  if (unitId === "champ_aegis") return t("Requis: Generateur Aegis niv. 1", "Requires: Aegis Generator lv. 1");
+  if (unitId === "tourelle_rafale") return t("Requis: Architecture Defensive niv. 1", "Requires: Defensive Architecture lv. 1");
+  if (unitId === "batterie_eclat") return t("Requis: Architecture Defensive niv. 2", "Requires: Defensive Architecture lv. 2");
+  if (unitId === "canon_ion_aiguillon") return t("Requis: Amplification Photonique niv. 2", "Requires: Photonic Amplification lv. 2");
+  if (unitId === "mine_orbitale_veille") return t("Requis: Balistique Orbitale niv. 2", "Requires: Orbital Ballistics lv. 2");
+  if (unitId === "canon_rail_longue_vue") return t("Requis: Balistique Orbitale niv. 4", "Requires: Orbital Ballistics lv. 4");
+  if (unitId === "projecteur_emp_silence") {
+    return t(
+      "Requis: Controle Electromagnetique niv. 1 + Moteurs Flux Neodyme niv. 3",
+      "Requires: Electromagnetic Control lv. 1 + Neodymium Flux Engines lv. 3"
+    );
+  }
+  if (unitId === "mur_photonique_prisme") return t("Requis: Generateur Aegis niv. 3", "Requires: Aegis Generator lv. 3");
+  if (unitId === "lance_gravitationnel_ancre") {
+    return t(
+      "Requis: Generateur Aegis niv. 6 + Physique Quantique Appliquee niv. 3",
+      "Requires: Aegis Generator lv. 6 + Applied Quantum Physics lv. 3"
+    );
+  }
+  if (unitId === "eclaireur_stellaire" || unitId === "foudroyant") return t("Requis: Doctrine d'Escarmouche niv. 1", "Requires: Skirmish Doctrine lv. 1");
+  if (unitId === "aurore" || unitId === "spectre") return t("Requis: Doctrine d'Interception niv. 1", "Requires: Interception Doctrine lv. 1");
+  if (unitId === "tempest" || unitId === "titanide") return t("Requis: Doctrine de Domination niv. 1", "Requires: Domination Doctrine lv. 1");
+  if (unitId === "colosse" || unitId === "arche_spatiale") return t("Requis: Architecture Capitale niv. 1", "Requires: Capital Architecture lv. 1");
+  return "";
+};
+
 const RESOURCE_TECH_BONUS_SOURCES: Record<ResourceId, Array<{ id: TechnologyId; perLevel: number }>> = {
   carbone: [{ id: "optimisation_extractive", perLevel: 0.03 }],
   titane: [{ id: "optimisation_extractive", perLevel: 0.03 }],
@@ -2996,6 +3225,9 @@ type MapFieldServerDto = {
 type MapExpeditionDto = {
   id: string;
   fieldId: string;
+  missionKind: "harvest" | "attack";
+  targetPlayerId: string;
+  targetUsername: string;
   status: "travel_to_field" | "extracting" | "returning";
   departureAt: number;
   arrivalAt: number;
@@ -3007,11 +3239,30 @@ type MapExpeditionDto = {
   extractionSeconds: number;
   totalHarvestSpeed: number;
   totalTransportCapacity: number;
+  fuelCostCredits: number;
   playerScore: number;
   scoreBonus: number;
   fleet: Array<{ unitId: string; quantity: number }>;
   snapshotResources: Partial<Record<ResourceId, number>>;
   collectedResources: Partial<Record<ResourceId, number>>;
+  serverNowTs: number;
+};
+type MapPublicExpeditionDto = {
+  id: string;
+  playerId: string;
+  username: string;
+  fieldId: string;
+  missionKind: "harvest" | "attack";
+  targetPlayerId: string;
+  targetUsername: string;
+  status: "travel_to_field" | "extracting" | "returning";
+  departureAt: number;
+  arrivalAt: number;
+  extractionStartAt: number;
+  extractionEndAt: number;
+  returnStartAt: number;
+  returnEndAt: number;
+  travelSeconds: number;
   serverNowTs: number;
 };
 type MapHarvestShipRow = {
@@ -3020,6 +3271,15 @@ type MapHarvestShipRow = {
   harvestSpeed: number;
   harvestCapacity: number;
   mapSpeed: number;
+};
+
+type MapCombatShipRow = {
+  unitId: string;
+  quantity: number;
+  force: number;
+  endurance: number;
+  speed: number;
+  lootCapacity: number;
 };
 
 type MapDailyHarvestQuestState = {
@@ -3304,6 +3564,33 @@ const MAP_HARVEST_UNIT_STATS: Record<string, { harvestSpeed: number; harvestCapa
   tempest: { harvestSpeed: 15, harvestCapacity: 4_000, mapSpeed: 500 },
   titanide: { harvestSpeed: 18, harvestCapacity: 8_000, mapSpeed: 360 },
   colosse: { harvestSpeed: 20, harvestCapacity: 12_000, mapSpeed: 300 }
+};
+
+const MAP_FUEL_DISTANCE_NORMALIZER = 1000;
+const MAP_FUEL_MIN_DISTANCE_FACTOR = 0.8;
+const MAP_FUEL_ATTACK_MULTIPLIER = 1.2;
+const MAP_FUEL_HARVEST_MULTIPLIER = 1;
+
+const estimateMapFleetFuelCredits = (
+  fleetRows: Array<{ unitId: string; quantity: number }>,
+  userId: string,
+  fieldX: number,
+  fieldY: number,
+  missionKind: "harvest" | "attack" = "harvest"
+) => {
+  const origin = mapPlayerToPlanetCoordinates(userId || "guest");
+  const dx = fieldX - origin.x;
+  const dy = fieldY - origin.y;
+  const distance = Math.sqrt(dx * dx + dy * dy);
+  const distanceFactor = Math.max(MAP_FUEL_MIN_DISTANCE_FACTOR, distance / MAP_FUEL_DISTANCE_NORMALIZER);
+  const missionMultiplier = missionKind === "attack" ? MAP_FUEL_ATTACK_MULTIPLIER : MAP_FUEL_HARVEST_MULTIPLIER;
+  const totalBase = fleetRows.reduce((sum, row) => {
+    const qty = Math.max(0, Math.floor(Number(row.quantity || 0)));
+    if (qty <= 0) return sum;
+    return sum + hangarUnitFuelBasePer1000(String(row.unitId || "")) * qty;
+  }, 0);
+  if (totalBase <= 0) return 0;
+  return Math.max(1, Math.ceil(totalBase * distanceFactor * missionMultiplier));
 };
 
 const MAP_TRAVEL_TIME_FACTOR = 42;
@@ -3610,10 +3897,12 @@ const estimateMapHarvestPlan = (
       )
     : 0;
   return {
+    distance,
     totalHarvestSpeed,
     totalCapacity,
     travelSeconds,
-    extractionSeconds
+    extractionSeconds,
+    fuelCredits: estimateMapFleetFuelCredits(fleetRows, userId, fieldX, fieldY, "harvest")
   };
 };
 
@@ -3924,40 +4213,80 @@ const resourceMachineDisplay = (resourceId: ResourceId, language: UILanguage): s
   return language === "en" ? RESOURCE_MACHINE_EN[resourceId] ?? fallback : fallback;
 };
 
-const RESOURCE_MENU_SPRITES: Record<string, { x: number; y: number }> = {
-  carbone: { x: 10, y: 10 },
-  titane: { x: 100, y: 10 },
-  osmium: { x: 190, y: 10 },
-  adamantium: { x: 280, y: 10 },
-  magmatite: { x: 370, y: 10 },
-  neodyme: { x: 460, y: 10 },
-  chronium: { x: 10, y: 100 },
-  aetherium: { x: 100, y: 100 },
-  isotope7: { x: 190, y: 100 },
-  singulite: { x: 280, y: 100 }
-};
-const RESOURCE_MENU_SPRITE_SCALE = 0.24;
-const RESOURCE_MENU_SPRITE_WIDTH = 550;
-const RESOURCE_MENU_SPRITE_HEIGHT = 820;
-
-const getResourceMenuSpriteStyle = (resourceId: string): CSSProperties => {
-  const coords = RESOURCE_MENU_SPRITES[resourceId] ?? { x: 10, y: 10 };
-  return {
-    backgroundPosition: `${-coords.x * RESOURCE_MENU_SPRITE_SCALE}px ${-coords.y * RESOURCE_MENU_SPRITE_SCALE}px`,
-    backgroundSize: `${RESOURCE_MENU_SPRITE_WIDTH * RESOURCE_MENU_SPRITE_SCALE}px ${RESOURCE_MENU_SPRITE_HEIGHT * RESOURCE_MENU_SPRITE_SCALE}px`
-  };
+const RESOURCE_ICON_IMAGES: Record<ResourceId, string> = {
+  carbone: "/room-images/ressource-carbone.png",
+  titane: "/room-images/ressource-Titane.png",
+  osmium: "/room-images/ressource-Osmium.png",
+  adamantium: "/room-images/ressource-Adamantium.png",
+  magmatite: "/room-images/ressource-Magmatite.png",
+  neodyme: "/room-images/ressource-Neodyme.png",
+  chronium: "/room-images/ressource-Chronium.png",
+  aetherium: "/room-images/ressource-Aetherium.png",
+  isotope7: "/room-images/ressource-Isotope-7.png",
+  singulite: "/room-images/ressource-Singulite.png"
 };
 
-const TOPBAR_RESOURCE_MENU_SPRITE_SCALE = 0.285;
-const TOPBAR_RESOURCE_MENU_SPRITE_Y_OFFSET = 8;
-
-const getTopbarResourceSpriteStyle = (resourceId: string): CSSProperties => {
-  const coords = RESOURCE_MENU_SPRITES[resourceId] ?? { x: 10, y: 10 };
-  return {
-    backgroundPosition: `${-coords.x * TOPBAR_RESOURCE_MENU_SPRITE_SCALE}px ${-(coords.y - TOPBAR_RESOURCE_MENU_SPRITE_Y_OFFSET) * TOPBAR_RESOURCE_MENU_SPRITE_SCALE}px`,
-    backgroundSize: `${RESOURCE_MENU_SPRITE_WIDTH * TOPBAR_RESOURCE_MENU_SPRITE_SCALE}px ${RESOURCE_MENU_SPRITE_HEIGHT * TOPBAR_RESOURCE_MENU_SPRITE_SCALE}px`
-  };
+const normalizeResourceIconId = (resourceId: unknown): ResourceId | null => {
+  const raw = String(resourceId || "").trim().toLowerCase();
+  if (!raw) return null;
+  if (raw === "isotope-7" || raw === "isotope_7") return "isotope7";
+  if (
+    raw === "carbone" ||
+    raw === "titane" ||
+    raw === "osmium" ||
+    raw === "adamantium" ||
+    raw === "magmatite" ||
+    raw === "neodyme" ||
+    raw === "chronium" ||
+    raw === "aetherium" ||
+    raw === "isotope7" ||
+    raw === "singulite"
+  ) {
+    return raw;
+  }
+  return null;
 };
+
+const getResourceIconPath = (resourceId: unknown): string | null => {
+  const normalized = normalizeResourceIconId(resourceId);
+  return normalized ? RESOURCE_ICON_IMAGES[normalized] ?? null : null;
+};
+
+const getResourceIconStyle = (resourceId: unknown): CSSProperties => {
+  const path = getResourceIconPath(resourceId);
+  return path
+    ? {
+        backgroundImage: `url("${path}")`
+      }
+    : {};
+};
+
+const getResourceMenuSpriteStyle = (resourceId: string): CSSProperties => getResourceIconStyle(resourceId);
+const getTopbarResourceSpriteStyle = (resourceId: string): CSSProperties => getResourceIconStyle(resourceId);
+
+function ResourceTextWithIcon({
+  resourceId,
+  language,
+  className = "",
+  iconClassName = ""
+}: {
+  resourceId: string;
+  language: UILanguage;
+  className?: string;
+  iconClassName?: string;
+}) {
+  const normalized = normalizeResourceIconId(resourceId);
+  const label = normalized ? resourceDisplayName(normalized, language) : String(resourceId || "");
+  const iconPath = getResourceIconPath(resourceId);
+  return (
+    <span className={`resource-inline-label ${className}`.trim()}>
+      {iconPath ? (
+        <span className={`top-resource-icon resource-inline-icon ${iconClassName}`.trim()} style={getResourceIconStyle(resourceId)} />
+      ) : null}
+      <span>{label}</span>
+    </span>
+  );
+}
 
 const RESOURCE_STORAGE_COLLECTION = "hyperstructure";
 const RESOURCE_STORAGE_KEY = "resources_state_v1";
@@ -4240,6 +4569,7 @@ export default function App() {
       raw === "alliance" ||
       raw === "ranking" ||
       raw === "profile" ||
+      raw === "settings" ||
       raw === "starmap" ||
       raw === "chat" ||
       raw === "resources" ||
@@ -4257,6 +4587,8 @@ export default function App() {
   const [zoom, setZoom] = useState<number>(BASE_ZOOM);
   const [pan, setPan] = useState({ x: 0, y: 200 });
   const [panMode, setPanMode] = useState<boolean>(false);
+  const [profileMenuOpen, setProfileMenuOpen] = useState(false);
+  const profileMenuCloseTimeoutRef = useRef<number | null>(null);
 
   const [buildSlot, setBuildSlot] = useState<{ x: number; y: number } | null>(null);
   const [activeRoom, setActiveRoom] = useState<Room | null>(null);
@@ -4348,6 +4680,7 @@ export default function App() {
   const previousScreenRef = useRef<UIScreen>(screen);
   const rankingRpcInFlightRef = useRef(false);
   const rankingRpcBackoffUntilRef = useRef(0);
+  const rankingSyncInFlightRef = useRef(false);
   const l = (fr: string, en: string) => (uiLanguage === "en" ? en : fr);
   const inventoryMenuBadgeCount = Math.max(0, inventoryServerBadgeCount + inventoryInboxBadgeCount);
   const mapWarmCacheKey = useMemo(
@@ -4529,6 +4862,58 @@ export default function App() {
       if (import.meta.env.DEV) {
         // eslint-disable-next-line no-console
         console.error("credit load error", err);
+      }
+    }
+  }, [client, invalidateSession, session]);
+
+  const refreshEconomyHeaderState = useCallback(async () => {
+    if (!session) return;
+    try {
+      const rpc = await client.rpc(session, "economy_get_state", "{}");
+      const parsed = parseJsonObject((rpc as any)?.payload ?? rpc);
+      const nested = parseJsonObject(parsed?.payload);
+      const source = Object.keys(nested).length > 0 ? nested : parsed;
+      const resourceSource =
+        (source?.state?.resources && typeof source.state.resources === "object" ? source.state.resources : null) ??
+        (source?.resources && typeof source.resources === "object" ? source.resources : null);
+      if (resourceSource) {
+        setResourceAmounts((prev) => {
+          const next = { ...prev };
+          for (const def of RESOURCE_DEFS) {
+            const row = (resourceSource as Record<string, any>)[def.id];
+            const raw = Number(row && typeof row === "object" ? row.amount : row);
+            if (Number.isFinite(raw) && raw >= 0) next[def.id] = raw;
+          }
+          return next;
+        });
+      }
+      const nextCredits = Number(source?.state?.premiumCredits ?? source?.premiumCredits ?? NaN);
+      if (Number.isFinite(nextCredits) && nextCredits >= 0) {
+        setCredits(Math.floor(nextCredits));
+      }
+      const buildingSource =
+        (source?.state?.buildings && typeof source.state.buildings === "object" ? source.state.buildings : null) ??
+        (source?.buildings && typeof source.buildings === "object" ? source.buildings : null);
+      if (buildingSource) {
+        setUnlockedResourceIds((prev) => {
+          const next = new Set<string>(prev);
+          for (const base of BASE_UNLOCKED_RESOURCE_IDS) next.add(base);
+          for (const def of RESOURCE_DEFS) {
+            const rawLevel = Number((buildingSource as Record<string, any>)[def.id]?.level ?? 0);
+            if (Number.isFinite(rawLevel) && rawLevel > 0) next.add(def.id);
+          }
+          return Array.from(next);
+        });
+      }
+      resourceTickRef.current = Date.now();
+    } catch (err) {
+      if (isUnauthorizedError(err)) {
+        invalidateSession();
+        return;
+      }
+      if (import.meta.env.DEV) {
+        // eslint-disable-next-line no-console
+        console.error("economy header refresh error", err);
       }
     }
   }, [client, invalidateSession, session]);
@@ -4720,14 +5105,7 @@ export default function App() {
     setRankingError("");
     rankingRpcInFlightRef.current = true;
     try {
-      const clientProgress = {
-        rooms: rooms.map((room) => ({
-          type: room.type,
-          level: Math.max(0, Math.floor(Number(room.level || 0)))
-        })),
-        researchPoints: computeResearchInvestmentPoints(technologyLevels)
-      };
-      const rpc = await client.rpc(session, "ranking_get_state", JSON.stringify({ limit: 50, clientProgress }));
+      const rpc = await client.rpc(session, "ranking_get_state", JSON.stringify({ limit: 50 }));
       const parsed = parseJsonObject((rpc as any)?.payload ?? rpc);
       const nested = parseJsonObject(parsed?.payload);
       const source = Object.keys(nested).length > 0 ? nested : parsed;
@@ -4756,6 +5134,41 @@ export default function App() {
     } finally {
       rankingRpcInFlightRef.current = false;
       if (!silent) setRankingLoading(false);
+    }
+  };
+
+  const syncRankingProgress = async () => {
+    if (!session) return;
+    if (rankingSyncInFlightRef.current) return;
+
+    rankingSyncInFlightRef.current = true;
+    try {
+      const progress = {
+        rooms: rooms.map((room) => ({
+          type: room.type,
+          level: Math.max(0, Math.floor(Number(room.level || 0)))
+        })),
+        researchPoints: computeResearchInvestmentPoints(technologyLevels)
+      };
+      const rpc = await client.rpc(session, "ranking_sync_progress", JSON.stringify({ progress }));
+      const parsed = parseJsonObject((rpc as any)?.payload ?? rpc);
+      const nested = parseJsonObject(parsed?.payload);
+      const source = Object.keys(nested).length > 0 ? nested : parsed;
+      const points = Number(source?.points?.total ?? 0);
+      if (Number.isFinite(points)) {
+        setPlayerScorePoints(Math.max(0, Math.floor(points)));
+      }
+    } catch (err) {
+      if (isUnauthorizedError(err)) {
+        invalidateSession();
+        return;
+      }
+      if (import.meta.env.DEV) {
+        // eslint-disable-next-line no-console
+        console.error("ranking sync error", err);
+      }
+    } finally {
+      rankingSyncInFlightRef.current = false;
     }
   };
 
@@ -5218,30 +5631,78 @@ export default function App() {
       setResourceLoading(true);
       setResourceError("");
       try {
-        const read = await client.readStorageObjects(session, {
-          object_ids: [{ collection: RESOURCE_STORAGE_COLLECTION, key: RESOURCE_STORAGE_KEY, user_id: session.user_id }]
-        });
+        const [read, economyRpc] = await Promise.all([
+          client.readStorageObjects(session, {
+            object_ids: [{ collection: RESOURCE_STORAGE_COLLECTION, key: RESOURCE_STORAGE_KEY, user_id: session.user_id }]
+          }),
+          client.rpc(session, "economy_get_state", "{}").catch(() => null)
+        ]);
         const stored = read.objects?.[0]?.value as { amounts?: Record<string, number>; unlocked?: string[]; lastTick?: number } | undefined;
+        const parsedEconomy = parseJsonObject((economyRpc as any)?.payload ?? economyRpc);
+        const nestedEconomy = parseJsonObject(parsedEconomy?.payload);
+        const economySource = Object.keys(nestedEconomy).length > 0 ? nestedEconomy : parsedEconomy;
         const now = Date.now();
-        const base: Record<string, number> = {};
-        for (const r of RESOURCE_DEFS) base[r.id] = 0;
+        const storedBase: Record<string, number> = {};
+        const serverBase: Record<string, number> = {};
+        for (const r of RESOURCE_DEFS) {
+          storedBase[r.id] = 0;
+          serverBase[r.id] = 0;
+        }
 
         if (stored?.amounts && typeof stored.amounts === "object") {
-          for (const key of Object.keys(base)) {
+          for (const key of Object.keys(storedBase)) {
             const v = stored.amounts[key];
-            base[key] = typeof v === "number" && Number.isFinite(v) ? v : 0;
+            storedBase[key] = typeof v === "number" && Number.isFinite(v) ? v : 0;
           }
         }
 
-        const unlocked = Array.isArray(stored?.unlocked) && stored!.unlocked!.length > 0 ? stored!.unlocked! : BASE_UNLOCKED_RESOURCE_IDS;
-        const lastTick = typeof stored?.lastTick === "number" && stored.lastTick > 0 ? stored.lastTick : now;
+        const serverResources =
+          (economySource?.state?.resources && typeof economySource.state.resources === "object" ? economySource.state.resources : null) ??
+          (economySource?.resources && typeof economySource.resources === "object" ? economySource.resources : null);
+        if (serverResources) {
+          for (const key of Object.keys(serverBase)) {
+            const row = (serverResources as Record<string, any>)[key];
+            const raw = Number(row && typeof row === "object" ? row.amount : row);
+            serverBase[key] = Number.isFinite(raw) && raw > 0 ? raw : 0;
+          }
+        }
+
+        const storedUnlocked = Array.isArray(stored?.unlocked) && stored!.unlocked!.length > 0 ? stored!.unlocked! : BASE_UNLOCKED_RESOURCE_IDS;
+        const serverBuildings =
+          (economySource?.state?.buildings && typeof economySource.state.buildings === "object" ? economySource.state.buildings : null) ??
+          (economySource?.buildings && typeof economySource.buildings === "object" ? economySource.buildings : null);
+        const serverUnlockedSet = new Set<string>(BASE_UNLOCKED_RESOURCE_IDS);
+        if (serverBuildings) {
+          for (const r of RESOURCE_DEFS) {
+            const rawLevel = Number((serverBuildings as Record<string, any>)[r.id]?.level ?? 0);
+            if ((Number.isFinite(rawLevel) && rawLevel > 0) || Number(serverBase[r.id] || 0) > 0) {
+              serverUnlockedSet.add(r.id);
+            }
+          }
+        }
+
+        const storedTotal = Object.values(storedBase).reduce((sum, value) => sum + Math.max(0, Number(value || 0)), 0);
+        const serverTotal = Object.values(serverBase).reduce((sum, value) => sum + Math.max(0, Number(value || 0)), 0);
+        const hasStoredSnapshot = Boolean(stored?.amounts && typeof stored.amounts === "object");
+        const shouldUseServerSeed =
+          serverTotal > 0 &&
+          (!hasStoredSnapshot || storedTotal <= 0 || storedTotal < serverTotal * 0.02);
+
+        const seedAmounts = shouldUseServerSeed ? serverBase : storedBase;
+        const unlocked = Array.from(new Set([...(shouldUseServerSeed ? Array.from(serverUnlockedSet) : storedUnlocked), ...Array.from(serverUnlockedSet)]));
+        const lastTick =
+          shouldUseServerSeed
+            ? now
+            : typeof stored?.lastTick === "number" && stored.lastTick > 0
+              ? stored.lastTick
+              : now;
         const offlineSeconds = Math.max(0, Math.floor((now - lastTick) / 1000));
-        const produced = applyResourceProduction(base, offlineSeconds, unlocked);
+        const produced = applyResourceProduction(seedAmounts, offlineSeconds, unlocked);
 
         if (canceled) return;
         setUnlockedResourceIds(unlocked);
         setResourceAmounts(produced);
-        setResourceOfflineSeconds(offlineSeconds);
+        setResourceOfflineSeconds(shouldUseServerSeed ? 0 : offlineSeconds);
         resourceTickRef.current = now;
       } catch (err) {
         if (!canceled) {
@@ -5846,6 +6307,49 @@ export default function App() {
     setScreen("home");
   };
 
+  const rankingClientProgressKey = useMemo(
+    () =>
+      JSON.stringify({
+        rooms: rooms
+          .map((room) => ({
+            type: room.type,
+            level: Math.max(0, Math.floor(Number(room.level || 0)))
+          }))
+          .sort((a, b) => String(a.type).localeCompare(String(b.type))),
+        researchLevels: TECHNOLOGY_DEFS.map((def) => ({
+          id: def.id,
+          level: Math.max(0, Math.floor(Number(technologyLevels[def.id] ?? 0)))
+        })),
+        constructionJob: constructionJob
+          ? {
+              mode: constructionJob.mode,
+              roomType: constructionJob.roomType,
+              targetLevel: constructionJob.targetLevel,
+              costPaid: constructionJob.costPaid
+            }
+          : null,
+        researchJob: researchJob
+          ? {
+              technologyId: researchJob.technologyId,
+              targetLevel: researchJob.targetLevel,
+              costPaid: researchJob.costPaid
+            }
+          : null
+      }),
+    [constructionJob, researchJob, rooms, technologyLevels]
+  );
+
+  useEffect(() => {
+    if (!session) {
+      return;
+    }
+    if (!vaultHydrated || vaultHydratedUserId !== session.user_id) {
+      return;
+    }
+    void syncRankingProgress();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rankingClientProgressKey, session, vaultHydrated, vaultHydratedUserId]);
+
   const topbarAudioCtxRef = useRef<AudioContext | null>(null);
   const playTopbarClickSound = useCallback(() => {
     if (typeof window === "undefined") return;
@@ -5899,6 +6403,52 @@ export default function App() {
     playTopbarClickSound();
     setScreen(nextScreen);
   }, [playTopbarClickSound]);
+
+  const clearProfileMenuCloseTimeout = useCallback(() => {
+    if (profileMenuCloseTimeoutRef.current !== null) {
+      window.clearTimeout(profileMenuCloseTimeoutRef.current);
+      profileMenuCloseTimeoutRef.current = null;
+    }
+  }, []);
+
+  const openProfileMenu = useCallback(() => {
+    clearProfileMenuCloseTimeout();
+    setProfileMenuOpen(true);
+  }, [clearProfileMenuCloseTimeout]);
+
+  const closeProfileMenu = useCallback(
+    (delayMs = 0) => {
+      clearProfileMenuCloseTimeout();
+      if (delayMs <= 0) {
+        setProfileMenuOpen(false);
+        return;
+      }
+      profileMenuCloseTimeoutRef.current = window.setTimeout(() => {
+        setProfileMenuOpen(false);
+        profileMenuCloseTimeoutRef.current = null;
+      }, delayMs);
+    },
+    [clearProfileMenuCloseTimeout]
+  );
+
+  const navigateFromProfileMenu = useCallback(
+    (nextScreen: UIScreen) => {
+      closeProfileMenu(0);
+      navigateFromTopbar(nextScreen);
+    },
+    [closeProfileMenu, navigateFromTopbar]
+  );
+
+  const handleProfileMenuBlur = useCallback(
+    (event: FocusEvent<HTMLDivElement>) => {
+      const nextTarget = event.relatedTarget as Node | null;
+      if (nextTarget && event.currentTarget.contains(nextTarget)) return;
+      closeProfileMenu(1200);
+    },
+    [closeProfileMenu]
+  );
+
+  useEffect(() => () => clearProfileMenuCloseTimeout(), [clearProfileMenuCloseTimeout]);
 
   const saveProfile = async (e: FormEvent) => {
     e.preventDefault();
@@ -6312,7 +6862,6 @@ export default function App() {
   };
 
   const researchRemainingSeconds = researchJob ? Math.max(0, Math.floor((researchJob.endAt - nowMs) / 1000)) : 0;
-  const displayedScorePoints = formatDisplayedScoreValue(playerScorePoints);
   const populationFillPct = clampNumber(
     (populationSnapshot.totalPopulation / Math.max(1, populationSnapshot.capacity)) * 100,
     0,
@@ -6545,19 +7094,6 @@ export default function App() {
       return;
     }
     const qty = Math.max(1, Math.floor(Number(quantity) || 1));
-    const crewPerUnit = Math.max(0, Math.floor(Number(POPULATION_SHIP_CREW_REQUIREMENTS[unitId] ?? 0)));
-    if (crewPerUnit > 0) {
-      const crewRequired = crewPerUnit * qty;
-      if (crewRequired > hangarCrewState.free) {
-        setHangarError(
-          l(
-            `Equipage insuffisant (${crewRequired.toLocaleString()} requis, ${hangarCrewState.free.toLocaleString()} disponibles).`,
-            `Not enough crew (${crewRequired.toLocaleString()} required, ${hangarCrewState.free.toLocaleString()} available).`
-          )
-        );
-        return;
-      }
-    }
     setHangarActionBusy(true);
     setHangarError("");
     try {
@@ -6658,13 +7194,10 @@ export default function App() {
   }> = [
     { screen: "game", label: l("Jeu", "Game"), icon: Play },
     { screen: "hangar", label: l("Hangar", "Hangar"), icon: Swords },
-    { screen: "population", label: l("Population", "Population"), icon: Users },
     { screen: "starmap", label: l("Carte", "Map"), icon: Navigation },
-    { screen: "resources", label: l("Ressources", "Resources"), icon: Coins },
     { screen: "technology", label: l("Technologie", "Technology"), icon: Hexagon },
     { screen: "alliance", label: l("Alliance", "Alliance"), icon: Shield },
     { screen: "ranking", label: l("Classement", "Ranking"), icon: ArrowUpCircle },
-    { screen: "wiki", label: l("Wiki", "Wiki"), icon: BookOpen },
     { screen: "inventory", label: l("Inventaire", "Inventory"), icon: Package, badge: inventoryMenuBadgeCount },
     { screen: "inbox", label: l("Inbox", "Inbox"), icon: Mail, badge: inboxUnreadCount },
     { screen: "chat", label: l("Chat", "Chat"), icon: MessageCircle }
@@ -6672,37 +7205,94 @@ export default function App() {
 
   const renderUnifiedMenu = () => (
     <div className="status-wrap topbar-nav">
-      {topbarNavItems.map((item) => {
-        const Icon = item.icon;
-        const isActive = screen === item.screen;
-        const badge = Math.max(0, Math.floor(Number(item.badge ?? 0)));
-        return (
-          <button
-            key={item.screen}
-            className={`topbar-nav-btn${isActive ? " topbar-nav-btn--active" : ""}${badge > 0 ? " topbar-nav-btn--with-badge" : ""}`}
-            onClick={() => navigateFromTopbar(item.screen)}
-          >
-            <Icon size={15} />
-            <span>{item.label}</span>
-            {badge > 0 ? <span className="menu-badge">{badge > 99 ? "99+" : badge}</span> : null}
-          </button>
-        );
-      })}
-      <div className="user-menu topbar-user-menu">
-        <button className={`topbar-nav-btn topbar-profile-btn${screen === "profile" ? " topbar-nav-btn--active" : ""}`} onClick={() => navigateFromTopbar("profile")}>
+      <div className="topbar-nav-scroll">
+        {topbarNavItems.map((item) => {
+          const Icon = item.icon;
+          const isActive = screen === item.screen;
+          const badge = Math.max(0, Math.floor(Number(item.badge ?? 0)));
+          return (
+            <button
+              key={item.screen}
+              className={`topbar-nav-btn${isActive ? " topbar-nav-btn--active" : ""}${badge > 0 ? " topbar-nav-btn--with-badge" : ""}`}
+              onClick={() => navigateFromTopbar(item.screen)}
+              title={item.label}
+              aria-label={item.label}
+            >
+              <Icon size={15} />
+              <span className="topbar-nav-label">{item.label}</span>
+              {badge > 0 ? <span className="menu-badge">{badge > 99 ? "99+" : badge}</span> : null}
+            </button>
+          );
+        })}
+      </div>
+      <div
+        className={`user-menu topbar-user-menu${profileMenuOpen ? " is-open" : ""}`}
+        onMouseEnter={openProfileMenu}
+        onMouseLeave={() => closeProfileMenu(1400)}
+        onFocusCapture={openProfileMenu}
+        onBlur={handleProfileMenuBlur}
+        onKeyDown={(event) => {
+          if (event.key === "Escape") {
+            closeProfileMenu(0);
+            const button = event.currentTarget.querySelector<HTMLButtonElement>(".topbar-profile-btn");
+            button?.focus();
+          }
+        }}
+      >
+        <button
+          className={`topbar-nav-btn topbar-profile-btn${screen === "profile" || screen === "settings" ? " topbar-nav-btn--active" : ""}`}
+          onClick={() => navigateFromProfileMenu("profile")}
+          title={playerId || l("Profil", "Profile")}
+          aria-label={playerId || l("Profil", "Profile")}
+          aria-haspopup={session ? "menu" : undefined}
+          aria-expanded={session ? profileMenuOpen : undefined}
+        >
           <UserRound size={15} />
-          <span>{playerId || l("Profil", "Profile")}</span>
+          <span className="topbar-nav-label topbar-profile-label">{playerId || l("Profil", "Profile")}</span>
         </button>
         {session ? (
-          <button
-            className="user-logout-btn"
-            onClick={() => {
-              playTopbarClickSound();
-              logout();
-            }}
-          >
-            <LogOut size={14} /> {l("Deconnexion", "Logout")}
-          </button>
+          <div className="user-menu-dropdown" role="menu" aria-label={l("Menu joueur", "Player menu")}>
+            <button
+              type="button"
+              className={`user-menu-action${screen === "profile" ? " is-active" : ""}`}
+              onClick={() => navigateFromProfileMenu("profile")}
+              role="menuitem"
+            >
+              <UserRound size={15} />
+              <span>{l("Profil", "Profile")}</span>
+            </button>
+            <button
+              type="button"
+              className={`user-menu-action${screen === "settings" ? " is-active" : ""}`}
+              onClick={() => navigateFromProfileMenu("settings")}
+              role="menuitem"
+            >
+              <SlidersHorizontal size={15} />
+              <span>{l("Parametres", "Settings")}</span>
+            </button>
+            <button
+              type="button"
+              className={`user-menu-action${screen === "wiki" ? " is-active" : ""}`}
+              onClick={() => navigateFromProfileMenu("wiki")}
+              role="menuitem"
+            >
+              <BookOpen size={15} />
+              <span>{l("Wiki", "Wiki")}</span>
+            </button>
+            <button
+              type="button"
+              className="user-menu-action user-menu-action--danger"
+              onClick={() => {
+                closeProfileMenu(0);
+                playTopbarClickSound();
+                logout();
+              }}
+              role="menuitem"
+            >
+              <LogOut size={15} />
+              <span>{l("Deconnexion", "Logout")}</span>
+            </button>
+          </div>
         ) : null}
       </div>
     </div>
@@ -6754,8 +7344,8 @@ export default function App() {
         </div>
         {renderUnifiedMenu()}
       </div>
-      <div className="topbar-resources">
-        <div className="top-resource-strip">
+        <div className="topbar-resources">
+          <div className="top-resource-strip">
           {RESOURCE_DEFS.filter(
             (r) =>
               unlockedResourceIds.includes(r.id) ||
@@ -6806,10 +7396,13 @@ export default function App() {
         </div>
         <div className="topbar-credits">
           <div className="top-score-panel">
-            <span className="top-score-panel__label">{l("Score global", "Global score")}</span>
-            <div className="top-score-panel__value-row">
-              <strong className="top-score-panel__value">{displayedScorePoints.toLocaleString()}</strong>
-              <span className="top-score-panel__rank">{l("Rang", "Rank")} #{playerScoreRank > 0 ? playerScoreRank : "-"}</span>
+            <div className="top-score-panel__metric top-score-panel__metric--score">
+              <span className="top-score-panel__label">{l("Score", "Score")}</span>
+              <strong className="top-score-panel__value">{formatDisplayedScoreLabel(playerScorePoints)}</strong>
+            </div>
+            <div className="top-score-panel__metric top-score-panel__metric--rank">
+              <span className="top-score-panel__rank-label">{l("Rang", "Rank")}</span>
+              <span className="top-score-panel__rank-value">#{playerScoreRank > 0 ? playerScoreRank : "-"}</span>
             </div>
           </div>
         </div>
@@ -6965,6 +7558,7 @@ export default function App() {
             error={resourceError}
             offlineSeconds={resourceOfflineSeconds}
             lastSavedAt={resourceLastSavedAt}
+            onNavigate={setScreen}
           />
         </>
       ) : screen === "population" ? (
@@ -7007,7 +7601,9 @@ export default function App() {
             nowMs={nowMs}
             client={client}
             session={session}
+            resourceAmounts={resourceAmounts}
             onRankingRefresh={() => void loadRankingState(true)}
+            onEconomyRefresh={refreshEconomyHeaderState}
             onUnauthorized={invalidateSession}
           />
         </>
@@ -7092,12 +7688,24 @@ export default function App() {
           {renderUnifiedHeader()}
           <WikiScreen language={uiLanguage} />
         </>
-      ) : screen === "profile" ? (
+      ) : screen === "profile" || screen === "settings" ? (
         <>
           {renderUnifiedHeader()}
 
           <ProfileScreen
             language={uiLanguage}
+            title={screen === "settings" ? l("Parametres du compte", "Account settings") : l("Identite du Commandant", "Commander Identity")}
+            subtitle={
+              screen === "settings"
+                ? l(
+                    "Reglez votre compte, votre langue et votre commandant actif depuis ce centre de configuration.",
+                    "Adjust your account, language, and active commander from this control center."
+                  )
+                : l(
+                    "Personnalisez votre presence dans le reseau de l'hyperstructure.",
+                    "Customize your presence in the hyperstructure network."
+                  )
+            }
             profileUsername={profileUsername}
             profileEmail={profileEmail}
             profileLanguage={profileLanguage}
@@ -7126,13 +7734,19 @@ export default function App() {
 
           <main className="game-layout">
             <aside className="left-panel">
-              <h2>{l("Stats Hyperstructure", "Hyperstructure Stats")}</h2>
               <div className="hyperstats-panel">
+                <h2>{l("Stats Hyperstructure", "Hyperstructure Stats")}</h2>
                 <StatLine icon={<Users size={16} />} label={l("Batiments actifs", "Active buildings")} value={stats.buildings} />
                 <StatLine icon={<Gem size={16} />} label={l("Ressources debloquees", "Unlocked resources")} value={stats.unlocked} />
                 <StatLine icon={<Zap size={16} />} label={l("Production totale/s", "Total production/s")} value={Number(stats.totalProduction.toFixed(3))} />
                 <StatLine icon={<Shield size={16} />} label={l("Capacite entrepot", "Storage capacity")} value={stats.storageCapacity} />
                 <StatLine icon={<RefreshCw size={16} />} label={l("File construction", "Construction queue")} value={stats.queueBusy ? 1 : 0} />
+                <div className="left-panel-actions">
+                  <button type="button" className="left-panel-link" onClick={() => navigateFromTopbar("resources")}>
+                    <Coins size={15} />
+                    <span>{l("Ressources", "Resources")}</span>
+                  </button>
+                </div>
               </div>
 
               <div className="population-panel">
@@ -7207,10 +7821,14 @@ export default function App() {
                     <strong>{l(populationSnapshot.civilizationTier.nameFr, populationSnapshot.civilizationTier.nameEn)}</strong>
                   </p>
                   <p>
-                    {l("Equipage disponible", "Available crew")}:{" "}
+                    {l("Personnel flotte estime", "Estimated fleet staffing")}:{" "}
                     <strong>{hangarCrewState.free.toLocaleString()}</strong>
                     {" / "}
                     {hangarCrewState.crewPool.toLocaleString()}
+                    {" "}
+                    <span className="population-meta-inline-note">
+                      {l("(indicatif)", "(advisory)")}
+                    </span>
                   </p>
                   {populationSnapshot.activeEvent ? (
                     <p>
@@ -7234,6 +7852,12 @@ export default function App() {
                       {l("Famine: croissance arretee", "Famine: growth halted")}
                     </p>
                   ) : null}
+                </div>
+                <div className="left-panel-actions">
+                  <button type="button" className="left-panel-link left-panel-link--population" onClick={() => navigateFromTopbar("population")}>
+                    <Users size={15} />
+                    <span>{l("Population", "Population")}</span>
+                  </button>
                 </div>
               </div>
             </aside>
@@ -7670,7 +8294,7 @@ function ChestLootModal({
           ) : (
             rewardRows.map((row) => (
               <div key={row.resourceId} className="chest-loot-row">
-                <span>{row.name}</span>
+                <ResourceTextWithIcon resourceId={row.resourceId} language={language} className="chest-loot-label" />
                 <strong>+{row.amount.toLocaleString()}</strong>
               </div>
             ))
@@ -7827,10 +8451,12 @@ function SectorMapScreen({
   const [mapFields, setMapFields] = useState<MapFieldServerDto[]>([]);
   const [mapExpedition, setMapExpedition] = useState<MapExpeditionDto | null>(null);
   const [mapExpeditions, setMapExpeditions] = useState<MapExpeditionDto[]>([]);
+  const [mapPublicExpeditions, setMapPublicExpeditions] = useState<MapPublicExpeditionDto[]>([]);
   const [mapReports, setMapReports] = useState<
     Array<{ id: string; fieldId: string; at: number; resources: Partial<Record<ResourceId, number>>; items?: Array<{ itemId: string; quantity: number }> }>
   >([]);
   const [mapHarvestInventory, setMapHarvestInventory] = useState<MapHarvestShipRow[]>([]);
+  const [mapCombatInventory, setMapCombatInventory] = useState<MapCombatShipRow[]>([]);
   const [mapServerMaxActiveExpeditions, setMapServerMaxActiveExpeditions] = useState(1);
   const [mapLoadError, setMapLoadError] = useState("");
   const [mapActionError, setMapActionError] = useState("");
@@ -7840,6 +8466,7 @@ function SectorMapScreen({
     pegase: "0",
     arche_spatiale: "0"
   });
+  const [attackFleetDraft, setAttackFleetDraft] = useState<Record<string, string>>({});
   const [fieldPopupId, setFieldPopupId] = useState<string | null>(null);
   const [mapNowMs, setMapNowMs] = useState(() => Date.now());
   const [mapServerSync, setMapServerSync] = useState<{ serverMs: number; localMs: number } | null>(null);
@@ -7885,6 +8512,7 @@ function SectorMapScreen({
   const mapStateRpcInFlightRef = useRef(false);
   const mapStateRpcBackoffUntilRef = useRef(0);
   const mapAutoCenterKeyRef = useRef("");
+  const lastPersistedMapCacheJsonRef = useRef("");
 
   const parseMapExpeditionRow = (expeditionRaw: Record<string, any>): MapExpeditionDto | null => {
     if (!expeditionRaw || typeof expeditionRaw !== "object") return null;
@@ -7908,6 +8536,9 @@ function SectorMapScreen({
     return {
       id,
       fieldId: String(expeditionRaw.fieldId || ""),
+      missionKind: String(expeditionRaw.missionKind || "").trim().toLowerCase() === "attack" ? "attack" : "harvest",
+      targetPlayerId: String(expeditionRaw.targetPlayerId || "").trim(),
+      targetUsername: String(expeditionRaw.targetUsername || "").trim(),
       status: (String(expeditionRaw.status || "travel_to_field") as MapExpeditionDto["status"]),
       departureAt: Math.max(0, Math.floor(Number(expeditionRaw.departureAt ?? 0))),
       arrivalAt: Math.max(0, Math.floor(Number(expeditionRaw.arrivalAt ?? 0))),
@@ -7919,6 +8550,7 @@ function SectorMapScreen({
       extractionSeconds: Math.max(0, Math.floor(Number(expeditionRaw.extractionSeconds ?? 0))),
       totalHarvestSpeed: Math.max(0, Math.floor(Number(expeditionRaw.totalHarvestSpeed ?? 0))),
       totalTransportCapacity: effectiveTransportCapacity,
+      fuelCostCredits: Math.max(0, Math.floor(Number(expeditionRaw.fuelCostCredits ?? 0))),
       playerScore: Math.max(0, Math.floor(Number(expeditionRaw.playerScore ?? 0))),
       scoreBonus: Number.isFinite(Number(expeditionRaw.scoreBonus ?? 0)) ? Number(expeditionRaw.scoreBonus ?? 0) : 1,
       fleet,
@@ -7928,6 +8560,46 @@ function SectorMapScreen({
       collectedResources: (expeditionRaw.collectedResources && typeof expeditionRaw.collectedResources === "object"
         ? expeditionRaw.collectedResources
         : {}) as Partial<Record<ResourceId, number>>,
+      serverNowTs: Math.max(0, Math.floor(Number(expeditionRaw.serverNowTs ?? Math.floor(Date.now() / 1000))))
+    };
+  };
+
+  const parseMapCombatInventoryRows = (rowsRaw: any[]): MapCombatShipRow[] =>
+    (Array.isArray(rowsRaw) ? rowsRaw : [])
+      .map((row: any) => ({
+        unitId: String(row?.unitId || "").trim(),
+        quantity: Math.max(0, Math.floor(Number(row?.quantity ?? 0))),
+        force: Math.max(0, Math.floor(Number(row?.force ?? 0))),
+        endurance: Math.max(0, Math.floor(Number(row?.endurance ?? 0))),
+        speed: Math.max(0, Math.floor(Number(row?.speed ?? 0))),
+        lootCapacity: Math.max(0, Math.floor(Number(row?.lootCapacity ?? 0)))
+      }))
+      .filter((row: MapCombatShipRow) => row.unitId.length > 0 && row.quantity > 0);
+
+  const parsePublicMapExpeditionRow = (expeditionRaw: Record<string, any>): MapPublicExpeditionDto | null => {
+    if (!expeditionRaw || typeof expeditionRaw !== "object") return null;
+    const id = String(expeditionRaw.id || "").trim();
+    const playerId = String(expeditionRaw.playerId || "").trim();
+    const fieldId = String(expeditionRaw.fieldId || "").trim();
+    if (!id || !playerId || !fieldId) return null;
+    const status = String(expeditionRaw.status || "travel_to_field").trim().toLowerCase();
+    if (status !== "travel_to_field" && status !== "extracting" && status !== "returning") return null;
+    return {
+      id,
+      playerId,
+      username: String(expeditionRaw.username || playerId).trim() || playerId,
+      fieldId,
+      missionKind: String(expeditionRaw.missionKind || "").trim().toLowerCase() === "attack" ? "attack" : "harvest",
+      targetPlayerId: String(expeditionRaw.targetPlayerId || "").trim(),
+      targetUsername: String(expeditionRaw.targetUsername || "").trim(),
+      status: status as MapPublicExpeditionDto["status"],
+      departureAt: Math.max(0, Math.floor(Number(expeditionRaw.departureAt ?? 0))),
+      arrivalAt: Math.max(0, Math.floor(Number(expeditionRaw.arrivalAt ?? 0))),
+      extractionStartAt: Math.max(0, Math.floor(Number(expeditionRaw.extractionStartAt ?? 0))),
+      extractionEndAt: Math.max(0, Math.floor(Number(expeditionRaw.extractionEndAt ?? 0))),
+      returnStartAt: Math.max(0, Math.floor(Number(expeditionRaw.returnStartAt ?? 0))),
+      returnEndAt: Math.max(0, Math.floor(Number(expeditionRaw.returnEndAt ?? 0))),
+      travelSeconds: Math.max(0, Math.floor(Number(expeditionRaw.travelSeconds ?? 0))),
       serverNowTs: Math.max(0, Math.floor(Number(expeditionRaw.serverNowTs ?? Math.floor(Date.now() / 1000))))
     };
   };
@@ -7993,6 +8665,11 @@ function SectorMapScreen({
     [cachedMapPayload]
   );
 
+  const cachedMapCombatInventory = useMemo(
+    () => parseMapCombatInventoryRows(Array.isArray(cachedMapPayload.combatInventory) ? cachedMapPayload.combatInventory : []),
+    [cachedMapPayload]
+  );
+
   const cachedDisplayedMapExpeditions = useMemo(() => {
     const expeditionsRaw = Array.isArray(cachedMapPayload.expeditions) ? cachedMapPayload.expeditions : [];
     const parsedExpeditions = expeditionsRaw
@@ -8003,15 +8680,38 @@ function SectorMapScreen({
     return fallbackExpedition ? [fallbackExpedition] : [];
   }, [cachedMapPayload]);
 
+  const cachedPublicMapExpeditions = useMemo(
+    () =>
+      (Array.isArray(cachedMapPayload.publicExpeditions) ? cachedMapPayload.publicExpeditions : [])
+        .map((row: any) => parsePublicMapExpeditionRow(parseJsonObject(row)))
+        .filter((row: MapPublicExpeditionDto | null): row is MapPublicExpeditionDto => Boolean(row)),
+    [cachedMapPayload]
+  );
+
   const liveDisplayedMapExpeditions = useMemo(
     () => (mapExpeditions.length > 0 ? mapExpeditions : (mapExpedition ? [mapExpedition] : [])),
     [mapExpedition, mapExpeditions]
+  );
+  const displayedPublicMapExpeditions = useMemo(
+    () => (mapPublicExpeditions.length > 0 ? mapPublicExpeditions : (!mapLiveStateHydrated ? cachedPublicMapExpeditions : [])),
+    [cachedPublicMapExpeditions, mapLiveStateHydrated, mapPublicExpeditions]
   );
   const displayedMapPlayers = mapPlayers.length > 0 ? mapPlayers : cachedMapPlayers;
   const displayedMapFields = mapFields.length > 0 ? mapFields : cachedMapFields;
   const hasTrackedMapExpedition =
     liveDisplayedMapExpeditions.length > 0 || (!mapLiveStateHydrated && cachedDisplayedMapExpeditions.length > 0);
-  const mapStateRefreshIntervalMs = hasTrackedMapExpedition ? 4000 : 25000;
+  const hasObservedForeignMapActivity = useMemo(
+    () =>
+      displayedPublicMapExpeditions.length > 0 ||
+      displayedMapFields.some(
+        (field) =>
+          Boolean(field.isOccupied) &&
+          normalizeMapEntityId(field.occupiedByPlayerId || "") !== "" &&
+          normalizeMapEntityId(field.occupiedByPlayerId || "") !== normalizeMapEntityId(currentUserId)
+      ),
+    [currentUserId, displayedMapFields, displayedPublicMapExpeditions]
+  );
+  const mapStateRefreshIntervalMs = hasTrackedMapExpedition || hasObservedForeignMapActivity ? 4000 : 8000;
 
   useEffect(() => {
     if (!active) return;
@@ -8072,8 +8772,10 @@ function SectorMapScreen({
       setMapFields([]);
       setMapExpedition(null);
       setMapExpeditions([]);
+      setMapPublicExpeditions([]);
       setMapReports([]);
       setMapHarvestInventory([]);
+      setMapCombatInventory([]);
       setMapServerMaxActiveExpeditions(1);
       setMapLoadError("");
       return;
@@ -8093,108 +8795,10 @@ function SectorMapScreen({
         const parsed = parseJsonObject((rpc as any)?.payload ?? rpc);
         const nested = parseJsonObject(parsed?.payload);
         const source = Object.keys(nested).length > 0 ? nested : parsed;
-        const fieldsRaw = Array.isArray(source?.fields) ? source.fields : [];
-        const expeditionRaw = parseJsonObject(source?.expedition);
-        const expeditionsRaw = Array.isArray(source?.expeditions) ? source.expeditions : [];
-        const reportsRaw = Array.isArray(source?.reports) ? source.reports : [];
-        const harvestRaw = Array.isArray(source?.harvestInventory) ? source.harvestInventory : [];
-        const maxActiveExpeditions = Math.max(1, Math.floor(Number(source?.maxActiveExpeditions ?? 1)));
-
-        const nextFields: MapFieldServerDto[] = fieldsRaw
-          .map((row: any) => {
-            const occupiedByPlayerId = normalizeMapEntityId(row?.occupiedByPlayerId);
-            const occupyingFleetId = normalizeMapEntityId(row?.occupyingFleetId);
-            return {
-              id: String(row?.id || "").trim(),
-              x: Math.floor(Number(row?.x ?? 0)),
-              y: Math.floor(Number(row?.y ?? 0)),
-              rarityTier: String(row?.rarityTier || "COMMON").toUpperCase() as MapFieldServerDto["rarityTier"],
-              qualityTier: String(row?.qualityTier || "STANDARD").toUpperCase() as MapFieldServerDto["qualityTier"],
-              resources: Array.isArray(row?.resources)
-                ? row.resources
-                    .map((res: any) => ({
-                      resourceId: String(res?.resourceId || "").trim(),
-                      totalAmount: Math.max(0, Math.floor(Number(res?.totalAmount ?? 0))),
-                      remainingAmount: Math.max(0, Math.floor(Number(res?.remainingAmount ?? 0)))
-                    }))
-                    .filter((res: any) => res.resourceId.length > 0)
-                : [],
-              totalExtractionWork: Math.max(0, Math.floor(Number(row?.totalExtractionWork ?? 0))),
-              remainingExtractionWork: Math.max(0, Math.floor(Number(row?.remainingExtractionWork ?? 0))),
-              spawnedAt: Math.max(0, Math.floor(Number(row?.spawnedAt ?? 0))),
-              expiresAt: Math.max(0, Math.floor(Number(row?.expiresAt ?? 0))),
-              occupiedByPlayerId,
-              occupiedByUsername: String(row?.occupiedByUsername || ""),
-              occupyingFleetId,
-              isOccupied: normalizeMapOccupiedFlag(row?.isOccupied, occupiedByPlayerId, occupyingFleetId),
-              isVisible: parseBooleanFlag(row?.isVisible, true),
-              hiddenDetails: parseBooleanFlag(row?.hiddenDetails, false)
-            };
-          })
-          .filter((row: MapFieldServerDto) => row.id.length > 0);
-
-        const parsedExpeditions = expeditionsRaw
-          .map((row: any) => parseMapExpeditionRow(parseJsonObject(row)))
-          .filter((row: MapExpeditionDto | null): row is MapExpeditionDto => Boolean(row));
-        const fallbackExpedition = parseMapExpeditionRow(expeditionRaw);
-        const nextExpeditions = parsedExpeditions.length > 0
-          ? parsedExpeditions
-          : fallbackExpedition
-            ? [fallbackExpedition]
-            : [];
-        const nextExpedition: MapExpeditionDto | null = nextExpeditions[0] ?? null;
-
-        const nextReports = reportsRaw
-          .map((row: any) => ({
-            id: String(row?.id || "").trim(),
-            fieldId: String(row?.fieldId || "").trim(),
-            at: Math.max(0, Math.floor(Number(row?.at ?? 0))),
-            resources: (row?.resources && typeof row.resources === "object" ? row.resources : {}) as Partial<Record<ResourceId, number>>,
-            items: Array.isArray(row?.items)
-              ? row.items
-                  .map((item: any) => ({
-                    itemId: String(item?.itemId || "").trim(),
-                    quantity: Math.max(0, Math.floor(Number(item?.quantity ?? 0)))
-                  }))
-                  .filter((item: any) => item.itemId.length > 0 && item.quantity > 0)
-              : []
-          }))
-          .filter((row: any) => row.id.length > 0);
-
-        const nextHarvestInventory: MapHarvestShipRow[] = harvestRaw
-          .map((row: any) => ({
-            unitId: String(row?.unitId || "").trim(),
-            quantity: Math.max(0, Math.floor(Number(row?.quantity ?? 0))),
-            harvestSpeed: Math.max(0, Math.floor(Number(row?.harvestSpeed ?? 0))),
-            harvestCapacity: Math.max(0, Math.floor(Number(row?.harvestCapacity ?? 0))),
-            mapSpeed: Math.max(0, Math.floor(Number(row?.mapSpeed ?? 0)))
-          }))
-          .filter((row: MapHarvestShipRow) => row.unitId.length > 0 && row.quantity > 0);
-
-        const stateRaw = parseJsonObject(source?.state);
-        const stateResources =
-          stateRaw?.resources && typeof stateRaw.resources === "object"
-            ? (stateRaw.resources as Partial<Record<ResourceId, number>>)
-            : undefined;
-        const stateCredits = Number(stateRaw?.credits ?? NaN);
-        const stateMapDropNotifications = Number(stateRaw?.mapDropNotifications ?? NaN);
-        const syncReport = parseJsonObject(source?.syncReport);
-
         if (!cancelled) {
-          setMapFields(nextFields);
-          setMapExpeditions(nextExpeditions);
-          setMapExpedition(nextExpedition);
-          setMapReports(nextReports);
-          setMapHarvestInventory(nextHarvestInventory);
-          setMapServerMaxActiveExpeditions(maxActiveExpeditions);
+          applyMapPayload(source);
           setMapLoadError("");
           setMapLiveStateHydrated(true);
-          onMapStateSync?.({
-            resources: stateResources,
-            credits: Number.isFinite(stateCredits) ? Math.max(0, Math.floor(stateCredits)) : undefined,
-            mapDropNotifications: Number.isFinite(stateMapDropNotifications) ? Math.max(0, Math.floor(stateMapDropNotifications)) : undefined,
-            syncReport: Object.keys(syncReport).length > 0 ? syncReport : null
-          });
         }
       } catch (err) {
         if (isUnauthorizedError(err)) {
@@ -8226,7 +8830,7 @@ function SectorMapScreen({
       cancelled = true;
       clearInterval(interval);
     };
-  }, [active, client, commandementEscadreLevel, session, language, mapActionBusy, mapStateRefreshIntervalMs]);
+  }, [active, client, commandementEscadreLevel, session, mapActionBusy, mapStateRefreshIntervalMs]);
 
   useEffect(() => {
     const tick = setInterval(() => setMapNowMs(Date.now()), 1000);
@@ -8270,6 +8874,16 @@ function SectorMapScreen({
     return computeSectorPlayerPlanets(rows, currentUserId);
   }, [currentUserId, currentUsername, displayedMapPlayers]);
 
+  const mapPlanetCoordsByUserId = useMemo(() => {
+    const next = new Map<string, { x: number; y: number }>();
+    for (const playerPlanet of sectorPlayerPlanets) {
+      const userId = String(playerPlanet.userId || "").trim();
+      if (!userId) continue;
+      next.set(userId, { x: playerPlanet.x, y: playerPlanet.y });
+    }
+    return next;
+  }, [sectorPlayerPlanets]);
+
   const mapResourceEntities = useMemo(
     () => displayedMapFields.map((field) => mapFieldToSectorEntity(field, language)),
     [displayedMapFields, language]
@@ -8290,6 +8904,21 @@ function SectorMapScreen({
     return Object.keys(fromServer).length > 0 ? { ...fallback, ...fromServer } : fallback;
   }, [hangarInventory, mapHarvestInventory]);
 
+  const combatAvailability = useMemo(() => {
+    const fromServer: Record<string, number> = {};
+    const cached: Record<string, number> = {};
+    for (const row of mapCombatInventory) fromServer[row.unitId] = Math.max(0, Math.floor(Number(row.quantity || 0)));
+    for (const row of cachedMapCombatInventory) cached[row.unitId] = Math.max(0, Math.floor(Number(row.quantity || 0)));
+    const fallback: Record<string, number> = {};
+    for (const def of HANGAR_UNIT_DEFS) {
+      if (def.category !== "ship") continue;
+      fallback[def.id] = Math.max(0, Math.floor(Number(hangarInventory[def.id] ?? 0)));
+    }
+    if (Object.keys(fromServer).length > 0) return { ...fallback, ...cached, ...fromServer };
+    if (Object.keys(cached).length > 0) return { ...fallback, ...cached };
+    return fallback;
+  }, [cachedMapCombatInventory, hangarInventory, mapCombatInventory]);
+
   useEffect(() => {
     setFleetDraft((prev) => {
       let changed = false;
@@ -8307,6 +8936,23 @@ function SectorMapScreen({
     });
   }, [harvestAvailability]);
 
+  useEffect(() => {
+    setAttackFleetDraft((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      for (const unitId of Object.keys(next)) {
+        const available = Math.max(0, Math.floor(Number(combatAvailability[unitId] ?? 0)));
+        const current = Math.max(0, Math.floor(Number(next[unitId] ?? 0)));
+        const clamped = Math.max(0, Math.min(available, current));
+        if (clamped !== current || String(clamped) !== next[unitId]) {
+          next[unitId] = String(clamped);
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [combatAvailability]);
+
   const hasValidHarvestFleetSelection = useMemo(() => {
     for (const unitId of Object.keys(fleetDraft)) {
       const available = Math.max(0, Math.floor(Number(harvestAvailability[unitId] ?? 0)));
@@ -8316,6 +8962,42 @@ function SectorMapScreen({
     }
     return false;
   }, [fleetDraft, harvestAvailability]);
+
+  const combatInventoryById = useMemo(() => {
+    const out: Record<string, MapCombatShipRow> = {};
+    for (const row of [...cachedMapCombatInventory, ...mapCombatInventory]) {
+      if (!row || !row.unitId) continue;
+      out[row.unitId] = row;
+    }
+    return out;
+  }, [cachedMapCombatInventory, mapCombatInventory]);
+
+  const availableCombatShipRows = useMemo(
+    () =>
+      HANGAR_UNIT_DEFS
+        .filter((def) => def.category === "ship")
+        .map((def) => {
+          const serverRow = combatInventoryById[def.id];
+          return {
+            unitId: def.id,
+            quantity: Math.max(0, Math.floor(Number(combatAvailability[def.id] ?? 0))),
+            force: Math.max(0, Math.floor(Number(serverRow?.force ?? def.force ?? 0))),
+            endurance: Math.max(0, Math.floor(Number(serverRow?.endurance ?? def.endurance ?? 0))),
+            speed: Math.max(0, Math.floor(Number(serverRow?.speed ?? def.speed ?? 0))),
+            lootCapacity: Math.max(
+              0,
+              Math.floor(Number(serverRow?.lootCapacity ?? MAP_HARVEST_UNIT_STATS[def.id]?.harvestCapacity ?? 0))
+            )
+          };
+        })
+        .filter((row) => row.quantity > 0),
+    [combatAvailability, combatInventoryById]
+  );
+
+  const availableAttackShipRows = useMemo(
+    () => availableCombatShipRows.filter((row) => row.force > 0),
+    [availableCombatShipRows]
+  );
 
   const selfPlanetCoords = useMemo(() => {
     return mapPlayerToPlanetCoordinates(String(currentUserId || "guest"));
@@ -8438,6 +9120,17 @@ function SectorMapScreen({
   }, [fieldPopupId, mapResourceEntities]);
 
   const selectedFieldEntity = fieldPopupEntity;
+  const fieldPopupOccupiedBySelf = Boolean(
+    fieldPopupEntity &&
+    fieldPopupEntity.isOccupied &&
+    normalizeMapEntityId(fieldPopupEntity.occupiedByPlayerId || "") === currentUserId
+  );
+  const fieldPopupOccupiedByRival = Boolean(
+    fieldPopupEntity &&
+    fieldPopupEntity.isOccupied &&
+    normalizeMapEntityId(fieldPopupEntity.occupiedByPlayerId || "") !== "" &&
+    normalizeMapEntityId(fieldPopupEntity.occupiedByPlayerId || "") !== currentUserId
+  );
 
   const selectedFieldPlan = useMemo(() => {
     if (!selectedFieldEntity) return null;
@@ -8457,6 +9150,183 @@ function SectorMapScreen({
     );
   }, [currentUserId, fleetDraft, harvestAvailability, selectedFieldEntity]);
 
+  const selectedAttackPlan = useMemo(() => {
+    const rows = Object.keys(attackFleetDraft)
+      .map((unitId) => {
+        const available = Math.max(0, Math.floor(Number(combatAvailability[unitId] ?? 0)));
+        const requested = Math.max(0, Math.floor(Number(attackFleetDraft[unitId] ?? 0)));
+        const quantity = Math.min(available, requested);
+        if (quantity <= 0) return null;
+        const stats = combatInventoryById[unitId];
+        const fallback = HANGAR_UNIT_DEFS.find((row) => row.id === unitId);
+        const force = Math.max(0, Math.floor(Number(stats?.force ?? fallback?.force ?? 0)));
+        if (force <= 0) return null;
+        return {
+          unitId,
+          quantity,
+          force,
+          endurance: Math.max(0, Math.floor(Number(stats?.endurance ?? fallback?.endurance ?? 0))),
+          speed: Math.max(0, Math.floor(Number(stats?.speed ?? fallback?.speed ?? 0))),
+          lootCapacity: Math.max(
+            0,
+            Math.floor(Number(stats?.lootCapacity ?? MAP_HARVEST_UNIT_STATS[unitId]?.harvestCapacity ?? 0))
+          )
+        };
+      })
+      .filter((row): row is NonNullable<typeof row> => Boolean(row));
+    if (rows.length <= 0) return null;
+    let totalForce = 0;
+    let totalEndurance = 0;
+    let totalLootCapacity = 0;
+    let weightedSpeed = 0;
+    let shipCount = 0;
+    for (const row of rows) {
+      totalForce += row.force * row.quantity;
+      totalEndurance += row.endurance * row.quantity;
+      totalLootCapacity += row.lootCapacity * row.quantity;
+      weightedSpeed += row.speed * row.quantity;
+      shipCount += row.quantity;
+    }
+    const origin = selectedFieldEntity ? mapPlayerToPlanetCoordinates(currentUserId || "guest") : null;
+    const dx = origin && selectedFieldEntity ? selectedFieldEntity.x - origin.x : 0;
+    const dy = origin && selectedFieldEntity ? selectedFieldEntity.y - origin.y : 0;
+    const distance = Math.sqrt(dx * dx + dy * dy);
+    const travelSeconds =
+      shipCount > 0 && weightedSpeed > 0
+        ? Math.max(
+            MAP_MIN_TRAVEL_SECONDS,
+            Math.min(MAP_MAX_TRAVEL_SECONDS, Math.floor((distance / (weightedSpeed / shipCount)) * MAP_TRAVEL_TIME_FACTOR))
+          )
+        : 0;
+    return {
+      fleet: rows.map((row) => ({ unitId: row.unitId, quantity: row.quantity })),
+      totalForce,
+      totalEndurance,
+      totalLootCapacity,
+      averageSpeed: shipCount > 0 ? Math.round(weightedSpeed / shipCount) : 0,
+      distance,
+      travelSeconds,
+      fuelCredits:
+        selectedFieldEntity
+          ? estimateMapFleetFuelCredits(
+              rows.map((row) => ({ unitId: row.unitId, quantity: row.quantity })),
+              currentUserId || "guest",
+              selectedFieldEntity.x,
+              selectedFieldEntity.y,
+              "attack"
+            )
+          : 0
+    };
+  }, [attackFleetDraft, combatAvailability, combatInventoryById, currentUserId, selectedFieldEntity]);
+
+  const selectedAttackHasCombatForce = useMemo(
+    () => Boolean(selectedAttackPlan && selectedAttackPlan.totalForce > 0),
+    [selectedAttackPlan]
+  );
+
+  const fieldPopupResourceCount = useMemo(
+    () => (fieldPopupEntity?.resources ?? []).filter((row) => Math.max(0, Math.floor(Number(row?.remainingAmount ?? 0))) > 0).length,
+    [fieldPopupEntity]
+  );
+  const fieldPopupRemainingTotal = useMemo(
+    () =>
+      (fieldPopupEntity?.resources ?? []).reduce(
+        (sum, row) => sum + Math.max(0, Math.floor(Number(row?.remainingAmount ?? 0))),
+        0
+      ),
+    [fieldPopupEntity]
+  );
+
+  const setHarvestFleetDraftForUnit = useCallback(
+    (unitId: string, mode: "max" | "clear") => {
+      const available = Math.max(0, Math.floor(Number(harvestAvailability[unitId] ?? 0)));
+      setFleetDraft((prev) => ({ ...prev, [unitId]: String(mode === "max" ? available : 0) }));
+    },
+    [harvestAvailability]
+  );
+
+  const fillAllHarvestFleetDraft = useCallback(() => {
+    setFleetDraft((prev) => {
+      const next = { ...prev };
+      for (const unitId of Object.keys(MAP_HARVEST_UNIT_STATS)) {
+        next[unitId] = String(Math.max(0, Math.floor(Number(harvestAvailability[unitId] ?? 0))));
+      }
+      return next;
+    });
+  }, [harvestAvailability]);
+
+  const clearAllHarvestFleetDraft = useCallback(() => {
+    setFleetDraft((prev) => {
+      const next = { ...prev };
+      for (const unitId of Object.keys(MAP_HARVEST_UNIT_STATS)) {
+        next[unitId] = "0";
+      }
+      return next;
+    });
+  }, []);
+
+  const setAttackFleetDraftForUnit = useCallback(
+    (unitId: string, mode: "max" | "clear") => {
+      const available = Math.max(0, Math.floor(Number(combatAvailability[unitId] ?? 0)));
+      setAttackFleetDraft((prev) => ({ ...prev, [unitId]: String(mode === "max" ? available : 0) }));
+    },
+    [combatAvailability]
+  );
+
+  const fillAllAttackFleetDraft = useCallback(() => {
+    setAttackFleetDraft((prev) => {
+      const next = { ...prev };
+      for (const [unitId, quantity] of Object.entries(combatAvailability)) {
+        next[unitId] = String(Math.max(0, Math.floor(Number(quantity ?? 0))));
+      }
+      return next;
+    });
+  }, [combatAvailability]);
+
+  const clearAllAttackFleetDraft = useCallback(() => {
+    setAttackFleetDraft((prev) => {
+      const next = { ...prev };
+      for (const unitId of Object.keys(next)) next[unitId] = "0";
+      return next;
+    });
+  }, []);
+
+  const hasValidAttackFleetSelection = useMemo(
+    () => selectedAttackHasCombatForce,
+    [selectedAttackHasCombatForce]
+  );
+
+  const buildAttackFleetPayload = useCallback(
+    (allowAutoFill = false) => {
+      const draftedRows = Object.keys(attackFleetDraft)
+        .map((unitId) => {
+          const quantity = Math.min(
+            Math.max(0, Math.floor(Number(combatAvailability[unitId] ?? 0))),
+            Math.max(0, Math.floor(Number(attackFleetDraft[unitId] ?? 0)))
+          );
+          if (quantity <= 0) return null;
+          const stats = combatInventoryById[unitId];
+          const fallback = HANGAR_UNIT_DEFS.find((entry) => entry.id === unitId);
+          const force = Math.max(0, Math.floor(Number(stats?.force ?? fallback?.force ?? 0)));
+          if (force <= 0) return null;
+          return { unitId, quantity };
+        })
+        .filter((row): row is { unitId: string; quantity: number } => Boolean(row))
+        .filter((row) => row.quantity > 0);
+      if (draftedRows.length > 0) return draftedRows;
+      if (!allowAutoFill) return [];
+      return availableAttackShipRows
+        .filter((row) => row.quantity > 0)
+        .map((row) => ({ unitId: row.unitId, quantity: row.quantity }));
+    },
+    [attackFleetDraft, availableAttackShipRows, combatAvailability, combatInventoryById]
+  );
+
+  const hasCombatCapableAutoAttackFleet = useMemo(
+    () => availableAttackShipRows.some((row) => row.quantity > 0),
+    [availableAttackShipRows]
+  );
+
   const displayedMapExpeditions = useMemo(
     () => (liveDisplayedMapExpeditions.length > 0 ? liveDisplayedMapExpeditions : (!mapLiveStateHydrated ? cachedDisplayedMapExpeditions : [])),
     [cachedDisplayedMapExpeditions, liveDisplayedMapExpeditions, mapLiveStateHydrated]
@@ -8471,6 +9341,23 @@ function SectorMapScreen({
         }))
         .filter((row) => !row.timeline.completed),
     [displayedMapExpeditions, mapNowTs]
+  );
+
+  const derivedPublicMapExpeditions = useMemo(
+    () =>
+      displayedPublicMapExpeditions
+        .map((expedition) => ({
+          expedition,
+          timeline: deriveMapExpeditionTimeline(
+            {
+              ...expedition,
+              extractionSeconds: Math.max(0, expedition.extractionEndAt - expedition.extractionStartAt)
+            } as MapExpeditionDto,
+            mapNowTs
+          )
+        }))
+        .filter((row) => !row.timeline.completed),
+    [displayedPublicMapExpeditions, mapNowTs]
   );
 
   const dailyHarvestElapsedSeconds = useMemo(
@@ -8531,6 +9418,131 @@ function SectorMapScreen({
           } => Boolean(visual)
         ),
     [derivedDisplayedMapExpeditions, displayedMapFields, selfPlanetCoords]
+  );
+
+  const publicMapMovingExpeditionVisuals = useMemo(
+    () =>
+      derivedPublicMapExpeditions
+        .map(({ expedition, timeline }) => {
+          const field = displayedMapFields.find((row) => row.id === expedition.fieldId);
+          if (!field) return null;
+          const status = timeline.status;
+          if (status !== "travel_to_field" && status !== "returning") return null;
+          const home = mapPlanetCoordsByUserId.get(expedition.playerId) ?? mapPlayerToPlanetCoordinates(expedition.playerId);
+          const fieldPoint = { x: field.x, y: field.y };
+          const returning = status === "returning";
+          const start = returning ? fieldPoint : home;
+          const target = returning ? home : fieldPoint;
+          const progress = timeline.progress;
+          const dx = target.x - start.x;
+          const dy = target.y - start.y;
+          const hostileToSelf =
+            expedition.missionKind === "attack" &&
+            normalizeMapEntityId(expedition.targetPlayerId) === normalizeMapEntityId(currentUserId);
+          return {
+            id: expedition.id,
+            status,
+            startX: start.x,
+            startY: start.y,
+            targetX: target.x,
+            targetY: target.y,
+            currentX: start.x + dx * progress,
+            currentY: start.y + dy * progress,
+            angle: Math.atan2(dy, dx) * (180 / Math.PI) + 90,
+            lineColor: hostileToSelf ? "#ff6072" : "#86d7ff",
+            haloColor: hostileToSelf ? "rgba(255, 96, 114, 0.18)" : "rgba(120, 204, 255, 0.16)",
+            shipFill: hostileToSelf ? "#ff8895" : "#8fd9ff",
+            shipStroke: hostileToSelf ? "#ffe4e8" : "#dff5ff"
+          };
+        })
+        .filter(
+          (
+            visual
+          ): visual is {
+            id: string;
+            status: string;
+            startX: number;
+            startY: number;
+            targetX: number;
+            targetY: number;
+            currentX: number;
+            currentY: number;
+            angle: number;
+            lineColor: string;
+            haloColor: string;
+            shipFill: string;
+            shipStroke: string;
+          } => Boolean(visual)
+        ),
+    [currentUserId, derivedPublicMapExpeditions, displayedMapFields, mapPlanetCoordsByUserId]
+  );
+
+  const incomingHostileFieldAttacks = useMemo(() => {
+    const selfId = normalizeMapEntityId(currentUserId);
+    if (!selfId) return [];
+    const earliestByField = new Map<
+      string,
+      {
+        fieldId: string;
+        attackerPlayerId: string;
+        attackerUsername: string;
+        impactTs: number;
+        remainingSeconds: number;
+        attackCount: number;
+      }
+    >();
+    for (const { expedition, timeline } of derivedPublicMapExpeditions) {
+      if (expedition.missionKind !== "attack") continue;
+      if (normalizeMapEntityId(expedition.targetPlayerId) !== selfId) continue;
+      if (timeline.status !== "travel_to_field") continue;
+      const remainingSeconds = Math.max(0, timeline.endAt - mapNowTs);
+      if (remainingSeconds <= 0) continue;
+      const existing = earliestByField.get(expedition.fieldId);
+      if (!existing || timeline.endAt < existing.impactTs) {
+        earliestByField.set(expedition.fieldId, {
+          fieldId: expedition.fieldId,
+          attackerPlayerId: expedition.playerId,
+          attackerUsername: String(expedition.username || expedition.playerId).trim() || expedition.playerId,
+          impactTs: timeline.endAt,
+          remainingSeconds,
+          attackCount: existing ? existing.attackCount + 1 : 1
+        });
+      } else {
+        existing.attackCount += 1;
+      }
+    }
+    return Array.from(earliestByField.values()).sort((a, b) => a.impactTs - b.impactTs);
+  }, [currentUserId, derivedPublicMapExpeditions, mapNowTs]);
+
+  const incomingHostileFieldAttackByFieldId = useMemo(() => {
+    const output: Record<
+      string,
+      {
+        fieldId: string;
+        attackerPlayerId: string;
+        attackerUsername: string;
+        impactTs: number;
+        remainingSeconds: number;
+        attackCount: number;
+      }
+    > = {};
+    for (const attack of incomingHostileFieldAttacks) {
+      output[attack.fieldId] = attack;
+    }
+    return output;
+  }, [incomingHostileFieldAttacks]);
+
+  const incomingHostileFieldAttackRows = useMemo(
+    () =>
+      incomingHostileFieldAttacks.map((attack) => {
+        const field = displayedMapFields.find((row) => row.id === attack.fieldId);
+        return {
+          ...attack,
+          fieldLabel: field ? mapFieldDisplayName(field.id, language) : mapFieldDisplayName(attack.fieldId, language),
+          fieldCoords: field ? { x: field.x, y: field.y } : null
+        };
+      }),
+    [displayedMapFields, incomingHostileFieldAttacks, language]
   );
 
   const mapExtractionVisuals = useMemo(
@@ -8666,6 +9678,12 @@ function SectorMapScreen({
       harvestRows?: Array<{ resourceId: ResourceId; amount: number }>;
       cargoUsed?: number;
       cargoCapacity?: number;
+      incomingAttack?: {
+        attackerUsername: string;
+        impactTs: number;
+        remainingSeconds: number;
+        attackCount: number;
+      };
     }> = fleets
       .map((fleet) => {
         const missionLabel = fleet.missionType === "attack"
@@ -8690,20 +9708,34 @@ function SectorMapScreen({
       const fieldName = field ? mapFieldDisplayName(field.id, language) : mapFieldDisplayName(expedition.fieldId, language);
       const fieldCoords = field ? { x: field.x, y: field.y } : undefined;
       const status = timeline.status;
-      const statusLabel = status === "extracting"
-        ? (language === "en" ? "Harvesting fleet" : "Flotte en extraction")
-        : status === "returning"
-          ? (language === "en" ? "Returning fleet" : "Flotte en retour")
-          : (language === "en" ? "Traveling fleet" : "Flotte en trajet");
-      const route = status === "extracting"
-        ? `${fieldName} - ${language === "en" ? "Harvesting in progress" : "Exploitation en cours"}`
-        : status === "returning"
+      const isAttackMission = expedition.missionKind === "attack";
+      const targetUsername = String(expedition.targetUsername || "").trim();
+      const statusLabel = isAttackMission
+        ? status === "returning"
+          ? (language === "en" ? "Returning attack fleet" : "Flotte d'attaque en retour")
+          : (language === "en" ? "Attack fleet" : "Flotte d'attaque")
+        : status === "extracting"
+          ? (language === "en" ? "Harvesting fleet" : "Flotte en extraction")
+          : status === "returning"
+            ? (language === "en" ? "Returning fleet" : "Flotte en retour")
+            : (language === "en" ? "Traveling fleet" : "Flotte en trajet");
+      const route = isAttackMission
+        ? status === "returning"
           ? `${fieldName} -> ${language === "en" ? "Your planet" : "Votre planete"}`
-          : `${language === "en" ? "Your planet" : "Votre planete"} -> ${fieldName}`;
+          : `${language === "en" ? "Your planet" : "Votre planete"} -> ${fieldName}${targetUsername ? ` • ${language === "en" ? "Target" : "Cible"} ${targetUsername}` : ""}`
+        : status === "extracting"
+          ? `${fieldName} - ${language === "en" ? "Harvesting in progress" : "Exploitation en cours"}`
+          : status === "returning"
+            ? `${fieldName} -> ${language === "en" ? "Your planet" : "Votre planete"}`
+            : `${language === "en" ? "Your planet" : "Votre planete"} -> ${fieldName}`;
       const etaTs = timeline.endAt;
       const remainingSeconds = Math.max(0, etaTs - mapNowTs);
       if (remainingSeconds <= 0) continue;
       const harvestSummary = mapInFlightHarvestSummaryById[expedition.id];
+      const incomingAttack =
+        !isAttackMission && status !== "returning"
+          ? incomingHostileFieldAttackByFieldId[expedition.fieldId]
+          : undefined;
       rows.unshift({
         id: `expedition_${expedition.id}`,
         title: statusLabel,
@@ -8717,11 +9749,19 @@ function SectorMapScreen({
         targetCoords: fieldCoords,
         harvestRows: harvestSummary?.rows ?? [],
         cargoUsed: harvestSummary?.cargoUsed ?? 0,
-        cargoCapacity: harvestSummary?.cargoCapacity ?? 0
+        cargoCapacity: harvestSummary?.cargoCapacity ?? 0,
+        incomingAttack: incomingAttack
+          ? {
+              attackerUsername: incomingAttack.attackerUsername,
+              impactTs: incomingAttack.impactTs,
+              remainingSeconds: incomingAttack.remainingSeconds,
+              attackCount: incomingAttack.attackCount
+            }
+          : undefined
       });
     }
     return rows;
-  }, [derivedDisplayedMapExpeditions, displayedMapFields, entityLabelById, fleets, language, mapInFlightHarvestSummaryById, mapNowTs]);
+  }, [derivedDisplayedMapExpeditions, displayedMapFields, entityLabelById, fleets, incomingHostileFieldAttackByFieldId, language, mapInFlightHarvestSummaryById, mapNowTs]);
 
   const mapLiveExtractionOverlays = useMemo(() => {
     const validResourceIds = new Set<ResourceId>(RESOURCE_DEFS.map((def) => def.id as ResourceId));
@@ -8832,24 +9872,41 @@ function SectorMapScreen({
     );
   }, [derivedDisplayedMapExpeditions]);
 
+  const primaryInFlightHarvestSummary = useMemo(() => {
+    const primaryId = primaryDisplayedExpedition?.expedition.id;
+    if (!primaryId) return null;
+    return mapInFlightHarvestSummaryById[primaryId] ?? null;
+  }, [mapInFlightHarvestSummaryById, primaryDisplayedExpedition]);
+
   const mapLiveCollectedRows = useMemo(
     () => {
-      if (mapLiveExtractionOverlays.length <= 0) return [];
       const primaryId = primaryDisplayedExpedition?.expedition.id;
+      if (primaryId && primaryInFlightHarvestSummary?.rows?.length) return primaryInFlightHarvestSummary.rows;
+      if (mapLiveExtractionOverlays.length <= 0) return [];
       if (!primaryId) return mapLiveExtractionOverlays[0].rows;
       const overlay = mapLiveExtractionOverlays.find((row) => row.id === primaryId);
       return overlay ? overlay.rows : mapLiveExtractionOverlays[0].rows;
     },
-    [mapLiveExtractionOverlays, primaryDisplayedExpedition]
+    [mapLiveExtractionOverlays, primaryDisplayedExpedition, primaryInFlightHarvestSummary]
   );
   const primaryLiveExtractionOverlay = useMemo(
     () => {
+      if (primaryInFlightHarvestSummary) {
+        return {
+          id: primaryDisplayedExpedition?.expedition.id || "",
+          x: 0,
+          y: 0,
+          rows: primaryInFlightHarvestSummary.rows,
+          cargoUsed: primaryInFlightHarvestSummary.cargoUsed,
+          cargoCapacity: primaryInFlightHarvestSummary.cargoCapacity
+        };
+      }
       if (mapLiveExtractionOverlays.length <= 0) return null;
       const primaryId = primaryDisplayedExpedition?.expedition.id;
       if (!primaryId) return mapLiveExtractionOverlays[0] ?? null;
       return mapLiveExtractionOverlays.find((row) => row.id === primaryId) ?? mapLiveExtractionOverlays[0] ?? null;
     },
-    [mapLiveExtractionOverlays, primaryDisplayedExpedition]
+    [mapLiveExtractionOverlays, primaryDisplayedExpedition, primaryInFlightHarvestSummary]
   );
 
   const primaryMapExpedition = primaryDisplayedExpedition?.expedition ?? null;
@@ -9207,7 +10264,7 @@ function SectorMapScreen({
     setActionMode("none");
   };
 
-  const applyMapPayload = (source: Record<string, any>) => {
+  function applyMapPayload(source: Record<string, any>) {
     const rowsRaw = Array.isArray(source?.fields) ? source.fields : [];
     const nextFields: MapFieldServerDto[] = rowsRaw
       .map((row: any) => {
@@ -9262,6 +10319,12 @@ function SectorMapScreen({
       setMapExpedition(null);
     }
 
+    const publicExpeditionsRaw = Array.isArray(source?.publicExpeditions) ? source.publicExpeditions : [];
+    const nextPublicExpeditions = publicExpeditionsRaw
+      .map((row: any) => parsePublicMapExpeditionRow(parseJsonObject(row)))
+      .filter((row: MapPublicExpeditionDto | null): row is MapPublicExpeditionDto => Boolean(row));
+    setMapPublicExpeditions(nextPublicExpeditions);
+
     if (Array.isArray(source?.harvestInventory)) {
       const nextHarvestInventory: MapHarvestShipRow[] = source.harvestInventory
         .map((row: any) => ({
@@ -9273,6 +10336,10 @@ function SectorMapScreen({
         }))
         .filter((row: MapHarvestShipRow) => row.unitId.length > 0 && row.quantity > 0);
       setMapHarvestInventory(nextHarvestInventory);
+    }
+
+    if (Array.isArray(source?.combatInventory)) {
+      setMapCombatInventory(parseMapCombatInventoryRows(source.combatInventory));
     }
 
     if (Array.isArray(source?.reports)) {
@@ -9314,6 +10381,7 @@ function SectorMapScreen({
   useEffect(() => {
     setMapCacheHydrated(false);
     setMapLiveStateHydrated(false);
+    lastPersistedMapCacheJsonRef.current = "";
   }, [currentUserId, mapCacheKey]);
 
   useLayoutEffect(() => {
@@ -9364,11 +10432,16 @@ function SectorMapScreen({
         fields: displayedMapFields,
         expedition: liveDisplayedMapExpeditions[0] ?? null,
         expeditions: liveDisplayedMapExpeditions,
+        publicExpeditions: displayedPublicMapExpeditions,
         reports: mapReports,
         harvestInventory: mapHarvestInventory,
+        combatInventory: mapCombatInventory,
         maxActiveExpeditions: mapServerMaxActiveExpeditions
       };
-      sessionStorage.setItem(mapCacheKey, JSON.stringify(nextCachePayload));
+      const nextCacheJson = JSON.stringify(nextCachePayload);
+      if (lastPersistedMapCacheJsonRef.current === nextCacheJson) return;
+      lastPersistedMapCacheJsonRef.current = nextCacheJson;
+      sessionStorage.setItem(mapCacheKey, nextCacheJson);
       onPersistMapCache?.(nextCachePayload);
     } catch {
       // ignore storage quota errors
@@ -9378,8 +10451,10 @@ function SectorMapScreen({
     mapCacheKey,
     displayedMapFields,
     displayedMapPlayers,
+    displayedPublicMapExpeditions,
     liveDisplayedMapExpeditions,
     mapHarvestInventory,
+    mapCombatInventory,
     mapReports,
     mapServerMaxActiveExpeditions,
     mapCacheHydrated,
@@ -9437,10 +10512,38 @@ function SectorMapScreen({
     return () => {
       cancelled = true;
     };
-  }, [active, applyMapPayload, client, commandementEscadreLevel, displayedMapExpeditions, mapActionBusy, mapNowTs, session]);
+  }, [active, client, commandementEscadreLevel, displayedMapExpeditions, mapActionBusy, mapNowTs, session]);
 
   const launchHarvestOnField = async (fieldId: string) => {
     if (!session) return;
+    const liveField = displayedMapFields.find((row) => String(row.id || "") === String(fieldId || ""));
+    const liveOccupiedByPlayerId = normalizeMapEntityId(liveField?.occupiedByPlayerId);
+    const occupiedBySelf =
+      Boolean(liveField?.isOccupied) &&
+      Boolean(liveOccupiedByPlayerId) &&
+      liveOccupiedByPlayerId === normalizeMapEntityId(currentUserId);
+    const occupiedByRival =
+      Boolean(liveField?.isOccupied) &&
+      Boolean(liveOccupiedByPlayerId) &&
+      liveOccupiedByPlayerId !== normalizeMapEntityId(currentUserId);
+
+    if (occupiedBySelf) {
+      setMapActionError(
+        l(
+          "Votre flotte exploite deja ce champ. Utilisez Retour dans Flottes en vol.",
+          "Your fleet is already harvesting this field. Use Return in Fleets in flight."
+        )
+      );
+      setActionMode("none");
+      return;
+    }
+
+    if (occupiedByRival) {
+      await launchAttackOnField(fieldId, { autoFromHarvest: true, allowAutoFill: true });
+      setActionMode("none");
+      return;
+    }
+
     const fleetPayload = Object.keys(fleetDraft)
       .map((unitId) => ({
         unitId,
@@ -9486,9 +10589,17 @@ function SectorMapScreen({
       }
       const detailLower = String(detail || "").toLowerCase();
       if (detailLower.includes("resource field is already occupied")) {
+        const autoAttackLaunched = await launchAttackOnField(fieldId, {
+          autoFromHarvest: true,
+          allowAutoFill: true,
+          keepBusy: true
+        });
+        if (autoAttackLaunched) {
+          return;
+        }
         detail = l(
-          "Ce champ est deja occupe. Choisissez un champ libre.",
-          "This field is already occupied. Choose a free field."
+          "Ce champ est deja occupe et aucune flotte de combat automatique n'est disponible.",
+          "This field is already occupied and no automatic combat fleet is available."
         );
       } else if (detailLower.includes("no harvestable resources unlocked for this field")) {
         detail = l(
@@ -9499,6 +10610,11 @@ function SectorMapScreen({
         detail = l(
           "Nombre maximal de flottes actives atteint pour votre niveau de Commandement d'Escadre.",
           "Maximum active fleet slots reached for your Squadron Command level."
+        );
+      } else if (detailLower.includes("not enough credits for fleet fuel")) {
+        detail = l(
+          "Credits insuffisants pour payer le carburant de cette mission.",
+          "Not enough credits to pay this mission fuel cost."
         );
       }
       setMapActionError(
@@ -9536,6 +10652,97 @@ function SectorMapScreen({
     } finally {
       setMapActionBusy(false);
       setActionMode("none");
+    }
+  }
+
+  const launchAttackOnField = async (
+    fieldId: string,
+    options?: { autoFromHarvest?: boolean; allowAutoFill?: boolean; keepBusy?: boolean }
+  ) => {
+    if (!session) return;
+    const fleetPayload = buildAttackFleetPayload(Boolean(options?.allowAutoFill));
+    if (fleetPayload.length <= 0) {
+      setMapActionError(
+        options?.autoFromHarvest
+          ? l(
+              "Champ occupe : aucune escadre de combat disponible pour lancer une interception automatique.",
+              "Occupied field: no combat squadron is available to launch an automatic interception."
+            )
+          : l(
+              "Aucun vaisseau de combat disponible dans votre stock serveur.",
+              "No combat ship is currently available in your server stock."
+            )
+      );
+      return false;
+    }
+    const payloadForce = fleetPayload.reduce((sum, row) => {
+      const unitId = String(row?.unitId || "").trim();
+      const quantity = Math.max(0, Math.floor(Number(row?.quantity ?? 0)));
+      if (!unitId || quantity <= 0) return sum;
+      const stats = combatInventoryById[unitId];
+      const fallback = HANGAR_UNIT_DEFS.find((entry) => entry.id === unitId);
+      const force = Math.max(0, Math.floor(Number(stats?.force ?? fallback?.force ?? 0)));
+      return sum + force * quantity;
+    }, 0);
+    if (payloadForce <= 0) {
+      setMapActionError(
+        l(
+          "Attaque impossible : selectionnez au moins un vaisseau de combat offensif. Les transporteurs seuls ne peuvent pas attaquer.",
+          "Attack unavailable: select at least one combat ship. Transports alone cannot attack."
+        )
+      );
+      return false;
+    }
+    try {
+      if (!options?.keepBusy) setMapActionBusy(true);
+      setMapActionError("");
+      const rpc = await client.rpc(
+        session,
+        "rpc_map_fields_attack",
+        JSON.stringify({ fieldId, fleet: fleetPayload })
+      );
+      const parsed = parseJsonObject((rpc as any)?.payload ?? rpc);
+      const nested = parseJsonObject(parsed?.payload);
+      const source = Object.keys(nested).length > 0 ? nested : parsed;
+      applyMapPayload(source);
+      return true;
+    } catch (err) {
+      let detail = extractRpcErrorMessage(err);
+      if (!detail && err instanceof Response) {
+        try {
+          const raw = await err.text();
+          const parsed = parseJsonObject(raw);
+          detail =
+            String(parsed.message || parsed.error || parsed.error_message || "").trim() ||
+            raw.trim();
+        } catch {
+          // noop
+        }
+      }
+      const detailLower = String(detail || "").toLowerCase();
+      if (detailLower.includes("attack fleet has no combat-capable ships")) {
+        detail = l(
+          "Aucun vaisseau de combat offensif n'est selectionne. Les transporteurs ne peuvent pas attaquer.",
+          "No offensive combat ship is selected. Transports cannot attack."
+        );
+      } else if (detailLower.includes("not enough credits for fleet fuel")) {
+        detail = l(
+          "Credits insuffisants pour payer le carburant de cette mission.",
+          "Not enough credits to pay this mission fuel cost."
+        );
+      }
+      setMapActionError(
+        detail
+          ? `${l("Attaque impossible", "Attack unavailable")}: ${detail}`
+          : l("Attaque impossible pour le moment.", "Unable to attack right now.")
+      );
+      if (import.meta.env.DEV) {
+        // eslint-disable-next-line no-console
+        console.error("map attack error", err);
+      }
+      return false;
+    } finally {
+      if (!options?.keepBusy) setMapActionBusy(false);
     }
   };
 
@@ -9687,6 +10894,33 @@ function SectorMapScreen({
         <div className="sector-stars layer-a" style={{ backgroundPosition: `${pan.x * 0.18}px ${pan.y * 0.18}px` }} />
         <div className="sector-stars layer-b" style={{ backgroundPosition: `${pan.x * 0.4}px ${pan.y * 0.4}px` }} />
         <div className="sector-nebula" />
+        {incomingHostileFieldAttacks.length > 0 ? (
+          <div className="sector-under-attack-overlay" aria-hidden="true">
+            <div className="sector-under-attack-frame" />
+            <div className="sector-under-attack-stack">
+              {incomingHostileFieldAttackRows.map((attack) => (
+                <div key={`incoming_attack_${attack.fieldId}_${attack.impactTs}`} className="sector-under-attack-banner">
+                  <AlertCircle size={16} />
+                  <div className="sector-under-attack-banner-copy">
+                    <strong>{l("Alerte combat", "Combat alert")}</strong>
+                    <small>
+                      {attack.fieldLabel}
+                      {attack.fieldCoords ? ` [${attack.fieldCoords.x}, ${attack.fieldCoords.y}]` : ""}
+                    </small>
+                  </div>
+                  <div className="sector-under-attack-banner-metrics">
+                    <span>
+                      {l("Impact", "Impact")} {formatFlightEtaClock(attack.impactTs)}
+                    </span>
+                    <span>
+                      {l("Dans", "In")} {formatFlightCountdown(attack.remainingSeconds)}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
         <div className="sector-top-stack">
           <aside
             className="sector-flight-overlay"
@@ -9722,6 +10956,26 @@ function SectorMapScreen({
                         {row.remainingSeconds == null ? <small>{row.detail}</small> : null}
                       </header>
                       <p>{row.route}</p>
+                      {row.incomingAttack ? (
+                        <div className="sector-flight-attack-alert">
+                          <div className="sector-flight-attack-alert-head">
+                            <AlertCircle size={14} />
+                            <strong>{l("Flotte attaquante", "Attacking fleet")}</strong>
+                          </div>
+                          <div className="sector-flight-attack-alert-target">
+                            <span>{row.incomingAttack.attackerUsername}</span>
+                            {row.incomingAttack.attackCount > 1 ? (
+                              <small>+{row.incomingAttack.attackCount - 1}</small>
+                            ) : null}
+                          </div>
+                          <div className="sector-flight-attack-alert-times">
+                            <span>{l("Impact", "Impact")}</span>
+                            <strong>{formatFlightEtaClock(row.incomingAttack.impactTs)}</strong>
+                            <span>{l("Dans", "In")}</span>
+                            <strong>{formatFlightCountdown(row.incomingAttack.remainingSeconds)}</strong>
+                          </div>
+                        </div>
+                      ) : null}
                       {row.harvestRows && row.harvestRows.length > 0 ? (
                         <div className="sector-flight-resource-meta">
                           <span className="sector-flight-resource-title">
@@ -9730,7 +10984,7 @@ function SectorMapScreen({
                           <div className="sector-flight-resource-list">
                             {row.harvestRows.map((resourceRow) => (
                               <div key={`${row.id}_${resourceRow.resourceId}`} className="sector-flight-resource-row">
-                                <span>{resourceDisplayName(resourceRow.resourceId, language)}</span>
+                                <ResourceTextWithIcon resourceId={resourceRow.resourceId} language={language} />
                                 <strong>+{resourceRow.amount.toLocaleString()}</strong>
                               </div>
                             ))}
@@ -9901,6 +11155,36 @@ function SectorMapScreen({
               </g>
             ))}
 
+            {publicMapMovingExpeditionVisuals.map((visual) => (
+              <g key={`map_public_expedition_${visual.id}`} className="sector-map-expedition-path public">
+                <line
+                  x1={visual.startX}
+                  y1={visual.startY}
+                  x2={visual.targetX}
+                  y2={visual.targetY}
+                  stroke={visual.lineColor}
+                  strokeWidth="2.2"
+                  strokeDasharray="11 10"
+                  opacity="0.34"
+                />
+                <circle
+                  cx={visual.currentX}
+                  cy={visual.currentY}
+                  r="10"
+                  fill={visual.haloColor}
+                />
+                <g transform={`translate(${visual.currentX} ${visual.currentY}) rotate(${visual.angle})`}>
+                  <path
+                    d="M 0 -10 L 6 7 L 0 3 L -6 7 Z"
+                    fill={visual.shipFill}
+                    stroke={visual.shipStroke}
+                    strokeWidth="1"
+                    className="sector-map-ship"
+                  />
+                </g>
+              </g>
+            ))}
+
             {mapExtractionVisuals.map((visual) => (
               <g key={`map_extraction_${visual.id}`} className="sector-map-expedition-path">
                 <circle
@@ -9936,7 +11220,7 @@ function SectorMapScreen({
                 <>
                   {overlay.rows.map((row) => (
                     <div key={`field_live_gain_${overlay.id}_${row.resourceId}`} className="sector-field-live-row">
-                      <span>{resourceDisplayName(row.resourceId, language)}</span>
+                      <ResourceTextWithIcon resourceId={row.resourceId} language={language} />
                       <strong>+{row.amount.toLocaleString()}</strong>
                     </div>
                   ))}
@@ -9986,6 +11270,16 @@ function SectorMapScreen({
               >
                 {selected ? <span className="sector-select-ring" /> : null}
                 {targetable ? <span className="sector-target-ring" /> : null}
+
+                {entity.type === "resource" &&
+                entity.isOccupied &&
+                entity.occupiedByUsername &&
+                normalizeMapEntityId(entity.occupiedByPlayerId || "") !== normalizeMapEntityId(currentUserId) ? (
+                  <>
+                    <span className="sector-harvester-warning" aria-hidden="true">!</span>
+                    <span className="sector-harvester-tag">{entity.occupiedByUsername}</span>
+                  </>
+                ) : null}
 
                 {entity.type === "station" ? (
                   <span className={`sector-core station-${entity.hue} ${entity.isPlayer ? "player" : ""}`}>
@@ -10078,7 +11372,7 @@ function SectorMapScreen({
                 </div>
 
             <div className="sector-panel">
-              <h3><Hourglass size={15} /> {l("Exploitation", "Harvesting")}</h3>
+              <h3><Hourglass size={15} /> {primaryMapExpedition?.missionKind === "attack" ? l("Interception", "Interception") : l("Exploitation", "Harvesting")}</h3>
               {mapLoadError ? <p className="sector-map-error">{mapLoadError}</p> : null}
               {mapActionError ? <p className="sector-map-error">{mapActionError}</p> : null}
               {primaryMapExpedition && primaryExpeditionState ? (
@@ -10093,6 +11387,14 @@ function SectorMapScreen({
                           : l("Retour", "Returning")}
                     </strong>
                   </div>
+                  {primaryMapExpedition.missionKind === "attack" ? (
+                    <div>
+                      <span>{l("Cible", "Target")}</span>
+                      <strong>
+                        {String(primaryMapExpedition.targetUsername || "").trim() || l("Flotte ennemie", "Enemy fleet")}
+                      </strong>
+                    </div>
+                  ) : null}
                   <div>
                     <span>{l("Fin estimee", "ETA")}</span>
                     <strong>
@@ -10100,10 +11402,29 @@ function SectorMapScreen({
                     </strong>
                   </div>
                   <div>
-                    <span>{l("Vitesse de collecte", "Harvest speed")}</span>
-                    <strong>{primaryMapExpedition.totalHarvestSpeed.toLocaleString()}</strong>
+                    <span>{primaryMapExpedition.missionKind === "attack" ? l("Capacite de butin", "Loot capacity") : l("Vitesse de collecte", "Harvest speed")}</span>
+                    <strong>
+                      {primaryMapExpedition.missionKind === "attack"
+                        ? primaryMapExpedition.totalTransportCapacity.toLocaleString()
+                        : primaryMapExpedition.totalHarvestSpeed.toLocaleString()}
+                    </strong>
                   </div>
-                  {primaryExpeditionState.status === "extracting" ? (
+                  {primaryMapExpedition.missionKind === "attack" ? (
+                    mapLiveCollectedRows.length > 0 ? (
+                      <div className="sector-map-live-gains">
+                        <p>{l("Butin embarque", "Loot onboard")}</p>
+                        {mapLiveCollectedRows.map((row) => (
+                          <div key={`map_attack_loot_${row.resourceId}`} className="sector-map-live-gain-row">
+                            <ResourceTextWithIcon resourceId={row.resourceId} language={language} />
+                            <strong>+{row.amount.toLocaleString()}</strong>
+                          </div>
+                        ))}
+                        <small className={`sector-field-live-capacity ${primaryMapExpedition.totalTransportCapacity > 0 && (primaryLiveExtractionOverlay?.cargoUsed ?? 0) >= primaryMapExpedition.totalTransportCapacity ? "full" : ""}`}>
+                          {l("Soute", "Cargo")}: {(primaryLiveExtractionOverlay?.cargoUsed ?? 0).toLocaleString()} / {primaryMapExpedition.totalTransportCapacity.toLocaleString()}
+                        </small>
+                      </div>
+                    ) : null
+                  ) : primaryExpeditionState.status === "extracting" ? (
                     <div className="sector-map-live-gains">
                       <p>{l("Ressources cumulees", "Accumulated resources")}</p>
                       {mapLiveCollectedRows.length <= 0 ? (
@@ -10112,7 +11433,7 @@ function SectorMapScreen({
                         <>
                           {mapLiveCollectedRows.map((row) => (
                             <div key={`map_gain_${row.resourceId}`} className="sector-map-live-gain-row">
-                              <span>{resourceDisplayName(row.resourceId, language)}</span>
+                              <ResourceTextWithIcon resourceId={row.resourceId} language={language} />
                               <strong>+{row.amount.toLocaleString()}</strong>
                             </div>
                           ))}
@@ -10300,7 +11621,7 @@ function SectorMapScreen({
                       <div><span>{l("Rendement restant", "Remaining yield")}</span><strong>{Math.max(0, Math.floor(Number(selectedEntity.amount ?? 0))).toLocaleString()}</strong></div>
                       {(selectedEntity.resources ?? []).map((row) => (
                         <div key={`rf_res_${selectedEntity.id}_${row.resourceId}`}>
-                          <span>{resourceDisplayName(row.resourceId, language)}</span>
+                          <ResourceTextWithIcon resourceId={row.resourceId} language={language} />
                           <strong>{Math.floor(row.remainingAmount).toLocaleString()} / {Math.floor(row.totalAmount).toLocaleString()}</strong>
                         </div>
                       ))}
@@ -10313,6 +11634,7 @@ function SectorMapScreen({
                           <div><span>{l("Trajet estime", "Estimated travel")}</span><strong>{Math.floor(selectedFieldPlan.travelSeconds / 60)}m {selectedFieldPlan.travelSeconds % 60}s</strong></div>
                           <div><span>{l("Extraction estimee", "Estimated extraction")}</span><strong>{Math.floor(selectedFieldPlan.extractionSeconds / 60)}m</strong></div>
                           <div><span>{l("Capacite cargo", "Cargo capacity")}</span><strong>{selectedFieldPlan.totalCapacity.toLocaleString()}</strong></div>
+                          <div><span>{l("Carburant mission", "Mission fuel")}</span><strong>{selectedFieldPlan.fuelCredits.toLocaleString()} {l("Credits", "Credits")}</strong></div>
                         </>
                       ) : null}
                       {selectedEntity.fieldId && !selectedEntity.isOccupied ? (
@@ -10374,12 +11696,42 @@ function SectorMapScreen({
                         </div>
                       ) : null}
                       {selectedEntity.fieldId && selectedEntity.isOccupied ? (
-                        <p className="sector-empty">
-                          {l(
-                            "Ce champ est deja occupe. Choisissez un champ libre.",
-                            "This field is already occupied. Choose a free field."
-                          )}
-                        </p>
+                        fieldPopupOccupiedByRival ? (
+                          <div className="sector-field-actions">
+                            <div className="sector-field-actions-head">
+                              <p>{l("Champ rival", "Rival field")}</p>
+                              <span className="sector-field-slot-pill alert">
+                                {selectedEntity.occupiedByUsername || l("Rivale", "Rival")}
+                              </span>
+                            </div>
+                            <button
+                              type="button"
+                              className="sector-war-btn attack"
+                              onClick={() => void launchAttackOnField(selectedEntity.fieldId!, { autoFromHarvest: true, allowAutoFill: true })}
+                              disabled={mapActionBusy || !hasCombatCapableAutoAttackFleet}
+                            >
+                              {mapActionBusy ? l("Engagement...", "Engaging...") : l("Attaquer le champ", "Attack the field")}
+                            </button>
+                            <p className="sector-empty">
+                              {hasCombatCapableAutoAttackFleet
+                                ? l(
+                                    "Une tentative de collecte sur un champ rival est convertie en attaque automatique.",
+                                    "A harvesting attempt on a rival field is converted into an automatic attack."
+                                  )
+                                : l(
+                                    "Aucune escadre de combat disponible pour une attaque automatique.",
+                                    "No combat squadron is available for an automatic attack."
+                                  )}
+                            </p>
+                          </div>
+                        ) : (
+                          <p className="sector-empty">
+                            {l(
+                              "Ce champ est deja occupe. Choisissez un champ libre.",
+                              "This field is already occupied. Choose a free field."
+                            )}
+                          </p>
+                        )
                       ) : null}
                     </>
                   )}
@@ -10438,15 +11790,36 @@ function SectorMapScreen({
                     )}
                   </p>
                 ) : (
-                  <div className="sector-field-resource-strip">
-                    {(fieldPopupEntity.resources ?? []).map((row) => (
-                      <article key={`rf_modal_res_${fieldPopupEntity.id}_${row.resourceId}`} className="sector-field-resource-card">
-                        <span>{resourceDisplayName(row.resourceId, language)}</span>
-                        <strong>{Math.floor(row.remainingAmount).toLocaleString()}</strong>
-                        <small>{l("sur", "of")} {Math.floor(row.totalAmount).toLocaleString()}</small>
+                  <>
+                    <div className="sector-field-brief">
+                      <article className="sector-field-brief-card">
+                        <span>{l("Ressources detectees", "Detected resources")}</span>
+                        <strong>{fieldPopupResourceCount.toLocaleString()}</strong>
                       </article>
-                    ))}
-                  </div>
+                      <article className="sector-field-brief-card">
+                        <span>{l("Volume restant", "Remaining volume")}</span>
+                        <strong>{fieldPopupRemainingTotal.toLocaleString()}</strong>
+                      </article>
+                      <article className="sector-field-brief-card">
+                        <span>{l("Travail restant", "Remaining work")}</span>
+                        <strong>{Math.max(0, Math.floor(Number(fieldPopupEntity.remainingExtractionWork ?? 0))).toLocaleString()}</strong>
+                      </article>
+                    </div>
+                    <details className="sector-field-spoiler">
+                      <summary>{l("Contenu du champ", "Field contents")}</summary>
+                      <div className="sector-field-spoiler-content">
+                        <div className="sector-field-resource-strip">
+                          {(fieldPopupEntity.resources ?? []).map((row) => (
+                            <article key={`rf_modal_res_${fieldPopupEntity.id}_${row.resourceId}`} className="sector-field-resource-card">
+                              <ResourceTextWithIcon resourceId={row.resourceId} language={language} className="sector-field-resource-label" />
+                              <strong>{Math.floor(row.remainingAmount).toLocaleString()}</strong>
+                              <small>{l("sur", "of")} {Math.floor(row.totalAmount).toLocaleString()}</small>
+                            </article>
+                          ))}
+                        </div>
+                      </div>
+                    </details>
+                  </>
                 )}
               </section>
 
@@ -10462,51 +11835,31 @@ function SectorMapScreen({
                     </span>
                   </div>
 
-                  <div className="sector-field-compare">
-                    {["pegase", "argo", "arche_spatiale"].map((unitId) => {
-                      const stats = MAP_HARVEST_UNIT_STATS[unitId];
-                      const shipImage = HANGAR_SHIP_IMAGE_MAP[unitId];
-                      const maxHarvest = Math.max(...["pegase", "argo", "arche_spatiale"].map((id) => Number(MAP_HARVEST_UNIT_STATS[id]?.harvestSpeed ?? 0)));
-                      const maxCargo = Math.max(...["pegase", "argo", "arche_spatiale"].map((id) => Number(MAP_HARVEST_UNIT_STATS[id]?.harvestCapacity ?? 0)));
-                      const maxSpeed = Math.max(...["pegase", "argo", "arche_spatiale"].map((id) => Number(MAP_HARVEST_UNIT_STATS[id]?.mapSpeed ?? 0)));
-                      return (
-                        <article key={`fleet_compare_${unitId}`} className={`sector-field-compare-card ${unitId.replace(/_/g, "-")}`}>
-                          <div className="sector-field-compare-head">
-                            {shipImage ? (
-                              <img
-                                src={shipImage}
-                                alt={hangarUnitDisplayName(unitId, unitId, language)}
-                                className="sector-field-compare-ship"
-                              />
-                            ) : null}
-                            <div>
-                              <strong>{hangarUnitDisplayName(unitId, unitId, language)}</strong>
-                              <small>{hangarUnitDisplayDescription(unitId, unitId, language)}</small>
-                            </div>
-                          </div>
-                          <div className="sector-field-compare-meters">
-                            <div>
-                              <span>{l("Recolte", "Harvest")}</span>
-                              <b>{Math.max(0, Math.floor(Number(stats?.harvestSpeed ?? 0)))}</b>
-                              <i><em style={{ width: `${maxHarvest > 0 ? (Number(stats?.harvestSpeed ?? 0) / maxHarvest) * 100 : 0}%` }} /></i>
-                            </div>
-                            <div>
-                              <span>{l("Cargo", "Cargo")}</span>
-                              <b>{Math.max(0, Math.floor(Number(stats?.harvestCapacity ?? 0))).toLocaleString()}</b>
-                              <i><em style={{ width: `${maxCargo > 0 ? (Number(stats?.harvestCapacity ?? 0) / maxCargo) * 100 : 0}%` }} /></i>
-                            </div>
-                            <div>
-                              <span>{l("Vitesse", "Speed")}</span>
-                              <b>{Math.max(0, Math.floor(Number(stats?.mapSpeed ?? 0)))}</b>
-                              <i><em style={{ width: `${maxSpeed > 0 ? (Number(stats?.mapSpeed ?? 0) / maxSpeed) * 100 : 0}%` }} /></i>
-                            </div>
-                          </div>
-                        </article>
-                      );
-                    })}
+                  <div className="sector-field-action-row">
+                    <button type="button" className="sector-field-quick-fill" onClick={fillAllHarvestFleetDraft}>
+                      {l("Tout envoyer", "Send all")}
+                    </button>
+                    <button type="button" className="sector-field-quick-fill subtle" onClick={clearAllHarvestFleetDraft}>
+                      {l("Reinitialiser", "Reset")}
+                    </button>
+                    {["pegase", "argo", "arche_spatiale"].map((unitId) => (
+                      <button
+                        key={`fill_${unitId}`}
+                        type="button"
+                        className="sector-field-quick-fill subtle"
+                        onClick={() => setHarvestFleetDraftForUnit(unitId, "max")}
+                        title={hangarUnitDisplayDescription(unitId, unitId, language)}
+                      >
+                        {l("Tout", "All")} {hangarUnitDisplayName(unitId, unitId, language)}
+                      </button>
+                    ))}
                   </div>
 
                   <div className="sector-field-command-stats">
+                    <article>
+                      <span>{l("Distance", "Distance")}</span>
+                      <strong>{selectedFieldPlan ? `${Math.round(selectedFieldPlan.distance).toLocaleString()} u` : "--"}</strong>
+                    </article>
                     <article>
                       <span>{l("Trajet estime", "Estimated travel")}</span>
                       <strong>
@@ -10531,7 +11884,62 @@ function SectorMapScreen({
                       <span>{l("Debit total", "Total harvest speed")}</span>
                       <strong>{selectedFieldPlan ? selectedFieldPlan.totalHarvestSpeed.toLocaleString() : "--"}</strong>
                     </article>
+                    <article>
+                      <span>{l("Carburant", "Fuel")}</span>
+                      <strong>
+                        {selectedFieldPlan ? `${selectedFieldPlan.fuelCredits.toLocaleString()} ${l("Credits", "Credits")}` : "--"}
+                      </strong>
+                    </article>
                   </div>
+
+                  <details className="sector-field-spoiler">
+                    <summary>{l("Comparer les coques de collecte", "Compare harvesting hulls")}</summary>
+                    <div className="sector-field-spoiler-content">
+                      <div className="sector-field-compare">
+                        {["pegase", "argo", "arche_spatiale"].map((unitId) => {
+                          const stats = MAP_HARVEST_UNIT_STATS[unitId];
+                          const shipImage = HANGAR_SHIP_IMAGE_MAP[unitId];
+                          const maxHarvest = Math.max(...["pegase", "argo", "arche_spatiale"].map((id) => Number(MAP_HARVEST_UNIT_STATS[id]?.harvestSpeed ?? 0)));
+                          const maxCargo = Math.max(...["pegase", "argo", "arche_spatiale"].map((id) => Number(MAP_HARVEST_UNIT_STATS[id]?.harvestCapacity ?? 0)));
+                          const maxSpeed = Math.max(...["pegase", "argo", "arche_spatiale"].map((id) => Number(MAP_HARVEST_UNIT_STATS[id]?.mapSpeed ?? 0)));
+                          return (
+                            <article key={`fleet_compare_${unitId}`} className={`sector-field-compare-card ${unitId.replace(/_/g, "-")}`}>
+                              <div className="sector-field-compare-head">
+                                {shipImage ? (
+                                  <img
+                                    src={shipImage}
+                                    alt={hangarUnitDisplayName(unitId, unitId, language)}
+                                    className="sector-field-compare-ship"
+                                  />
+                                ) : null}
+                                <div>
+                                  <strong>{hangarUnitDisplayName(unitId, unitId, language)}</strong>
+                                  <small>{hangarUnitDisplayDescription(unitId, unitId, language)}</small>
+                                </div>
+                              </div>
+                              <div className="sector-field-compare-meters">
+                                <div>
+                                  <span>{l("Recolte", "Harvest")}</span>
+                                  <b>{Math.max(0, Math.floor(Number(stats?.harvestSpeed ?? 0)))}</b>
+                                  <i><em style={{ width: `${maxHarvest > 0 ? (Number(stats?.harvestSpeed ?? 0) / maxHarvest) * 100 : 0}%` }} /></i>
+                                </div>
+                                <div>
+                                  <span>{l("Cargo", "Cargo")}</span>
+                                  <b>{Math.max(0, Math.floor(Number(stats?.harvestCapacity ?? 0))).toLocaleString()}</b>
+                                  <i><em style={{ width: `${maxCargo > 0 ? (Number(stats?.harvestCapacity ?? 0) / maxCargo) * 100 : 0}%` }} /></i>
+                                </div>
+                                <div>
+                                  <span>{l("Vitesse", "Speed")}</span>
+                                  <b>{Math.max(0, Math.floor(Number(stats?.mapSpeed ?? 0)))}</b>
+                                  <i><em style={{ width: `${maxSpeed > 0 ? (Number(stats?.mapSpeed ?? 0) / maxSpeed) * 100 : 0}%` }} /></i>
+                                </div>
+                              </div>
+                            </article>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </details>
 
                   <div className="sector-field-command-grid">
                     {["argo", "pegase", "arche_spatiale"].map((unitId) => {
@@ -10585,6 +11993,25 @@ function SectorMapScreen({
                             <span className="sector-field-unit-tag">{available > 0 ? l("Pret", "Ready") : l("Vide", "Empty")}</span>
                           </div>
 
+                          <div className="sector-field-unit-toolbar">
+                            <button
+                              type="button"
+                              className="sector-field-mini-btn"
+                              onClick={() => setHarvestFleetDraftForUnit(unitId, "max")}
+                              disabled={mapActionBusy || available <= 0}
+                            >
+                              MAX
+                            </button>
+                            <button
+                              type="button"
+                              className="sector-field-mini-btn subtle"
+                              onClick={() => setHarvestFleetDraftForUnit(unitId, "clear")}
+                              disabled={mapActionBusy || currentQty <= 0}
+                            >
+                              {l("RAZ", "CLR")}
+                            </button>
+                          </div>
+
                           <div className="sector-field-unit-stats">
                             <span>
                               <small>{l("Recolte", "Harvest")}</small>
@@ -10611,7 +12038,7 @@ function SectorMapScreen({
                             <input
                               type="number"
                               min={0}
-                              max={available}
+                                    max={available}
                               value={raw}
                               onChange={(e) => {
                                 const next = Math.max(0, Math.min(available, Math.floor(Number(e.target.value || 0))));
@@ -10647,6 +12074,10 @@ function SectorMapScreen({
                   </div>
 
                   <div className="sector-field-command-foot">
+                    <div className="sector-field-launch-brief">
+                      <span>{l("Distance", "Distance")} <strong>{selectedFieldPlan ? `${Math.round(selectedFieldPlan.distance).toLocaleString()} u` : "--"}</strong></span>
+                      <span>{l("Carburant", "Fuel")} <strong>{selectedFieldPlan ? `${selectedFieldPlan.fuelCredits.toLocaleString()} ${l("Credits", "Credits")}` : "--"}</strong></span>
+                    </div>
                     <button
                       type="button"
                       className="sector-war-btn sector-field-launch-btn"
@@ -10671,13 +12102,263 @@ function SectorMapScreen({
                           )
                         : !hasValidHarvestFleetSelection
                           ? l("Selectionnez au moins un vaisseau de collecte.", "Select at least one harvesting ship.")
-                          : l("Verifiez le trajet, le cargo et le debit avant d'envoyer la flotte.", "Check travel time, cargo and harvest speed before dispatching the fleet.")}
+                          : selectedFieldPlan
+                            ? l(
+                                `Verifiez le trajet, le cargo, le debit et le carburant (${selectedFieldPlan.fuelCredits.toLocaleString()} credits) avant d'envoyer la flotte.`,
+                                `Check travel time, cargo, throughput and fuel (${selectedFieldPlan.fuelCredits.toLocaleString()} credits) before dispatching the fleet.`
+                              )
+                            : l("Verifiez le trajet, le cargo et le debit avant d'envoyer la flotte.", "Check travel time, cargo and harvest speed before dispatching the fleet.")}
                     </p>
                   </div>
                 </section>
               ) : null}
 
-              {fieldPopupEntity.fieldId && fieldPopupEntity.isOccupied ? (
+              {fieldPopupEntity.fieldId && fieldPopupOccupiedByRival ? (
+                <section className="sector-field-command-panel attack">
+                  <div className="sector-field-command-head">
+                    <div>
+                      <h5>{l("Interception de flotte", "Fleet interception")}</h5>
+                      <p>
+                        {l(
+                          "Assemblez une escadre pour frapper la flotte adverse pendant l'extraction. Le combat est resolu cote serveur.",
+                          "Assemble a strike force to hit the enemy fleet during extraction. Combat is resolved server-side."
+                        )}
+                      </p>
+                    </div>
+                    <span className="sector-field-slot-pill alert">{l("Cible", "Target")} {fieldPopupEntity.occupiedByUsername || l("Rivale", "Rival")}</span>
+                  </div>
+
+                  <div className="sector-field-action-row">
+                    <button type="button" className="sector-field-quick-fill" onClick={fillAllAttackFleetDraft}>
+                      {l("Tout engager", "Engage all")}
+                    </button>
+                    <button type="button" className="sector-field-quick-fill subtle" onClick={clearAllAttackFleetDraft}>
+                      {l("Reinitialiser", "Reset")}
+                    </button>
+                  </div>
+
+                  <div className="sector-field-command-stats">
+                    <article>
+                      <span>{l("Distance", "Distance")}</span>
+                      <strong>{selectedAttackPlan ? `${Math.round(selectedAttackPlan.distance).toLocaleString()} u` : "--"}</strong>
+                    </article>
+                    <article>
+                      <span>{l("Impact estime", "Estimated impact")}</span>
+                      <strong>
+                        {selectedAttackPlan
+                          ? `${Math.floor(selectedAttackPlan.travelSeconds / 60)}m ${selectedAttackPlan.travelSeconds % 60}s`
+                          : "--"}
+                      </strong>
+                    </article>
+                    <article>
+                      <span>{l("Puissance", "Firepower")}</span>
+                      <strong>{selectedAttackPlan ? selectedAttackPlan.totalForce.toLocaleString() : "--"}</strong>
+                    </article>
+                    <article>
+                      <span>{l("Endurance", "Endurance")}</span>
+                      <strong>{selectedAttackPlan ? selectedAttackPlan.totalEndurance.toLocaleString() : "--"}</strong>
+                    </article>
+                    <article>
+                      <span>{l("Capture max", "Loot cap")}</span>
+                      <strong>{selectedAttackPlan ? selectedAttackPlan.totalLootCapacity.toLocaleString() : "--"}</strong>
+                    </article>
+                    <article>
+                      <span>{l("Vitesse moyenne", "Average speed")}</span>
+                      <strong>{selectedAttackPlan ? selectedAttackPlan.averageSpeed.toLocaleString() : "--"}</strong>
+                    </article>
+                    <article>
+                      <span>{l("Carburant", "Fuel")}</span>
+                      <strong>
+                        {selectedAttackPlan ? `${selectedAttackPlan.fuelCredits.toLocaleString()} ${l("Credits", "Credits")}` : "--"}
+                      </strong>
+                    </article>
+                  </div>
+
+                  {availableAttackShipRows.length <= 0 ? (
+                    <p className="sector-empty">
+                      {l(
+                        "Aucun vaisseau de combat offensif n'est disponible. Construisez d'abord une escadre dans le Hangar.",
+                        "No offensive combat ship is available. Build a strike wing in the Hangar first."
+                      )}
+                    </p>
+                  ) : (
+                  <div className="sector-field-command-grid">
+                    {availableAttackShipRows.map((row) => {
+                      const unitId = row.unitId;
+                      const available = Math.max(0, Math.floor(Number(row.quantity ?? 0)));
+                      const raw = attackFleetDraft[unitId] ?? "0";
+                      const currentQty = Math.max(0, Math.min(available, Math.floor(Number(raw || 0))));
+                      const shipImage = HANGAR_SHIP_IMAGE_MAP[unitId];
+                      const selectedForce = currentQty * row.force;
+                      const selectedEndurance = currentQty * row.endurance;
+                      const selectedLoot = currentQty * row.lootCapacity;
+                      return (
+                        <article
+                          key={`fleet_attack_${unitId}`}
+                          className={`sector-field-unit-card ${currentQty > 0 ? "selected" : ""} ${unitId.replace(/_/g, "-")}`}
+                        >
+                          <div className="sector-field-unit-media">
+                            {shipImage ? (
+                              <img
+                                src={shipImage}
+                                alt={hangarUnitDisplayName(unitId, unitId, language)}
+                                className="sector-field-unit-ship"
+                              />
+                            ) : null}
+                            <span className="sector-field-unit-role">
+                              {l("Escadre d'assaut", "Strike wing")}
+                            </span>
+                            <span className="sector-field-unit-available">
+                              {available.toLocaleString()} {l("disponibles", "available")}
+                            </span>
+                            <span className="sector-field-unit-count">
+                              {l("Selection", "Selected")} {currentQty}
+                            </span>
+                          </div>
+
+                          <div className="sector-field-unit-card-head">
+                            <div>
+                              <strong>{hangarUnitDisplayName(unitId, unitId, language)}</strong>
+                              <p>{hangarUnitDisplayDescription(unitId, unitId, language)}</p>
+                              <small>{l("En reserve", "In reserve")}: {available}</small>
+                            </div>
+                            <span className="sector-field-unit-tag">
+                              {available <= 0
+                                ? l("Vide", "Empty")
+                                : row.force > 0
+                                  ? l("Combat", "Combat")
+                                  : l("Transport", "Transport")}
+                            </span>
+                          </div>
+
+                          <div className="sector-field-unit-toolbar">
+                            <button
+                              type="button"
+                              className="sector-field-mini-btn"
+                              onClick={() => setAttackFleetDraftForUnit(unitId, "max")}
+                              disabled={mapActionBusy || available <= 0}
+                            >
+                              MAX
+                            </button>
+                            <button
+                              type="button"
+                              className="sector-field-mini-btn subtle"
+                              onClick={() => setAttackFleetDraftForUnit(unitId, "clear")}
+                              disabled={mapActionBusy || currentQty <= 0}
+                            >
+                              {l("RAZ", "CLR")}
+                            </button>
+                          </div>
+
+                          <div className="sector-field-unit-stats">
+                            <span>
+                              <small>{l("Force", "Force")}</small>
+                              <b>{row.force.toLocaleString()}</b>
+                            </span>
+                            <span>
+                              <small>{l("Endurance", "Endurance")}</small>
+                              <b>{row.endurance.toLocaleString()}</b>
+                            </span>
+                            <span>
+                              <small>{l("Vitesse", "Speed")}</small>
+                              <b>{row.speed.toLocaleString()}</b>
+                            </span>
+                          </div>
+
+                          <div className="sector-field-quantity-picker">
+                            <button
+                              type="button"
+                              onClick={() => setAttackFleetDraft((prev) => ({ ...prev, [unitId]: String(Math.max(0, currentQty - 1)) }))}
+                              disabled={mapActionBusy || currentQty <= 0}
+                            >
+                              -
+                            </button>
+                            <input
+                              type="number"
+                              min={0}
+                                    max={available}
+                              value={raw}
+                              onChange={(e) => {
+                                const next = Math.max(0, Math.min(available, Math.floor(Number(e.target.value || 0))));
+                                setAttackFleetDraft((prev) => ({ ...prev, [unitId]: String(next) }));
+                              }}
+                            />
+                            <button
+                              type="button"
+                              onClick={() => setAttackFleetDraft((prev) => ({ ...prev, [unitId]: String(Math.min(available, currentQty + 1)) }))}
+                              disabled={mapActionBusy || currentQty >= available}
+                            >
+                              +
+                            </button>
+                          </div>
+
+                          <div className="sector-field-unit-contrib">
+                            <span>
+                              <small>{l("Force mission", "Mission force")}</small>
+                              <b>{selectedForce.toLocaleString()}</b>
+                            </span>
+                            <span>
+                              <small>{l("Tenue mission", "Mission endurance")}</small>
+                              <b>{selectedEndurance.toLocaleString()}</b>
+                            </span>
+                            <span>
+                              <small>{l("Capture mission", "Mission loot")}</small>
+                              <b>{selectedLoot.toLocaleString()}</b>
+                            </span>
+                          </div>
+                        </article>
+                      );
+                    })}
+                  </div>
+                  )}
+
+                  <div className="sector-field-command-foot">
+                    <div className="sector-field-launch-brief danger">
+                      <span>{l("Distance", "Distance")} <strong>{selectedAttackPlan ? `${Math.round(selectedAttackPlan.distance).toLocaleString()} u` : "--"}</strong></span>
+                      <span>{l("Carburant", "Fuel")} <strong>{selectedAttackPlan ? `${selectedAttackPlan.fuelCredits.toLocaleString()} ${l("Credits", "Credits")}` : "--"}</strong></span>
+                    </div>
+                    <button
+                      type="button"
+                      className="sector-war-btn sector-field-launch-btn"
+                      onClick={() => void launchAttackOnField(fieldPopupEntity.fieldId!)}
+                      disabled={mapActionBusy || !hasValidAttackFleetSelection}
+                    >
+                      {mapActionBusy
+                        ? l("Engagement...", "Engaging...")
+                        : l("Attaquer le champ", "Attack the field")}
+                    </button>
+                    <p>
+                      {!hasValidAttackFleetSelection
+                        ? selectedAttackPlan && selectedAttackPlan.fleet.length > 0 && !selectedAttackHasCombatForce
+                          ? l(
+                              "Ajoutez au moins un vaisseau de combat. Les transporteurs seuls ne peuvent pas lancer l'assaut.",
+                              "Add at least one combat ship. Transports alone cannot launch the assault."
+                            )
+                          : l("Selectionnez au moins une escadre de combat.", "Select at least one combat squadron.")
+                        : selectedAttackPlan
+                          ? l(
+                              `Une attaque sur un champ interrompt l'exploitation. Le gagnant repart avec le cargo qu'il parvient a securiser. Carburant estime: ${selectedAttackPlan.fuelCredits.toLocaleString()} credits.`,
+                              `An attack on a field interrupts harvesting. The winner leaves with the cargo it can secure. Estimated fuel: ${selectedAttackPlan.fuelCredits.toLocaleString()} credits.`
+                            )
+                          : l(
+                              "Une attaque sur un champ interrompt l'exploitation. Le gagnant repart avec le cargo qu'il parvient a securiser.",
+                              "An attack on a field interrupts harvesting. The winner leaves with the cargo it can secure."
+                            )}
+                    </p>
+                  </div>
+                </section>
+              ) : null}
+
+              {fieldPopupEntity.fieldId && fieldPopupOccupiedBySelf ? (
+                <p className="sector-empty">
+                  {l(
+                    "Votre flotte exploite deja ce champ. Utilisez Retour dans Flottes en vol pour interrompre l'extraction.",
+                    "Your fleet is already harvesting this field. Use Return in Fleets in flight to interrupt extraction."
+                  )}
+                </p>
+              ) : null}
+
+              {fieldPopupEntity.fieldId && fieldPopupEntity.isOccupied && !fieldPopupOccupiedByRival && !fieldPopupOccupiedBySelf ? (
                 <p className="sector-empty">
                   {l(
                     "Ce champ est deja occupe. Choisissez un champ libre.",
@@ -10755,26 +12436,47 @@ function HangarScreen({
   const l = (fr: string, en: string) => (language === "en" ? en : fr);
   const unitName = (def: HangarUnitDef) => hangarUnitDisplayName(def.id, def.name, language);
   const unitDescription = (def: HangarUnitDef) => hangarUnitDisplayDescription(def.id, def.description, language);
+  const familyLabel = (family: HangarUnitFamily) => (language === "en" ? HANGAR_FAMILY_META[family].labelEn : HANGAR_FAMILY_META[family].labelFr);
+  const familySummary = (family: HangarUnitFamily) => (language === "en" ? HANGAR_FAMILY_META[family].summaryEn : HANGAR_FAMILY_META[family].summaryFr);
+  const familyTactical = (family: HangarUnitFamily) => (language === "en" ? HANGAR_FAMILY_META[family].tacticalEn : HANGAR_FAMILY_META[family].tacticalFr);
+  const familyImportance = (family: HangarUnitFamily) => (language === "en" ? HANGAR_FAMILY_META[family].importanceEn : HANGAR_FAMILY_META[family].importanceFr);
   const [tab, setTab] = useState<HangarCategory>("ship");
+  const [familyFilter, setFamilyFilter] = useState<"all" | HangarUnitFamily>("all");
   const [quantityByUnit, setQuantityByUnit] = useState<Record<string, string>>({});
   const [boostItemId, setBoostItemId] = useState("");
   const [boostQuantityInput, setBoostQuantityInput] = useState("1");
-  const resourceNameById = useMemo(
+
+  useEffect(() => {
+    setFamilyFilter("all");
+  }, [tab]);
+
+  const authoritativeResources = serverResourceAmounts ?? resourceAmounts;
+  const defs = useMemo(() => HANGAR_UNIT_DEFS.filter((unit) => unit.category === tab), [tab]);
+  const familyOrder = useMemo(() => HANGAR_CATEGORY_FAMILY_ORDER[tab], [tab]);
+  const visibleDefs = useMemo(
     () =>
-      RESOURCE_DEFS.reduce(
-        (acc, def) => {
-          acc[def.id] = resourceDisplayName(def.id, language);
-          return acc;
-        },
-        {} as Record<string, string>
-      ),
-    [language]
+      defs
+        .filter((unit) => isHangarUnitUnlocked(unit.id, technologyLevels))
+        .sort((a, b) => {
+          const familyDelta = familyOrder.indexOf(hangarUnitFamilyOf(a.id)) - familyOrder.indexOf(hangarUnitFamilyOf(b.id));
+          if (familyDelta !== 0) return familyDelta;
+          return hangarUnitPriorityOf(a.id) - hangarUnitPriorityOf(b.id);
+        }),
+    [defs, familyOrder, technologyLevels]
+  );
+  const readyFamilies = useMemo(
+    () => familyOrder.filter((family) => visibleDefs.some((def) => hangarUnitFamilyOf(def.id) === family)),
+    [familyOrder, visibleDefs]
+  );
+  const visibleFamilySections = useMemo(
+    () =>
+      (familyFilter === "all" ? readyFamilies : readyFamilies.filter((family) => family === familyFilter)).map((family) => ({
+        family,
+        defs: visibleDefs.filter((def) => hangarUnitFamilyOf(def.id) === family)
+      })),
+    [familyFilter, readyFamilies, visibleDefs]
   );
 
-  const defs = useMemo(
-    () => HANGAR_UNIT_DEFS.filter((unit) => unit.category === tab),
-    [tab]
-  );
   const queueWithDefs = useMemo(
     () =>
       queue
@@ -10798,23 +12500,36 @@ function HangarScreen({
     () =>
       builtUnitRows
         .filter((row) => row.def.category === "ship")
-        .sort((a, b) => {
-          if (b.def.force !== a.def.force) return b.def.force - a.def.force;
-          if (b.def.endurance !== a.def.endurance) return b.def.endurance - a.def.endurance;
-          return unitName(a.def).localeCompare(unitName(b.def));
-        }),
-    [builtUnitRows, language]
+        .sort((a, b) => hangarUnitPriorityOf(a.def.id) - hangarUnitPriorityOf(b.def.id)),
+    [builtUnitRows]
   );
   const builtDefenses = useMemo(
     () =>
       builtUnitRows
         .filter((row) => row.def.category === "defense")
+        .sort((a, b) => hangarUnitPriorityOf(a.def.id) - hangarUnitPriorityOf(b.def.id)),
+    [builtUnitRows]
+  );
+  const currentReserveRows = useMemo(
+    () =>
+      builtUnitRows
+        .filter((row) => row.def.category === tab)
         .sort((a, b) => {
-          if (b.def.force !== a.def.force) return b.def.force - a.def.force;
-          if (b.def.endurance !== a.def.endurance) return b.def.endurance - a.def.endurance;
-          return unitName(a.def).localeCompare(unitName(b.def));
+          const familyDelta = familyOrder.indexOf(hangarUnitFamilyOf(a.def.id)) - familyOrder.indexOf(hangarUnitFamilyOf(b.def.id));
+          if (familyDelta !== 0) return familyDelta;
+          return hangarUnitPriorityOf(a.def.id) - hangarUnitPriorityOf(b.def.id);
         }),
-    [builtUnitRows, language]
+    [builtUnitRows, familyOrder, tab]
+  );
+  const reserveByFamily = useMemo(
+    () =>
+      readyFamilies.map((family) => {
+        const rows = currentReserveRows.filter((row) => hangarUnitFamilyOf(row.def.id) === family);
+        const totalUnits = rows.reduce((sum, row) => sum + row.qty, 0);
+        const totalForce = rows.reduce((sum, row) => sum + Math.max(0, row.def.force) * row.qty, 0);
+        return { family, totalUnits, totalForce };
+      }),
+    [currentReserveRows, readyFamilies]
   );
   const boostItems = useMemo(
     () =>
@@ -10829,6 +12544,7 @@ function HangarScreen({
   const effectiveBoostQuantity = selectedBoost ? Math.min(requestedBoostQuantity, selectedBoost.quantity) : 0;
   const boostLoading = Boolean(selectedBoost) && inventoryActionLoadingId === selectedBoost.id;
   const canUseBoost = Boolean(activeQueueItem) && Boolean(selectedBoost) && effectiveBoostQuantity > 0 && !boostLoading && !inventoryLoading;
+
   useEffect(() => {
     if (boostItems.length === 0) {
       setBoostItemId("");
@@ -10839,301 +12555,490 @@ function HangarScreen({
     }
   }, [boostItemId, boostItems]);
 
+  const totalCombatReserve = useMemo(
+    () => builtShips.reduce((sum, row) => sum + Math.max(0, row.def.force) * row.qty, 0),
+    [builtShips]
+  );
+  const totalHarvestLift = useMemo(
+    () =>
+      builtShips.reduce(
+        (sum, row) => sum + Math.max(0, Number(MAP_HARVEST_UNIT_STATS[row.def.id]?.harvestCapacity ?? 0)) * row.qty,
+        0
+      ),
+    [builtShips]
+  );
+  const totalHullReserve = useMemo(
+    () => builtShips.reduce((sum, row) => sum + Math.max(0, row.def.endurance) * row.qty, 0),
+    [builtShips]
+  );
+  const totalDefensePower = useMemo(
+    () => builtDefenses.reduce((sum, row) => sum + Math.max(0, row.def.force) * row.qty, 0),
+    [builtDefenses]
+  );
+  const totalQueuedUnits = useMemo(
+    () => queueWithDefs.reduce((sum, entry) => sum + Math.max(0, entry.item.quantity), 0),
+    [queueWithDefs]
+  );
+
+  const unitRoleLabel = (def: HangarUnitDef) => {
+    const family = hangarUnitFamilyOf(def.id);
+    if (def.category === "defense") return familyLabel(family);
+    if (family === "logistics") return l("Soutien economique", "Economic support");
+    if (family === "screening") return l("Interception", "Interception");
+    if (family === "assault") return l("Assaut principal", "Main assault");
+    return l("Briseur lourd", "Heavy breaker");
+  };
+
+  const unitStrategicAdvice = (def: HangarUnitDef) => {
+    switch (def.id) {
+      case "pegase":
+        return l("Ideal pour ouvrir vite la carte et tester de petits champs. Escortez-le si un voisin peut intercepter.", "Ideal to open the map quickly and test small fields. Escort it if a neighbor can intercept.");
+      case "argo":
+        return l("C'est le convoyeur de travail. Bon compromis entre soute, vitesse et resilience pour vos rotations quotidiennes.", "This is your workhorse convoy. Good balance between cargo, speed and resilience for everyday rotations.");
+      case "arche_spatiale":
+        return l("A reserver aux longues routes ou aux champs tres riches. Sans escorte, sa perte coute cher.", "Use it on long routes or very rich fields. Without escort, losing it is expensive.");
+      case "eclaireur_stellaire":
+        return l("Excellent premier ecran. Sert a poursuivre les petits raids et a proteger vos transporteurs.", "Excellent first screen. Used to chase light raids and protect your haulers.");
+      case "foudroyant":
+        return l("Intercepteur superieur pour verrouiller la carte et couper les recolteurs adverses.", "Stronger interceptor to lock the map and cut enemy harvesters.");
+      case "aurore":
+        return l("Premier vrai outil offensif. A utiliser en meute pour forcer les replis rapides.", "First true offensive tool. Use it in packs to force fast retreats.");
+      case "spectre":
+        return l("Polyvalent et rentable. Tient bien la ligne contre des escadres moyennes.", "Flexible and efficient. Holds the line well against medium squadrons.");
+      case "tempest":
+        return l("Cle de vos frappes de terrain. Tres bon choix pour punir les recoltes ennemies.", "Key ship for field strikes. Excellent to punish enemy harvest runs.");
+      case "titanide":
+        return l("Stabilise la ligne lourde et absorbe les retours de feu. A coupler avec une vraie escorte.", "Stabilizes the heavy line and absorbs return fire. Pair it with a real escort.");
+      case "colosse":
+        return l("Unite decisive de fin de palier. A sortir seulement si votre economie peut suivre le carburant et les pertes.", "Decisive late-tier unit. Build it only if your economy can support the fuel and losses.");
+      case "projecteur_photonique":
+        return l("Premier verrou anti-raid de l'hyperstructure. Placez-le tot pour absorber les tests adverses.", "First anti-raid lock for your hyperstructure. Deploy it early to absorb enemy probes.");
+      case "tourelle_rafale":
+        return l("Couverture rapide contre les vagues legeres. Efficace pour proteger une economie encore fragile.", "Fast cover against light waves. Effective to protect a still-fragile economy.");
+      case "batterie_eclat":
+        return l("Excellente contre les escadres rapides. A combiner avec un bouclier pour durer.", "Excellent against fast squadrons. Pair it with shields to last.");
+      case "lame_de_plasma":
+        return l("Bonne batterie de transition pour les combats plus lourds autour de l'hyperstructure.", "Good transition battery for heavier fights around the hyperstructure.");
+      case "canon_ion_aiguillon":
+        return l("Plateforme polyvalente de milieu de palier. Solide contre les assauts moyens.", "Versatile mid-tier platform. Solid against medium assaults.");
+      case "mine_orbitale_veille":
+        return l("Impact brutal mais cadence lente. Ideal pour casser une pointe adverse au premier contact.", "High burst with slow cadence. Ideal to break an enemy spearhead on first impact.");
+      case "canon_rail_longue_vue":
+        return l("Tres bon contre les lourds. Donnez-lui du temps avec des ecrans et des boucliers.", "Excellent against heavy hulls. Buy it time with screens and shields.");
+      case "projecteur_emp_silence":
+        return l("Outil de controle. Il ralentit le rythme adverse et rend vos batteries plus rentables.", "Control tool. It slows the enemy pace and makes your batteries more efficient.");
+      case "champ_aegis":
+        return l("Base defensive prioritaire si vous voulez tenir sous pression. Il donne du temps a tout le reste.", "Priority defensive core if you want to hold under pressure. It buys time for everything else.");
+      case "mur_photonique_prisme":
+        return l("Mur de fatigue contre les vagues de raids. Excellent si vous attendez de longues sequences de harcelement.", "Attrition wall against raid waves. Excellent if you expect long harassment sequences.");
+      case "lance_gravitationnel_ancre":
+        return l("Piece terminale anti-capital. A deployer seulement quand votre base industrielle est deja stabilisee.", "Final anti-capital piece. Deploy it only once your industrial base is already stable.");
+      default:
+        return familyTactical(hangarUnitFamilyOf(def.id));
+    }
+  };
+
   return (
-    <main className="hangar-shell">
-      <section className="hangar-catalog">
-        <header className="hangar-head">
-          <h2>{l("Hangar Strategique", "Strategic Hangar")}</h2>
-          <p>{l("Concevez vos flottes et defenses. Les statistiques detaillees s'affichent au clic.", "Design fleets and defenses. Detailed stats appear on click.")}</p>
-          <div className="hangar-tabs">
+    <main className="hangar-v4-shell">
+      <section className="hangar-v4-hero">
+        <div className="hangar-v4-hero-copy">
+          <span className="hangar-v4-eyebrow">{l("Doctrine navale", "Naval doctrine")}</span>
+          <h2>{l("Hangar de projection", "Projection hangar")}</h2>
+          <p>
+            {l(
+              "Ordonnez vos productions par famille, cachez les modeles encore verrouilles et pilotez la reserve comme un theatre d'operations compact.",
+              "Command production by family, hide still-locked frames, and manage your reserve like a compact operations theater."
+            )}
+          </p>
+          <div className="hangar-v4-tabrow">
             <button type="button" className={tab === "ship" ? "active" : ""} onClick={() => setTab("ship")}>
-              <Rocket size={14} /> {l("Vaisseaux", "Ships")}
+              <Rocket size={15} /> {l("Escadres", "Squadrons")}
             </button>
             <button type="button" className={tab === "defense" ? "active" : ""} onClick={() => setTab("defense")}>
-              <Shield size={14} /> {l("Defenses", "Defenses")}
+              <Shield size={15} /> {l("Defenses", "Defenses")}
             </button>
           </div>
-        </header>
-        {loading ? <p className="hangar-status-line">{l("Synchronisation Hangar...", "Syncing Hangar...")}</p> : null}
-        {!loading && !serverResourcesReady ? (
-          <p className="hangar-status-line">{l("Ressources serveur Hangar en attente...", "Hangar server resources pending...")}</p>
-        ) : null}
-        {error ? <p className="hangar-error-line">{error}</p> : null}
-
-        <div className="hangar-grid">
-          {defs.map((def) => {
-            const qty = Math.max(1, Math.floor(Number(quantityByUnit[def.id] ?? 1) || 1));
-            const authoritativeResources = serverResourceAmounts ?? resourceAmounts;
-            const maxBuildable = maxCraftableFromResources(authoritativeResources, def.cost);
-            const batchCost = scaleCost(def.cost, qty);
-            const affordable = canAffordCost(authoritativeResources, batchCost);
-            const unlocked = isHangarUnitUnlocked(def.id, technologyLevels);
-            const costRows = (RESOURCE_DEFS.map((res) => res.id).filter(
-              (resourceId) => Number(batchCost[resourceId as ResourceId] ?? 0) > 0
-            ) as ResourceId[]).map((resourceId) => {
-              const required = Math.ceil(Number(batchCost[resourceId] ?? 0));
-              const available = Math.floor(Number(authoritativeResources[resourceId] ?? 0));
-              return {
-                id: resourceId,
-                required,
-                enough: available >= required,
-                name: resourceNameById[resourceId] ?? resourceId
-              };
-            });
-            const unlockHint =
-              def.id === "projecteur_photonique"
-                ? l("Requis: Amplification Photonique niv. 1", "Requires: Photonic Amplification lv. 1")
-                : def.id === "lanceur_orbitral"
-                  ? l("Requis: Balistique Orbitale niv. 1", "Requires: Orbital Ballistics lv. 1")
-                  : def.id === "lame_de_plasma"
-                ? l("Requis: Stabilisation Plasma niv. 1", "Requires: Plasma Stabilization lv. 1")
-                : def.id === "champ_aegis"
-                  ? l("Requis: Generateur Aegis niv. 1", "Requires: Aegis Generator lv. 1")
-                  : def.id === "tourelle_rafale"
-                    ? l("Requis: Architecture Defensive niv. 1", "Requires: Defensive Architecture lv. 1")
-                    : def.id === "batterie_eclat"
-                      ? l("Requis: Architecture Defensive niv. 2", "Requires: Defensive Architecture lv. 2")
-                      : def.id === "canon_ion_aiguillon"
-                        ? l("Requis: Amplification Photonique niv. 2", "Requires: Photonic Amplification lv. 2")
-                        : def.id === "mine_orbitale_veille"
-                          ? l("Requis: Balistique Orbitale niv. 2", "Requires: Orbital Ballistics lv. 2")
-                          : def.id === "canon_rail_longue_vue"
-                            ? l("Requis: Balistique Orbitale niv. 4", "Requires: Orbital Ballistics lv. 4")
-                            : def.id === "projecteur_emp_silence"
-                              ? l(
-                                  "Requis: Controle Electromagnetique niv. 1 + Moteurs Flux Neodyme niv. 3",
-                                  "Requires: Electromagnetic Control lv. 1 + Neodymium Flux Engines lv. 3"
-                                )
-                              : def.id === "mur_photonique_prisme"
-                                ? l("Requis: Generateur Aegis niv. 3", "Requires: Aegis Generator lv. 3")
-                                : def.id === "lance_gravitationnel_ancre"
-                                  ? l(
-                                      "Requis: Generateur Aegis niv. 6 + Physique Quantique Appliquee niv. 3",
-                                      "Requires: Aegis Generator lv. 6 + Applied Quantum Physics lv. 3"
-                                    )
-                  : def.id === "eclaireur_stellaire" || def.id === "foudroyant"
-                    ? l("Requis: Doctrine d'Escarmouche niv. 1", "Requires: Skirmish Doctrine lv. 1")
-                    : def.id === "aurore" || def.id === "spectre"
-                      ? l("Requis: Doctrine d'Interception niv. 1", "Requires: Interception Doctrine lv. 1")
-                      : def.id === "tempest" || def.id === "titanide"
-                        ? l("Requis: Doctrine de Domination niv. 1", "Requires: Domination Doctrine lv. 1")
-                        : def.id === "colosse" || def.id === "arche_spatiale"
-                          ? l("Requis: Architecture Capitale niv. 1", "Requires: Capital Architecture lv. 1")
-                          : "";
-            const produced = inventory[def.id] ?? 0;
-            const unitImagePath = def.category === "ship" ? HANGAR_SHIP_IMAGE_MAP[def.id] : HANGAR_DEFENSE_IMAGE_MAP[def.id];
-            return (
-              <article key={def.id} className="hangar-card">
-                <div className="hangar-card-head">
-                  <strong>{unitName(def)}</strong>
-                  <span>{def.category === "ship" ? l("Vaisseau", "Ship") : l("Defense", "Defense")}</span>
-                </div>
-                {!unlocked ? <p className="hangar-sync-note">{unlockHint}</p> : null}
-                <div className="hangar-visual">
-                  <img
-                    src={unitImagePath || "/room-images/vaisseau.png"}
-                    alt={unitName(def)}
-                    className="hangar-ship-image"
-                    onError={(e) => {
-                      const img = e.currentTarget as HTMLImageElement;
-                      if (!img.src.endsWith("/room-images/vaisseau.png")) {
-                        img.src = "/room-images/vaisseau.png";
-                      }
-                    }}
-                  />
-                </div>
-                <div className="hangar-card-availability">
-                  <span>{l("Disponibles", "Owned")}: <b>{Math.floor(produced).toLocaleString()}</b></span>
-                  <span>{l("Fabricable", "Buildable")}: <b>{maxBuildable.toLocaleString()}</b></span>
-                </div>
-                <p>{unitDescription(def)}</p>
-                <div className="hangar-card-foot">
-                  <small className="hangar-cost-title">{l("Cout", "Cost")}</small>
-                  <div className="hangar-cost-list">
-                    {costRows.map((row) => (
-                      <span key={`${def.id}_${row.id}`} className={`hangar-cost-item ${row.enough ? "enough" : "missing"}`}>
-                        <span className="top-resource-icon hangar-cost-icon" style={getResourceMenuSpriteStyle(row.id)} />
-                        <span className="hangar-cost-value">
-                          {row.required.toLocaleString()} {row.name}
-                        </span>
-                      </span>
-                    ))}
-                  </div>
-                  <small className="hangar-time-badge"><Hourglass size={13} /> {l("Temps", "Build time")}: {formatDuration(def.buildSeconds * qty)}</small>
-                </div>
-                <details className="hangar-spoiler">
-                  <summary>{l("Details du vaisseau", "Ship details")}</summary>
-                  <div className="hangar-details-grid compact">
-                    <div><small>{l("Force", "Force")}</small><b>{def.force}</b></div>
-                    <div><small>{l("Endurance", "Endurance")}</small><b>{def.endurance}</b></div>
-                    {def.category === "ship" ? (
-                      <>
-                        <div><small>{l("Vitesse", "Speed")}</small><b>{def.speed ?? 0}</b></div>
-                        <div><small>{l("Capacite", "Capacity")}</small><b>{def.capacity ?? 0}</b></div>
-                        <div><small>{l("Energie Q/h", "Quantum/h")}</small><b>{def.quantumPerHour ?? 0}</b></div>
-                      </>
-                    ) : (
-                      <>
-                        <div><small>{l("Portee", "Range")}</small><b>{def.range ?? 0}</b></div>
-                        <div><small>{l("Recharge", "Reload")}</small><b>{def.reload ?? "-"}</b></div>
-                      </>
-                    )}
-                  </div>
-                </details>
-                <div className="hangar-build-row">
-                  <label>
-                    {l("Quantite", "Quantity")}
-                    <input
-                      type="number"
-                      min={1}
-                      max={Math.max(1, maxBuildable)}
-                      value={quantityByUnit[def.id] ?? "1"}
-                      onChange={(e) => setQuantityByUnit((prev) => ({ ...prev, [def.id]: e.target.value }))}
-                    />
-                  </label>
-                  <button
-                    type="button"
-                    disabled={!unlocked || !affordable || actionBusy || maxBuildable <= 0 || loading || !serverResourcesReady}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      void onQueue(def.id, qty);
-                    }}
-                  >
-                    {!unlocked
-                      ? l("Prerequis manquants", "Missing requirements")
-                      : actionBusy
-                        ? l("Transmission...", "Transmitting...")
-                        : l("Lancer", "Build")}
-                  </button>
-                </div>
-              </article>
-            );
-          })}
+          <div className="hangar-v4-doctrine-banner">
+            <Coins size={16} />
+            <div>
+              <strong>{l("Carburant tactique en credits", "Credit-based tactical fuel")}</strong>
+              <span>
+                {l(
+                  "Chaque mission carte consomme des credits selon le type de coque, la distance et le role de la flotte.",
+                  "Each map mission consumes credits based on hull class, distance and fleet role."
+                )}
+              </span>
+            </div>
+          </div>
+        </div>
+        <div className="hangar-v4-hero-stats">
+          <article className="hangar-v4-kpi">
+            <small>{l("File active", "Active queue")}</small>
+            <strong>{totalQueuedUnits.toLocaleString()}</strong>
+            <span>{activeQueueItem ? `${queueWithDefs[0]?.def ? unitName(queueWithDefs[0].def) : l("Production", "Production")} x${activeQueueItem.quantity}` : l("Aucune production", "No production")}</span>
+          </article>
+          <article className="hangar-v4-kpi">
+            <small>{l("Puissance de reserve", "Reserve power")}</small>
+            <strong>{totalCombatReserve.toLocaleString()}</strong>
+            <span>{l("Force offensive stockee", "Stored offensive firepower")}</span>
+          </article>
+          <article className="hangar-v4-kpi">
+            <small>{l("Soute logistique", "Logistics lift")}</small>
+            <strong>{totalHarvestLift.toLocaleString()}</strong>
+            <span>{l("Capacite de transport disponible", "Available haul capacity")}</span>
+          </article>
+          <article className="hangar-v4-kpi">
+            <small>{l("Couverture defensive", "Defensive screen")}</small>
+            <strong>{totalDefensePower.toLocaleString()}</strong>
+            <span>{l("Feu stationnaire cumule", "Total static firepower")}</span>
+          </article>
         </div>
       </section>
 
-      <aside className="hangar-queue">
-        <div className="hangar-queue-panel">
-          <h3>{l("File de production", "Production queue")}</h3>
-          {queueWithDefs.length === 0 ? (
-            <p className="hangar-empty">{l("Aucune fabrication en cours.", "No production in progress.")}</p>
-          ) : (
-            <div className="hangar-queue-list">
-              {queueWithDefs.map(({ item, def }, index) => {
-                const duration = Math.max(1, item.endAt - item.startAt);
-                const elapsed = Math.max(0, Math.min(duration, nowMs - item.startAt));
-                const ratio = Math.round((elapsed / duration) * 100);
-                const remaining = Math.max(0, Math.floor((item.endAt - nowMs) / 1000));
-                const waiting = nowMs < item.startAt;
-                return (
-                  <article key={item.id} className={`hangar-queue-item ${index === 0 ? "active" : ""}`}>
-                    <header>
-                      <strong>{unitName(def)}</strong>
-                      <span className="hangar-queue-head-right">
-                        <b>x{item.quantity}</b>
+      <div className="hangar-v4-layout">
+        <aside className="hangar-v4-sidebar">
+          <section className="hangar-v4-panel">
+            <div className="hangar-v4-panel-head">
+              <strong>{l("Production tactique", "Tactical production")}</strong>
+              <span>{l("Temps reel", "Real-time")}</span>
+            </div>
+            {loading ? <p className="hangar-v4-status">{l("Synchronisation Hangar...", "Syncing Hangar...")}</p> : null}
+            {!loading && !serverResourcesReady ? (
+              <p className="hangar-v4-status">{l("Ressources serveur Hangar en attente...", "Hangar server resources pending...")}</p>
+            ) : null}
+            {error ? <p className="hangar-v4-error">{error}</p> : null}
+            {queueWithDefs.length === 0 ? (
+              <p className="hangar-v4-empty">{l("Aucune fabrication en cours.", "No production in progress.")}</p>
+            ) : (
+              <div className="hangar-v4-queue-list">
+                {queueWithDefs.map(({ item, def }, index) => {
+                  const duration = Math.max(1, item.endAt - item.startAt);
+                  const elapsed = Math.max(0, Math.min(duration, nowMs - item.startAt));
+                  const ratio = Math.round((elapsed / duration) * 100);
+                  const remaining = Math.max(0, Math.floor((item.endAt - nowMs) / 1000));
+                  const waiting = nowMs < item.startAt;
+                  return (
+                    <article key={item.id} className={`hangar-v4-queue-item ${index === 0 ? "active" : ""}`}>
+                      <header>
+                        <div>
+                          <strong>{unitName(def)}</strong>
+                          <small>{item.quantity.toLocaleString()} {l("unites", "units")}</small>
+                        </div>
                         {index === 0 ? (
                           <button
                             type="button"
-                            className="hangar-cancel-btn"
+                            className="hangar-v4-cancel"
                             disabled={actionBusy}
                             onClick={() => void onCancelQueueItem(item.id)}
                             title={l("Annuler et rembourser", "Cancel and refund")}
                           >
-                            <X size={13} />
+                            <X size={14} />
                           </button>
                         ) : null}
-                      </span>
-                    </header>
-                    <div className="hangar-queue-progress">
-                      <div style={{ width: `${waiting ? 0 : ratio}%` }} />
+                      </header>
+                      <div className="hangar-v4-progress"><div style={{ width: `${waiting ? 0 : ratio}%` }} /></div>
+                      <footer>
+                        <span>{waiting ? l("En attente", "Queued") : l("Temps restant", "Time left")}</span>
+                        <strong>{formatDuration(remaining)}</strong>
+                      </footer>
+                    </article>
+                  );
+                })}
+              </div>
+            )}
+            {activeQueueItem ? (
+              <div className="hangar-v4-boost-box">
+                <div className="hangar-v4-panel-head compact">
+                  <strong>{l("Acceleration", "Acceleration")}</strong>
+                  <span>{l("Inventaire", "Inventory")}</span>
+                </div>
+                {boostItems.length === 0 ? (
+                  <p className="hangar-v4-empty small">{l("Aucun accelerateur disponible.", "No accelerator available.")}</p>
+                ) : (
+                  <div className="hangar-v4-boost-controls">
+                    <select
+                      value={selectedBoost?.id ?? ""}
+                      onChange={(e) => {
+                        setBoostItemId(e.target.value);
+                        setBoostQuantityInput("1");
+                      }}
+                    >
+                      {boostItems.map((item) => (
+                        <option key={item.id} value={item.id}>
+                          {formatBoostDurationLabel(item.durationSeconds ?? 0)} (x{item.quantity})
+                        </option>
+                      ))}
+                    </select>
+                    <input
+                      type="number"
+                      min={1}
+                      max={selectedBoost?.quantity ?? 1}
+                      value={boostQuantityInput}
+                      onChange={(e) => setBoostQuantityInput(e.target.value)}
+                    />
+                    <button
+                      type="button"
+                      disabled={!canUseBoost}
+                      onClick={() =>
+                        selectedBoost
+                          ? onUseBoost(selectedBoost.id, effectiveBoostQuantity, "hangar", activeQueueItem.id)
+                          : undefined
+                      }
+                    >
+                      {boostLoading ? l("Application...", "Applying...") : l("Utiliser", "Use")}
+                    </button>
+                  </div>
+                )}
+              </div>
+            ) : null}
+          </section>
+
+          <section className="hangar-v4-panel">
+            <div className="hangar-v4-panel-head">
+              <strong>{tab === "ship" ? l("Reserve operationnelle", "Operational reserve") : l("Ligne defensive", "Defensive line")}</strong>
+              <span>{tab === "ship" ? builtShips.reduce((sum, row) => sum + row.qty, 0).toLocaleString() : builtDefenses.reduce((sum, row) => sum + row.qty, 0).toLocaleString()}</span>
+            </div>
+            {currentReserveRows.length === 0 ? (
+              <p className="hangar-v4-empty">{tab === "ship" ? l("Aucune coque disponible pour le moment.", "No hull available yet.") : l("Aucune defense disponible pour le moment.", "No defense available yet.")}</p>
+            ) : (
+              <div className="hangar-v4-reserve-list">
+                {reserveByFamily
+                  .filter((row) => row.totalUnits > 0)
+                  .map((row) => (
+                    <div key={`reserve_family_${row.family}`} className="hangar-v4-reserve-family">
+                      <span>{familyLabel(row.family)}</span>
+                      <strong>{row.totalUnits.toLocaleString()}</strong>
+                      <small>{row.totalForce > 0 ? `${row.totalForce.toLocaleString()} ${l("force", "force")}` : l("Soutien", "Support")}</small>
                     </div>
-                    <footer>
-                      <small className="hangar-time-remaining">
-                        {waiting ? l("En attente", "Queued") : l("Temps restant", "Time left")}: {formatDuration(remaining)}
-                      </small>
-                      <small>{formatCostLabel(item.batchCost, language)}</small>
-                    </footer>
-                  </article>
-                );
-              })}
+                  ))}
+              </div>
+            )}
+          </section>
+
+          <section className="hangar-v4-panel">
+            <div className="hangar-v4-panel-head">
+              <strong>{l("Doctrine carburant", "Fuel doctrine")}</strong>
+              <span>{l("Map", "Map")}</span>
             </div>
-          )}
-          {activeQueueItem ? (
-            <div className="hangar-boost-panel">
-              <strong>{l("Acceleration", "Acceleration")}</strong>
-              {boostItems.length === 0 ? (
-                <p>{l("Aucun accelerateur disponible.", "No accelerator available.")}</p>
-              ) : (
-                <div className="hangar-boost-row">
-                  <select
-                    value={selectedBoost?.id ?? ""}
-                    onChange={(e) => {
-                      setBoostItemId(e.target.value);
-                      setBoostQuantityInput("1");
-                    }}
-                  >
-                    {boostItems.map((item) => (
-                      <option key={item.id} value={item.id}>
-                        {formatBoostDurationLabel(item.durationSeconds ?? 0)} (x{item.quantity})
-                      </option>
-                    ))}
-                  </select>
-                  <input
-                    type="number"
-                    min={1}
-                    max={selectedBoost?.quantity ?? 1}
-                    value={boostQuantityInput}
-                    onChange={(e) => setBoostQuantityInput(e.target.value)}
-                  />
-                  <button
-                    type="button"
-                    disabled={!canUseBoost}
-                    onClick={() =>
-                      selectedBoost
-                        ? onUseBoost(selectedBoost.id, effectiveBoostQuantity, "hangar", activeQueueItem.id)
-                        : undefined
-                    }
-                  >
-                    {boostLoading ? l("Application...", "Applying...") : l("Utiliser", "Use")}
-                  </button>
-                </div>
+            <div className="hangar-v4-fuel-note">
+              <div>
+                <Coins size={15} />
+                <span>{l("Base / 1000 distance", "Base / 1000 distance")}</span>
+              </div>
+              <strong>{l("importance de coque + distance", "hull importance + distance")}</strong>
+            </div>
+            <p className="hangar-v4-copy-note">
+              {l(
+                "Une mission de recolte consomme moins qu'une attaque. Plus la coque est lourde et plus la route est longue, plus le cout en credits augmente.",
+                "A harvesting mission consumes less than an attack. The heavier the hull and the longer the route, the higher the credit cost."
               )}
+            </p>
+            <div className="hangar-v4-mini-metrics">
+              <span>{l("Coques", "Hulls")}: {builtShips.reduce((sum, row) => sum + row.qty, 0).toLocaleString()}</span>
+              <span>{l("Endurance stockee", "Stored hull")}: {totalHullReserve.toLocaleString()}</span>
             </div>
-          ) : null}
-        </div>
+          </section>
+        </aside>
 
-        <div className="hangar-queue-panel">
-          <h3>{l("Stock militaire", "Military stock")}</h3>
-          {builtShips.length === 0 ? (
-            <p className="hangar-empty">{l("Aucune unite produite.", "No units produced yet.")}</p>
-          ) : (
-            <div className="hangar-stock-list">
-              {builtShips.map(({ def, qty }) => (
-                <div key={`stock_${def.id}`} className="hangar-stock-item">
-                  <span>{unitName(def)}</span>
-                  <strong>{qty.toLocaleString()}</strong>
-                </div>
+        <section className="hangar-v4-catalog">
+          <div className="hangar-v4-catalog-head">
+            <div>
+              <span className="hangar-v4-eyebrow">{tab === "ship" ? l("Catalogue d'escadres", "Squadron catalog") : l("Catalogue defensif", "Defense catalog")}</span>
+              <h3>{tab === "ship" ? l("Vaisseaux classes par role", "Ships ordered by role") : l("Defenses classees par fonction", "Defenses ordered by function")}</h3>
+              <p>
+                {l(
+                  "Les modeles verrouilles restent masques jusqu'au debloquage. Les cartes donnent la synthese, le hover ouvre le renseignement rapide et les spoilers gardent les details hors du flux principal.",
+                  "Locked models stay hidden until unlocked. Cards show the summary, hover opens quick intel, and spoilers keep deep details out of the main flow."
+                )}
+              </p>
+            </div>
+            <div className="hangar-v4-family-pills">
+              <button type="button" className={familyFilter === "all" ? "active" : ""} onClick={() => setFamilyFilter("all")}>
+                {l("Toutes", "All")}
+              </button>
+              {readyFamilies.map((family) => (
+                <button
+                  key={`family_filter_${family}`}
+                  type="button"
+                  className={familyFilter === family ? "active" : ""}
+                  onClick={() => setFamilyFilter(family)}
+                >
+                  {familyLabel(family)}
+                </button>
               ))}
             </div>
-          )}
-        </div>
+          </div>
 
-        <div className="hangar-queue-panel">
-          <h3>{l("Defenses", "Defenses")}</h3>
-          {builtDefenses.length === 0 ? (
-            <p className="hangar-empty">{l("Aucune defense produite.", "No defenses produced yet.")}</p>
-          ) : (
-            <div className="hangar-stock-list">
-              {builtDefenses.map(({ def, qty }) => (
-                <div key={`stock_${def.id}`} className="hangar-stock-item">
-                  <span>{unitName(def)}</span>
-                  <strong>{qty.toLocaleString()}</strong>
-                </div>
-              ))}
+          {visibleFamilySections.length === 0 ? (
+            <div className="hangar-v4-empty-state">
+              <strong>{l("Aucun modele debloque dans cette categorie.", "No unlocked model in this category.")}</strong>
+              <p>
+                {tab === "ship"
+                  ? l("Developpez les doctrines militaires et l'architecture capitale pour ouvrir de nouvelles coques.", "Develop military doctrines and capital architecture to unlock new hulls.")
+                  : l("Faites progresser l'architecture defensive, les boucliers et la balistique pour ouvrir de nouvelles plateformes.", "Progress defensive architecture, shielding and ballistics to unlock new platforms.")}
+              </p>
             </div>
+          ) : (
+            visibleFamilySections.map(({ family, defs: familyDefs }) => (
+              <section key={`family_section_${family}`} className="hangar-v4-family-section">
+                <header className="hangar-v4-family-head">
+                  <div>
+                    <span className="hangar-v4-eyebrow">{familyImportance(family)}</span>
+                    <h4>{familyLabel(family)}</h4>
+                    <p>{familySummary(family)}</p>
+                  </div>
+                  <div className="hangar-v4-family-meta">
+                    <span>{familyDefs.length.toLocaleString()} {tab === "ship" ? l("modeles visibles", "visible models") : l("plateformes visibles", "visible platforms")}</span>
+                    <span>{familyTactical(family)}</span>
+                  </div>
+                </header>
+
+                <div className="hangar-v4-grid">
+                  {familyDefs.map((def) => {
+                    const requestedQty = Math.max(1, Math.floor(Number(quantityByUnit[def.id] ?? 1) || 1));
+                    const maxBuildable = maxCraftableFromResources(authoritativeResources, def.cost);
+                    const batchCost = scaleCost(def.cost, requestedQty);
+                    const affordable = canAffordCost(authoritativeResources, batchCost);
+                    const unitImagePath = def.category === "ship" ? HANGAR_SHIP_IMAGE_MAP[def.id] : HANGAR_DEFENSE_IMAGE_MAP[def.id];
+                    const produced = Math.max(0, Math.floor(Number(inventory[def.id] ?? 0)));
+                    const fuelBase = def.category === "ship" ? hangarUnitFuelBasePer1000(def.id) : 0;
+                    const hoverImage = unitImagePath || "/room-images/vaisseau.png";
+                    return (
+                      <article key={def.id} className={`hangar-v4-card ${def.category} ${family.replace(/_/g, "-")}`}>
+                        <div className="hangar-v4-card-bg" style={{ backgroundImage: `url(${hoverImage})` }} />
+                        <div className="hangar-v4-card-top">
+                          <span className="hangar-v4-badge">{unitRoleLabel(def)}</span>
+                          <span className="hangar-v4-badge subtle">{familyImportance(family)}</span>
+                        </div>
+                        <div className="hangar-v4-card-main">
+                          <div className="hangar-v4-card-media">
+                            <img
+                              src={hoverImage}
+                              alt={unitName(def)}
+                              className="hangar-v4-card-ship"
+                              onError={(e) => {
+                                const img = e.currentTarget as HTMLImageElement;
+                                if (!img.src.endsWith("/room-images/vaisseau.png")) img.src = "/room-images/vaisseau.png";
+                              }}
+                            />
+                          </div>
+                          <div className="hangar-v4-card-headline">
+                            <strong>{unitName(def)}</strong>
+                            <small>{unitDescription(def)}</small>
+                          </div>
+                          <div className="hangar-v4-card-stock">
+                            <span>{l("En service", "Owned")} <b>{produced.toLocaleString()}</b></span>
+                            <span>{l("Fabricable", "Buildable")} <b>{maxBuildable.toLocaleString()}</b></span>
+                          </div>
+                          <div className="hangar-v4-card-stats">
+                            <span>
+                              <small>{l("Force", "Force")}</small>
+                              <b>{def.force.toLocaleString()}</b>
+                            </span>
+                            <span>
+                              <small>{l("Endurance", "Endurance")}</small>
+                              <b>{def.endurance.toLocaleString()}</b>
+                            </span>
+                            <span>
+                              <small>{def.category === "ship" ? l("Vitesse", "Speed") : l("Portee", "Range")}</small>
+                              <b>{def.category === "ship" ? Math.max(0, Number(def.speed ?? 0)).toLocaleString() : String(def.range ?? "-")}</b>
+                            </span>
+                            <span>
+                              <small>{def.category === "ship" ? l("Carburant / 1000", "Fuel / 1000") : l("Rechargement", "Reload")}</small>
+                              <b>{def.category === "ship" ? `${fuelBase.toLocaleString()} ${l("cr", "cr")}` : String(def.reload ?? "-")}</b>
+                            </span>
+                          </div>
+                          <ResourceCostDisplay cost={batchCost} available={authoritativeResources} language={language} compact className="hangar-v4-costs" />
+                          <div className="hangar-v4-build-row">
+                            <label>
+                              <span>{l("Quantite", "Quantity")}</span>
+                              <input
+                                type="number"
+                                min={1}
+                                max={Math.max(1, maxBuildable)}
+                                value={quantityByUnit[def.id] ?? "1"}
+                                onChange={(e) => setQuantityByUnit((prev) => ({ ...prev, [def.id]: e.target.value }))}
+                              />
+                            </label>
+                            <button
+                              type="button"
+                              disabled={!affordable || actionBusy || maxBuildable <= 0 || loading || !serverResourcesReady}
+                              onClick={() => void onQueue(def.id, requestedQty)}
+                            >
+                              {actionBusy ? l("Transmission...", "Transmitting...") : l("Lancer la serie", "Queue batch")}
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="hangar-v4-hover-intel">
+                          <div className="hangar-v4-hover-head">
+                            <strong>{l("Renseignement rapide", "Quick intel")}</strong>
+                            <span>{familyLabel(family)}</span>
+                          </div>
+                          <p>{familySummary(family)}</p>
+                          <ul>
+                            <li>{unitStrategicAdvice(def)}</li>
+                            <li>
+                              {def.category === "ship"
+                                ? l(
+                                    `Base carburant: ${fuelBase.toLocaleString()} credits par 1000 distance. Les attaques coutent plus qu'une collecte.`,
+                                    `Fuel base: ${fuelBase.toLocaleString()} credits per 1000 distance. Attacks cost more than harvesting.`
+                                  )
+                                : l("Plateforme stationnaire: pas de carburant, mais une vraie dette industrielle a la production.", "Stationary platform: no fuel, but a real industrial debt when built.")}
+                            </li>
+                          </ul>
+                        </div>
+
+                        <details className="hangar-v4-details">
+                          <summary>{l("Doctrine & fiche", "Doctrine & sheet")}</summary>
+                          <div className="hangar-v4-details-grid">
+                            <div>
+                              <small>{l("Categorie", "Category")}</small>
+                              <b>{def.category === "ship" ? l("Vaisseau", "Ship") : l("Defense", "Defense")}</b>
+                            </div>
+                            <div>
+                              <small>{l("Famille", "Family")}</small>
+                              <b>{familyLabel(family)}</b>
+                            </div>
+                            <div>
+                              <small>{l("Temps unite", "Unit build time")}</small>
+                              <b>{formatDuration(def.buildSeconds)}</b>
+                            </div>
+                            <div>
+                              <small>{l("Temps serie", "Batch time")}</small>
+                              <b>{formatDuration(def.buildSeconds * requestedQty)}</b>
+                            </div>
+                            <div>
+                              <small>{def.category === "ship" ? l("Capacite / coque", "Cargo / hull") : l("Cadence", "Cadence")}</small>
+                              <b>{def.category === "ship" ? Number(def.capacity ?? 0).toLocaleString() : String(def.reload ?? "-")}</b>
+                            </div>
+                            <div>
+                              <small>{def.category === "ship" ? l("Q / h", "Quantum / h") : l("Carburant", "Fuel")}</small>
+                              <b>{def.category === "ship" ? Number(def.quantumPerHour ?? 0).toLocaleString() : l("Stationnaire", "Static")}</b>
+                            </div>
+                          </div>
+                          <div className="hangar-v4-doctrine-copy">
+                            <p>{familyTactical(family)}</p>
+                            <p>{unitStrategicAdvice(def)}</p>
+                            {def.category === "ship" ? (
+                              <p>
+                                {l(
+                                  `Carburant de reference: ${fuelBase.toLocaleString()} credits / 1000 distance. Plus la flotte est lourde et plus la route est longue, plus la mission coutera cher.`,
+                                  `Reference fuel: ${fuelBase.toLocaleString()} credits / 1000 distance. The heavier the fleet and the longer the route, the more expensive the mission becomes.`
+                                )}
+                              </p>
+                            ) : null}
+                          </div>
+                        </details>
+                      </article>
+                    );
+                  })}
+                </div>
+              </section>
+            ))
           )}
-        </div>
-      </aside>
+        </section>
+      </div>
     </main>
   );
 }
@@ -12055,7 +13960,9 @@ function AllianceScreen({
   nowMs,
   client,
   session,
+  resourceAmounts,
   onRankingRefresh,
+  onEconomyRefresh,
   onUnauthorized
 }: {
   language: UILanguage;
@@ -12063,17 +13970,21 @@ function AllianceScreen({
   nowMs: number;
   client: Client;
   session: Session | null;
+  resourceAmounts: Record<string, number>;
   onRankingRefresh: () => void;
+  onEconomyRefresh: () => Promise<void> | void;
   onUnauthorized: () => void;
 }) {
   return (
-    <AllianceScreenV2
+    <AllianceCommandScreen
       language={language}
       playerId={playerId}
       nowMs={nowMs}
       client={client}
       session={session}
+      resourceAmounts={resourceAmounts}
       onRankingRefresh={onRankingRefresh}
+      onEconomyRefresh={onEconomyRefresh}
       onUnauthorized={onUnauthorized}
     />
   );
@@ -12537,7 +14448,7 @@ function RankingScreen({
     rows.map((entry, index) => {
       const metadata = parseJsonObject(entry?.metadata);
       const rank = Math.max(1, Math.floor(Number(entry?.rank ?? index + 1)));
-      const score = formatDisplayedScoreValue(Number(entry?.score ?? 0));
+      const score = formatDisplayedScoreLabel(Number(entry?.score ?? 0));
       const subscore = Math.max(0, Math.floor(Number(entry?.subscore ?? 0)));
       const ownerId = String(entry?.ownerId ?? "");
       const allianceId = String(metadata?.allianceId ?? "");
@@ -12582,7 +14493,7 @@ function RankingScreen({
       <section className="ranking-summary-grid">
         <article className="ranking-summary-card">
           <small>{l("Votre score", "Your score")}</small>
-          <strong>{formatDisplayedScoreValue(playerPoints).toLocaleString()}</strong>
+          <strong>{formatDisplayedScoreLabel(playerPoints)}</strong>
         </article>
         <article className="ranking-summary-card">
           <small>{l("Votre rang", "Your rank")}</small>
@@ -12614,7 +14525,7 @@ function RankingScreen({
                 {row.extra ? `[${row.extra}] ` : ""}
                 {row.label}
               </strong>
-              <span>{row.score.toLocaleString()} pts</span>
+              <span>{row.score} pts</span>
             </article>
           ))}
         </section>
@@ -12648,7 +14559,7 @@ function RankingScreen({
                   </small>
                 )}
               </span>
-              <strong className="score">{row.score.toLocaleString()}</strong>
+              <strong className="score">{row.score}</strong>
               <span className="subscore">{row.subscore.toLocaleString()}</span>
             </div>
           ))
@@ -12683,178 +14594,36 @@ function TechnologyScreen({
   onLaunchResearch: (techId: TechnologyId) => void;
   onUseBoost: (itemId: string, quantity?: number, targetOverride?: "auto" | "building" | "hangar" | "research_local", queueId?: string) => void;
 }) {
-  const l = (fr: string, en: string) => (language === "en" ? en : fr);
-  const [boostItemId, setBoostItemId] = useState("");
-  const [boostQuantityInput, setBoostQuantityInput] = useState("1");
-  const categories: Array<{ id: TechnologyCategory; title: string }> = [
-    { id: "eco", title: l("Technologies Economiques", "Economic Tech") },
-    { id: "military", title: l("Technologies Militaires", "Military Tech") },
-    { id: "defense", title: l("Technologies Defensives", "Defensive Tech") },
-    { id: "unlock", title: l("Deblocages Vaisseaux", "Ship Unlocks") },
-    { id: "energy", title: l("Technologies Energetiques", "Energy Tech") },
-    { id: "strategy", title: l("Technologies Strategiques", "Strategic Tech") }
-  ];
-  const activeTech = researchJob ? TECHNOLOGY_BY_ID[researchJob.technologyId] : null;
-  const boostItems = useMemo(
-    () =>
-      inventoryItems
-        .filter((item) => item.category === "TIME_BOOST" && (item.durationSeconds ?? 0) > 0 && item.quantity > 0)
-        .sort((a, b) => (a.durationSeconds ?? 0) - (b.durationSeconds ?? 0)),
-    [inventoryItems]
-  );
-  const selectedBoost = boostItems.find((item) => item.id === boostItemId) ?? (boostItems.length > 0 ? boostItems[0] : null);
-  const requestedBoostQuantity = Math.max(1, Math.floor(Number(boostQuantityInput) || 1));
-  const effectiveBoostQuantity = selectedBoost ? Math.min(requestedBoostQuantity, selectedBoost.quantity) : 0;
-  const boostLoading = Boolean(selectedBoost) && inventoryActionLoadingId === selectedBoost.id;
-  const canUseBoost = Boolean(researchJob) && Boolean(selectedBoost) && effectiveBoostQuantity > 0 && !inventoryLoading && !boostLoading;
-  useEffect(() => {
-    if (boostItems.length === 0) {
-      setBoostItemId("");
-      return;
-    }
-    if (!boostItemId || !boostItems.some((item) => item.id === boostItemId)) {
-      setBoostItemId(boostItems[0].id);
-    }
-  }, [boostItemId, boostItems]);
-
   return (
-    <main className="tech-shell">
-      <section className="tech-overview">
-        <h2>{l("Centre de Recherche", "Research Center")}</h2>
-        <p>{l("Systeme technologique scalable: cout x1.6, temps x1.5, bonus cumulatifs multiplicatifs.", "Scalable tech system: cost x1.6, time x1.5, multiplicative stacked bonuses.")}</p>
-        {researchJob && activeTech ? (
-          <div className="tech-active-job">
-            <strong>{l("Recherche en cours", "Research in progress")}</strong>
-            <span>{technologyDisplayName(activeTech.id, activeTech.name, language)} - {l("Niveau cible", "Target level")} {researchJob.targetLevel}</span>
-            <em>{l("Temps restant", "Time left")}: {formatDuration(researchRemainingSeconds)}</em>
-            {boostItems.length > 0 ? (
-              <div className="tech-boost-row">
-                <select
-                  value={selectedBoost?.id ?? ""}
-                  onChange={(e) => {
-                    setBoostItemId(e.target.value);
-                    setBoostQuantityInput("1");
-                  }}
-                >
-                  {boostItems.map((item) => (
-                    <option key={item.id} value={item.id}>
-                      {formatBoostDurationLabel(item.durationSeconds ?? 0)} (x{item.quantity})
-                    </option>
-                  ))}
-                </select>
-                <input
-                  type="number"
-                  min={1}
-                  max={selectedBoost?.quantity ?? 1}
-                  value={boostQuantityInput}
-                  onChange={(e) => setBoostQuantityInput(e.target.value)}
-                />
-                <button
-                  type="button"
-                  disabled={!canUseBoost}
-                  onClick={() =>
-                    selectedBoost
-                      ? onUseBoost(selectedBoost.id, effectiveBoostQuantity, "research_local")
-                      : undefined
-                  }
-                >
-                  {boostLoading ? l("Application...", "Applying...") : l("Accelerer", "Boost")}
-                </button>
-              </div>
-            ) : (
-              <span>{l("Aucun accelerateur disponible.", "No accelerator available.")}</span>
-            )}
-          </div>
-        ) : (
-          <div className="tech-active-job idle">
-            <strong>{l("Aucune recherche active", "No active research")}</strong>
-            <span>{l("Selectionnez une technologie pour lancer la file de recherche.", "Select a technology to start research.")}</span>
-          </div>
-        )}
-      </section>
-
-      {categories.map((cat) => {
-        const list = TECHNOLOGY_DEFS.filter((def) => def.category === cat.id);
-        if (list.length === 0) return null;
-        return (
-          <section key={cat.id} className="tech-category">
-            <header>
-              <h3>{cat.title}</h3>
-            </header>
-            <div className="tech-grid">
-              {list.map((def) => {
-                const currentLevel = techLevelValue(technologyLevels, def.id);
-                const atMax = Boolean(def.maxLevel && currentLevel >= def.maxLevel);
-                const targetLevel = currentLevel + 1;
-                const nextCost = technologyCostForLevel(def, targetLevel);
-                const nextTime = Math.max(1, Math.floor(technologyTimeForLevel(def, targetLevel) * researchTimeFactor));
-                const reqMet = technologyRequirementsMet(technologyLevels, def);
-                const canPay = canAffordCost(resourceAmounts, nextCost);
-                const isCurrent = researchJob?.technologyId === def.id;
-                const requirementsLabel = (def.requires ?? [])
-                  .map((req) => `${technologyDisplayName(req.id, TECHNOLOGY_BY_ID[req.id].name, language)} Lv.${req.level}`)
-                  .join(" + ");
-                const disabled = atMax || !reqMet || !canPay || Boolean(researchJob);
-                return (
-                  <article key={def.id} className={`tech-card ${isCurrent ? "active" : ""}`}>
-                    <div className="tech-card-head">
-                      <strong>{technologyDisplayName(def.id, def.name, language)}</strong>
-                      <span>Lv.{currentLevel}{def.maxLevel ? `/${def.maxLevel}` : ""}</span>
-                    </div>
-                    <p className="tech-desc">{technologyDisplayDescription(def.id, def.description, language)}</p>
-                    {technologyDisplayEffect(def.id, def.effectPerLevel, language) ? (
-                      <p className="tech-effect">{technologyDisplayEffect(def.id, def.effectPerLevel, language)}</p>
-                    ) : null}
-                    {!reqMet && requirementsLabel ? (
-                      <p className="tech-req">{l("Requis", "Requires")}: {requirementsLabel}</p>
-                    ) : null}
-                    {!atMax ? (
-                      <>
-                        <div className="tech-cost">
-                          <span className="tech-cost-label">{l("Cout niv. suivant", "Next level cost")}:</span>
-                          <ResourceCostDisplay cost={nextCost} available={resourceAmounts} language={language} compact />
-                        </div>
-                        <p className="tech-time">{l("Temps niv. suivant", "Next level time")}: {formatDuration(nextTime)}</p>
-                      </>
-                    ) : (
-                      <p className="tech-max">{l("Niveau maximum atteint", "Max level reached")}</p>
-                    )}
-                    <button
-                      type="button"
-                      className="tech-launch-btn"
-                      disabled={disabled}
-                      onClick={() => onLaunchResearch(def.id)}
-                    >
-                      {isCurrent
-                        ? l("En recherche...", "Researching...")
-                        : atMax
-                          ? l("Max", "Max")
-                          : !reqMet
-                            ? l("Prerequis manquants", "Missing requirements")
-                            : !canPay
-                              ? l("Ressources insuffisantes", "Not enough resources")
-                              : researchJob
-                                ? l("File de recherche occupee", "Research slot busy")
-                                : l("Lancer la recherche", "Start research")}
-                    </button>
-                  </article>
-                );
-              })}
-            </div>
-          </section>
-        );
-      })}
-    </main>
+    <TechnologyCommandScreen
+      language={language}
+      technologyDefs={TECHNOLOGY_DEFS}
+      technologyLevels={technologyLevels}
+      researchJob={researchJob}
+      researchRemainingSeconds={researchRemainingSeconds}
+      researchTimeFactor={researchTimeFactor}
+      resourceAmounts={resourceAmounts}
+      inventoryItems={inventoryItems}
+      inventoryLoading={inventoryLoading}
+      inventoryActionLoadingId={inventoryActionLoadingId}
+      onLaunchResearch={onLaunchResearch}
+      onUseBoost={onUseBoost}
+      getTechnologyName={(techId, fallback) => technologyDisplayName(techId as TechnologyId, fallback, language)}
+      getTechnologyDescription={(techId, fallback) => technologyDisplayDescription(techId as TechnologyId, fallback, language)}
+      getTechnologyEffect={(techId, fallback) => technologyDisplayEffect(techId as TechnologyId, fallback, language)}
+      getTechnologyCostForLevel={technologyCostForLevel}
+      getTechnologyTimeForLevel={technologyTimeForLevel}
+      areTechnologyRequirementsMet={(tech) => technologyRequirementsMet(technologyLevels, tech as TechnologyDef)}
+      getRequirementsLabel={(tech) =>
+        (tech.requires ?? [])
+          .map((req) => `${technologyDisplayName(req.id as TechnologyId, TECHNOLOGY_BY_ID[req.id as TechnologyId].name, language)} Lv.${req.level}`)
+          .join(" + ")
+      }
+      formatBoostDurationLabel={formatBoostDurationLabel}
+    />
   );
 }
-
 function WikiScreen({ language }: { language: UILanguage }) {
-  const l = (fr: string, en: string) => (language === "en" ? en : fr);
-  const [tutorialTrack, setTutorialTrack] = useState<"start" | "hour1" | "pitfalls">("start");
-  const [buildingPhase, setBuildingPhase] = useState<"early" | "mid" | "late">("early");
-  const [militaryPhase, setMilitaryPhase] = useState<"light" | "mid" | "heavy">("light");
-  const [techPhase, setTechPhase] = useState<"base" | "advanced" | "endgame">("base");
-
   const buildingRows = useMemo(
     () =>
       RESOURCE_DEFS.map((res) => {
@@ -12882,6 +14651,7 @@ function WikiScreen({ language }: { language: UILanguage }) {
         .map((unit) => ({ ...unit, name: hangarUnitDisplayName(unit.id, unit.name, language) })),
     [language]
   );
+
   const defenses = useMemo(
     () =>
       HANGAR_UNIT_DEFS
@@ -12889,6 +14659,7 @@ function WikiScreen({ language }: { language: UILanguage }) {
         .map((unit) => ({ ...unit, name: hangarUnitDisplayName(unit.id, unit.name, language) })),
     [language]
   );
+
   const techRows = useMemo(
     () =>
       TECHNOLOGY_DEFS.map((tech) => ({
@@ -12906,1334 +14677,15 @@ function WikiScreen({ language }: { language: UILanguage }) {
     return keys.map((key) => `${(cost[key] ?? 0).toLocaleString()} ${resourceDisplayName(key, language)}`).join(" + ");
   };
 
-  const tabDescription =
-    buildingPhase === "early"
-      ? l(
-          "Phase initiale: priorite sur Carbone, Titane, Entrepot et cadence de construction.",
-          "Early phase: prioritize Carbon, Titanium, Warehouse capacity, and build cadence."
-        )
-      : buildingPhase === "mid"
-        ? l(
-            "Phase intermediaire: expansion Osmium/Adamantium et stabilisation des reserves.",
-            "Mid phase: expand Osmium/Adamantium and stabilize reserves."
-          )
-        : l(
-            "Phase avancee: ressources de recherche et optimisation intensive via technologies.",
-            "Late phase: scale research resources and optimize aggressively through technology."
-          );
-
-  const militaryDescription =
-    militaryPhase === "light"
-      ? l(
-          "Combat leger: reconnaissance, pression rapide et interception logistique.",
-          "Light combat: scouting, rapid pressure, and logistics interception."
-        )
-      : militaryPhase === "mid"
-        ? l(
-            "Combat moyen: flottes polyvalentes et defenses de maintien orbital.",
-            "Mid combat: versatile fleets with sustained orbital defense."
-          )
-        : l(
-            "Combat lourd: attrition longue, percee capitale et verrouillage orbital.",
-            "Heavy combat: long attrition, capital breakthrough, and orbital lockdown."
-          );
-
-  const techDescription =
-    techPhase === "base"
-      ? l(
-          "Technologies de base: acceleration economique et debloquages initiaux.",
-          "Base technologies: economic acceleration and initial unlocks."
-        )
-      : techPhase === "advanced"
-        ? l(
-            "Technologies avancees: puissance militaire, defense et efficience energetique.",
-            "Advanced technologies: military strength, defense scaling, and energy efficiency."
-          )
-        : l(
-            "Technologies endgame: commandement, modules et optimisation strategique de haut niveau.",
-          "Endgame technologies: command systems, modules, and high-level strategic optimization."
-        );
-
-  const tutorialCards = tutorialTrack === "start"
-    ? [
-        {
-          id: "t_start_1",
-          title: l("1. Stabiliser l'economie", "1. Stabilize economy"),
-          text: l(
-            "Montez Raffinerie de Carbone et Fabrique de Titane rapidement, puis posez un Entrepot pour eviter le blocage de production.",
-            "Level up Carbon Refinery and Titanium Factory quickly, then build a Warehouse to avoid production cap lock."
-          )
-        },
-        {
-          id: "t_start_2",
-          title: l("2. Garder la file active", "2. Keep queue active"),
-          text: l(
-            "Ne laissez jamais la file batiment vide. Meme une amelioration mineure vaut mieux qu'une file inactive.",
-            "Never leave the building queue idle. Even a minor upgrade is better than an empty queue."
-          )
-        },
-        {
-          id: "t_start_3",
-          title: l("3. Debloquer la chaine", "3. Unlock the chain"),
-          text: l(
-            "Visez Osmium puis Adamantium. Ces ressources ouvrent le mid game militaire et les technologies cle.",
-            "Rush Osmium then Adamantium. These resources unlock military mid game and key technologies."
-          )
-        }
-      ]
-    : tutorialTrack === "hour1"
-      ? [
-          {
-            id: "t_h1_1",
-            title: l("Minute 0-15", "Minute 0-15"),
-            text: l(
-              "Optimisez Carbone/Titane, lancez vos premieres ameliorations et gardez le zoom sur le quadrillage pour encha�ner.",
-              "Optimize Carbon/Titanium, start first upgrades, and stay focused on the grid to chain actions."
-            )
-          },
-          {
-            id: "t_h1_2",
-            title: l("Minute 15-35", "Minute 15-35"),
-            text: l(
-              "Posez Entrepot, preparez Osmium, puis surveillez la barre de ressources en haut pour eviter les caps.",
-              "Build Warehouse, prepare Osmium, and monitor top resource bar to avoid hitting caps."
-            )
-          },
-          {
-            id: "t_h1_3",
-            title: l("Minute 35-60", "Minute 35-60"),
-            text: l(
-              "Lancez la premiere techno eco, ouvrez le Hangar, et preparez une composition legere pour la carte.",
-              "Start first eco tech, open Hangar, and prepare a light composition for map operations."
-            )
-          }
-        ]
-      : [
-          {
-            id: "t_pit_1",
-            title: l("Erreur: stock plein", "Mistake: storage full"),
-            text: l(
-              "Si la ressource atteint le cap, la production stoppe. Montez Entrepot avant d'enchainer des boosts.",
-              "If a resource reaches cap, production stops. Upgrade Warehouse before chaining boosts."
-            )
-          },
-          {
-            id: "t_pit_2",
-            title: l("Erreur: tech sans eco", "Mistake: tech before economy"),
-            text: l(
-              "Monter des technos trop tot ralentit tout. Priorisez production et file batiment active.",
-              "Rushing tech too early slows everything down. Prioritize production and active building queue."
-            )
-          },
-          {
-            id: "t_pit_3",
-            title: l("Erreur: flotte non specialisee", "Mistake: unspecialized fleet"),
-            text: l(
-              "Mixez reconnaissance, attaque et transport selon objectif. Une flotte unique est facile a contrer.",
-              "Mix scouting, attack, and transport by objective. A single-type fleet is easy to counter."
-            )
-          }
-        ];
-
-  const tutorialChecklist = tutorialTrack === "start"
-    ? [
-        l("Ameliorer Carbone et Titane au moins niveau 3.", "Upgrade Carbon and Titanium to at least level 3."),
-        l("Construire Entrepot Orbital niveau 1.", "Build Orbital Warehouse level 1."),
-        l("Lancer une recherche economique.", "Start one economic research."),
-        l("Ne jamais laisser la file batiment vide.", "Never leave the building queue idle.")
-      ]
-    : tutorialTrack === "hour1"
-      ? [
-          l("Verifier la carte et poser 1 balise utile.", "Check the map and save 1 useful bookmark."),
-          l("Produire au moins 1 vaisseau de reco et 1 defense.", "Produce at least 1 scout ship and 1 defense."),
-          l("Utiliser un accelerateur sur la bonne file.", "Use one accelerator on the right queue."),
-          l("Verifier le ratio production/capacite.", "Check production/capacity ratio.")
-        ]
-      : [
-          l("Eviter de depenser tous les coffres a cap plein.", "Avoid opening all chests while capped."),
-          l("Ne pas ignorer les prerequis de doctrine.", "Do not ignore doctrine prerequisites."),
-          l("Ne pas surinvestir militaire sans logistique.", "Do not overinvest in military without logistics."),
-          l("Toujours verifier le cout du niveau suivant.", "Always check next-level cost before launch.")
-        ];
-
-  const tutorialRoadmap = [
-    {
-      phase: l("Session 1", "Session 1"),
-      objective: l("Stabiliser l'economie de base", "Stabilize base economy"),
-      actions: l(
-        "Carbone/Titane niveaux 3+, Entrepot niveau 1, file batiment active.",
-        "Carbon/Titanium level 3+, Warehouse level 1, active building queue."
-      ),
-      checkpoint: l("Aucun blocage de cap pendant 20 min.", "No storage-cap lock for 20 min.")
-    },
-    {
-      phase: l("Session 2", "Session 2"),
-      objective: l("Passer en mode expansion", "Move into expansion mode"),
-      actions: l(
-        "Debloquer Osmium + Adamantium, lancer 1 techno eco et 1 defense.",
-        "Unlock Osmium + Adamantium, start 1 economy tech and 1 defense."
-      ),
-      checkpoint: l("Production multi-ressources stable.", "Stable multi-resource production.")
-    },
-    {
-      phase: l("Session 3", "Session 3"),
-      objective: l("Entrer dans le mid game", "Enter mid game"),
-      actions: l(
-        "Ouvrir Hangar en continu, doctrines de base, premieres operations carte.",
-        "Run Hangar continuously, unlock base doctrines, launch first map operations."
-      ),
-      checkpoint: l("Flotte legere + defenses actives.", "Light fleet + active defenses.")
-    }
-  ];
-
-  const tutorialFaq = [
-    {
-      q: l("Quand utiliser les accelerateurs ?", "When should I use accelerators?"),
-      a: l(
-        "Utilisez-les quand votre file est deja rentable (Osmium/Adamantium, techno cle, unite critique). Evitez de les depenser sur des niveaux faibles.",
-        "Use them when your queue is already high value (Osmium/Adamantium, key tech, critical unit). Avoid spending them on low-value levels."
-      )
-    },
-    {
-      q: l("Pourquoi ma production s'arrete ?", "Why did my production stop?"),
-      a: l(
-        "Votre entrepot est plein. La production est clamp cote serveur. Montez l'Entrepot Orbital ou depensez des ressources.",
-        "Your warehouse is full. Production is server-side clamped. Upgrade Orbital Warehouse or spend resources."
-      )
-    },
-    {
-      q: l("Comment progresser plus vite sans me bloquer ?", "How do I progress faster without stalling?"),
-      a: l(
-        "Gardez les 3 files actives (batiment, hangar, recherche), evitez les caps, et priorisez les prerequis qui debloquent les paliers suivants.",
-        "Keep all 3 queues active (building, hangar, research), avoid caps, and prioritize prerequisites that unlock the next milestones."
-      )
-    }
-  ];
-
   return (
-    <main className="wiki-shell">
-      <section className="wiki-hero">
-        <h2>{l("Wiki Officiel Hyperstructure Command", "Hyperstructure Command Official Wiki")}</h2>
-        <p>
-          {l(
-            "Reference strategique du jeu 4X: economie persistante 24/7, expansion militaire, progression technologique et domination orbitale.",
-            "Strategic 4X reference: persistent 24/7 economy, military expansion, technology progression and orbital domination."
-          )}
-        </p>
-        <div className="wiki-info-grid">
-          <article className="wiki-info-card">
-            <strong>{l("Economie", "Economy")}</strong>
-            <span>{l("Production en continu, online/offline, serveur autoritaire.", "Continuous online/offline production, server-authoritative.")}</span>
-          </article>
-          <article className="wiki-info-card">
-            <strong>{l("Militaire", "Military")}</strong>
-            <span>{l("Flottes, defenses, ordre de tir et consommation quantique.", "Fleets, defenses, firing order and quantum consumption.")}</span>
-          </article>
-          <article className="wiki-info-card">
-            <strong>{l("Technologies", "Technologies")}</strong>
-            <span>{l("Scaling exponentiel, debloquages, bonus multiplicatifs.", "Exponential scaling, unlocks and multiplicative bonuses.")}</span>
-          </article>
-        </div>
-      </section>
-
-      <nav className="wiki-toc" aria-label={l("Sommaire Wiki", "Wiki table of contents")}>
-        <h3>{l("Sommaire", "Contents")}</h3>
-        <div className="wiki-toc-links">
-          <a href="#wiki-tutoriel">{l("1. Tutoriel de progression", "1. Progression tutorial")}</a>
-          <a href="#wiki-batiments">{l("2. Les Batiments", "2. Buildings")}</a>
-          <a href="#wiki-population">{l("3. Population & Societe", "3. Population & Society")}</a>
-          <a href="#wiki-vaisseaux">{l("4. Vaisseaux & Defenses", "4. Ships & Defenses")}</a>
-          <a href="#wiki-technologies">{l("5. Les Technologies", "5. Technologies")}</a>
-          <a href="#wiki-champs">{l("6. Carte & Champs de ressources", "6. Map & Resource fields")}</a>
-          <a href="#wiki-inbox">{l("7. Messagerie & Recompenses", "7. Inbox & Rewards")}</a>
-        </div>
-      </nav>
-
-      <section id="wiki-tutoriel" className="wiki-section">
-        <header className="wiki-section-head">
-          <h3>{l("1. Tutoriel de progression", "1. Progression tutorial")}</h3>
-          <p>
-            {l(
-              "Parcours guide pour debutant: quoi faire, dans quel ordre, et comment eviter les erreurs qui ralentissent la progression.",
-              "Guided beginner path: what to do, in which order, and how to avoid mistakes that slow progression."
-            )}
-          </p>
-        </header>
-
-        <div className="wiki-note">
-          <strong>{l("Mode actif", "Active mode")}</strong>
-          <span>
-            {tutorialTrack === "start"
-              ? l("Demarrage global", "Global kickoff")
-              : tutorialTrack === "hour1"
-                ? l("Plan 60 minutes", "60-minute plan")
-                : l("Erreurs frequentes", "Common pitfalls")}
-          </span>
-        </div>
-
-        <div className="wiki-tabs">
-          <button className={tutorialTrack === "start" ? "active" : ""} onClick={() => setTutorialTrack("start")}>
-            {l("Demarrage", "Start")}
-          </button>
-          <button className={tutorialTrack === "hour1" ? "active" : ""} onClick={() => setTutorialTrack("hour1")}>
-            {l("Premiere heure", "First hour")}
-          </button>
-          <button className={tutorialTrack === "pitfalls" ? "active" : ""} onClick={() => setTutorialTrack("pitfalls")}>
-            {l("A eviter", "Avoid")}
-          </button>
-        </div>
-
-        <div className="wiki-info-grid wiki-tutorial-grid">
-          {tutorialCards.map((card) => (
-            <article key={card.id} className="wiki-info-card">
-              <strong>{card.title}</strong>
-              <span>{card.text}</span>
-            </article>
-          ))}
-        </div>
-
-        <article className="wiki-checklist">
-          <h4>{l("Checklist immediate", "Immediate checklist")}</h4>
-          <ul>
-            {tutorialChecklist.map((item) => (
-              <li key={item}>{item}</li>
-            ))}
-          </ul>
-        </article>
-
-        <div className="wiki-table-wrap">
-          <table className="wiki-table">
-            <thead>
-              <tr>
-                <th>{l("Etape", "Stage")}</th>
-                <th>{l("Objectif", "Objective")}</th>
-                <th>{l("Actions cles", "Key actions")}</th>
-                <th>{l("Validation", "Checkpoint")}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {tutorialRoadmap.map((row) => (
-                <tr key={row.phase}>
-                  <td>{row.phase}</td>
-                  <td>{row.objective}</td>
-                  <td>{row.actions}</td>
-                  <td>{row.checkpoint}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-
-        <details className="wiki-spoiler">
-          <summary>{l("FAQ de progression", "Progression FAQ")}</summary>
-          <div className="wiki-faq-list">
-            {tutorialFaq.map((row) => (
-              <article key={row.q} className="wiki-faq-item">
-                <strong>{row.q}</strong>
-                <span>{row.a}</span>
-              </article>
-            ))}
-          </div>
-        </details>
-      </section>
-
-      <section id="wiki-batiments" className="wiki-section">
-        <header className="wiki-section-head">
-          <h3>{l("2. Les Batiments", "2. Buildings")}</h3>
-          <p>{l("La couche economique structure tout le gameplay: production, couts, temps, stockage.", "The economic layer structures all gameplay: production, costs, time and storage.")}</p>
-        </header>
-
-        <div className="wiki-note">
-          <strong>{l("Note strategique", "Strategic note")}</strong>
-          <span>{tabDescription}</span>
-        </div>
-
-        <div className="wiki-tabs">
-          <button className={buildingPhase === "early" ? "active" : ""} onClick={() => setBuildingPhase("early")}>
-            {l("Early game", "Early game")}
-          </button>
-          <button className={buildingPhase === "mid" ? "active" : ""} onClick={() => setBuildingPhase("mid")}>
-            {l("Mid game", "Mid game")}
-          </button>
-          <button className={buildingPhase === "late" ? "active" : ""} onClick={() => setBuildingPhase("late")}>
-            {l("Late game", "Late game")}
-          </button>
-        </div>
-
-        <details className="wiki-spoiler">
-          <summary>{l("Formules economiques (production, cout, temps, stockage)", "Economic formulas (production, cost, time, storage)")}</summary>
-          <pre>
-{`Production(n) = Production_base x n^1.15 x (1 + bonus_total)
-Cost(n) = Cost_base x 1.55^(n - 1)
-BuildTime(n) = BuildTime_base x 1.45^(n - 1)
-Storage(n) = Storage_base x 1.6^(n - 1)`}
-          </pre>
-        </details>
-
-        <details className="wiki-spoiler">
-          <summary>{l("Scaling avance et logique serveur", "Advanced scaling and server logic")}</summary>
-          <pre>
-{l(
-`- Calcul en float cote serveur
-- Delta offline = floor(server_now - last_update)
-- Clamp a la capacite entrepot pour la production
-- Arrivages externes (coffres/flottes) autorises au-dessus du cap
-- Affichage client arrondi`,
-`- Server-side float calculations
-- Offline delta = floor(server_now - last_update)
-- Production clamped to warehouse capacity
-- External deliveries (chests/fleets) can exceed cap
-- Rounded values on client display`
-)}
-          </pre>
-        </details>
-
-        <h4>{l("Batiments de Construction", "Construction Buildings")}</h4>
-        <div className="wiki-table-wrap">
-          <table className="wiki-table">
-            <thead>
-              <tr>
-                <th>{l("Ressource", "Resource")}</th>
-                <th>{l("Rarete", "Rarity")}</th>
-                <th>{l("Batiment", "Building")}</th>
-                <th>{l("Prod. base/s", "Base prod/s")}</th>
-                <th>{l("Cout base", "Base cost")}</th>
-                <th>{l("Temps base", "Base time")}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {buildingRows
-                .filter((row) => row.section === "construction")
-                .map((row) => (
-                  <tr key={`wiki_building_${row.id}`}>
-                    <td>{row.name}</td>
-                    <td>{row.rarity}</td>
-                    <td>{row.machine}</td>
-                    <td>{row.baseProdSec.toFixed(3)}</td>
-                    <td>{formatWikiCost(row.baseCost)}</td>
-                    <td>{formatDuration(row.baseTimeSec)}</td>
-                  </tr>
-                ))}
-            </tbody>
-          </table>
-        </div>
-
-        <h4>{l("Batiments de Recherche", "Research Buildings")}</h4>
-        <div className="wiki-table-wrap">
-          <table className="wiki-table">
-            <thead>
-              <tr>
-                <th>{l("Ressource", "Resource")}</th>
-                <th>{l("Rarete", "Rarity")}</th>
-                <th>{l("Batiment", "Building")}</th>
-                <th>{l("Prod. base/s", "Base prod/s")}</th>
-                <th>{l("Cout base", "Base cost")}</th>
-                <th>{l("Temps base", "Base time")}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {buildingRows
-                .filter((row) => row.section === "research")
-                .map((row) => (
-                  <tr key={`wiki_research_building_${row.id}`}>
-                    <td>{row.name}</td>
-                    <td>{row.rarity}</td>
-                    <td>{row.machine}</td>
-                    <td>{row.baseProdSec.toFixed(3)}</td>
-                    <td>{formatWikiCost(row.baseCost)}</td>
-                    <td>{formatDuration(row.baseTimeSec)}</td>
-                  </tr>
-                ))}
-            </tbody>
-          </table>
-        </div>
-      </section>
-
-      <section id="wiki-population" className="wiki-section">
-        <header className="wiki-section-head">
-          <h3>{l("3. Population & Societe", "3. Population & Society")}</h3>
-          <p>
-            {l(
-              "La population pilote production, construction, recherche et stabilite. C'est une couche strategique majeure du jeu.",
-              "Population drives production, construction, research, and stability. It is a major strategic layer."
-            )}
-          </p>
-        </header>
-
-        <div className="wiki-note">
-          <strong>{l("Principe cle", "Key principle")}</strong>
-          <span>
-            {l(
-              "La croissance est continue, mais les bonus ne s'appliquent que si votre colonie reste stable (logement, nourriture, ordre social).",
-              "Growth is continuous, but bonuses apply only if your colony stays stable (housing, food, social order)."
-            )}
-          </span>
-        </div>
-
-        <div className="wiki-info-grid">
-          <article className="wiki-info-card">
-            <strong>{l("Classes de population", "Population classes")}</strong>
-            <span>
-              {l(
-                "Travailleurs (economie), Ingenieurs (construction), Scientifiques (recherche). La repartition evolue avec les batiments civils.",
-                "Workers (economy), Engineers (construction), Scientists (research). Distribution evolves with civil buildings."
-              )}
-            </span>
-          </article>
-          <article className="wiki-info-card">
-            <strong>{l("Bonus directs", "Direct bonuses")}</strong>
-            <span>
-              {l(
-                "+1% production globale / 1000 habitants, -1% temps construction / 500 ingenieurs, +1% vitesse recherche / 300 scientifiques.",
-                "+1% global production / 1000 population, -1% construction time / 500 engineers, +1% research speed / 300 scientists."
-              )}
-            </span>
-          </article>
-          <article className="wiki-info-card">
-            <strong>{l("Contraintes", "Constraints")}</strong>
-            <span>
-              {l(
-                "Surpopulation = -25% production. Famine = croissance stop + chute de stabilite. Crises sociales possibles en stabilite basse.",
-                "Overcapacity = -25% production. Famine = growth halt + stability drop. Social crises can occur at low stability."
-              )}
-            </span>
-          </article>
-        </div>
-
-        <h4>{l("Variables et formules principales", "Core variables and formulas")}</h4>
-        <div className="wiki-table-wrap">
-          <table className="wiki-table">
-            <thead>
-              <tr>
-                <th>{l("Variable", "Variable")}</th>
-                <th>{l("Description", "Description")}</th>
-                <th>{l("Regle / Formule", "Rule / Formula")}</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td>{l("Population totale", "Total population")}</td>
-                <td>{l("Habitants actifs de la colonie", "Active colony inhabitants")}</td>
-                <td>{l("Base persistante + croissance horaire", "Persistent base + hourly growth")}</td>
-              </tr>
-              <tr>
-                <td>{l("Capacite habitation", "Housing capacity")}</td>
-                <td>{l("Plafond avant surpopulation", "Ceiling before overcapacity")}</td>
-                <td>{l("Base 500 + bonus batiments civils", "Base 500 + civil building bonuses")}</td>
-              </tr>
-              <tr>
-                <td>{l("Croissance", "Growth")}</td>
-                <td>{l("Augmentation naturelle", "Natural increase")}</td>
-                <td>{l("population x 0.004 / h + migration", "population x 0.004 / h + migration")}</td>
-              </tr>
-              <tr>
-                <td>{l("Nourriture", "Food")}</td>
-                <td>{l("Reserve de soutien", "Support reserve")}</td>
-                <td>{l("Conso = population/h, prod via cantines", "Consumption = population/h, production via canteens")}</td>
-              </tr>
-              <tr>
-                <td>{l("Stabilite", "Stability")}</td>
-                <td>{l("Ordre social (0-100)", "Social order (0-100)")}</td>
-                <td>{l("Influe directement la production et les crises", "Directly impacts production and crises")}</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-
-        <details className="wiki-spoiler">
-          <summary>{l("Formules detaillees (version gameplay)", "Detailed formulas (gameplay version)")}</summary>
-          <pre>
-{l(
-`Croissance_base/h = population x 0.004
-Migration/h = population x attractivite
-Croissance_finale/h = 0 si famine OU surpopulation
-sinon Croissance_base x modificateurs + Migration
-
-Bonus_prod_population = floor(population / 1000) x 1%
-Bonus_construction = floor(ingenieurs / 500) x 1%
-Bonus_recherche = floor(scientifiques / 300) x 1%
-
-Surpopulation -> -25% production
-Famine -> croissance stop + choc de stabilite
-Stabilite faible -> malus prod + risque de crise`,
-`Base_growth/h = population x 0.004
-Migration/h = population x attractiveness
-Final_growth/h = 0 if famine OR overcapacity
-otherwise Base_growth x modifiers + Migration
-
-Population_prod_bonus = floor(population / 1000) x 1%
-Construction_bonus = floor(engineers / 500) x 1%
-Research_bonus = floor(scientists / 300) x 1%
-
-Overcapacity -> -25% production
-Famine -> growth halt + stability shock
-Low stability -> production penalties + crisis risk`
-)}
-          </pre>
-        </details>
-
-        <h4>{l("Repartition des classes", "Class distribution")}</h4>
-        <div className="wiki-table-wrap">
-          <table className="wiki-table">
-            <thead>
-              <tr>
-                <th>{l("Classe", "Class")}</th>
-                <th>{l("Ratio de base", "Base ratio")}</th>
-                <th>{l("Effet principal", "Primary effect")}</th>
-                <th>{l("Palier de bonus", "Bonus threshold")}</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td>{l("Travailleurs", "Workers")}</td>
-                <td>~70%</td>
-                <td>{l("Alimentent les batiments de production", "Feed production buildings")}</td>
-                <td>{l("Manque de travailleurs = rendement reduit", "Worker shortage = reduced yield")}</td>
-              </tr>
-              <tr>
-                <td>{l("Ingenieurs", "Engineers")}</td>
-                <td>~20%</td>
-                <td>{l("Accelerent les constructions", "Speed up constructions")}</td>
-                <td>500 {l("ingenieurs", "engineers")} = -1% {l("temps", "time")}</td>
-              </tr>
-              <tr>
-                <td>{l("Scientifiques", "Scientists")}</td>
-                <td>~10%</td>
-                <td>{l("Accelerent les recherches", "Speed up research")}</td>
-                <td>300 {l("scientifiques", "scientists")} = +1% {l("vitesse", "speed")}</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-
-        <h4>{l("Stabilite: bandes d'effet", "Stability effect bands")}</h4>
-        <div className="wiki-table-wrap">
-          <table className="wiki-table">
-            <thead>
-              <tr>
-                <th>{l("Stabilite", "Stability")}</th>
-                <th>{l("Etat", "State")}</th>
-                <th>{l("Impact", "Impact")}</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr><td>90+</td><td>{l("Excellent", "Excellent")}</td><td>{l("Bonus de production", "Production bonus")}</td></tr>
-              <tr><td>70-89</td><td>{l("Stable", "Stable")}</td><td>{l("Regime normal", "Normal regime")}</td></tr>
-              <tr><td>50-69</td><td>{l("Fragile", "Fragile")}</td><td>{l("Malus legers", "Light penalties")}</td></tr>
-              <tr><td>30-49</td><td>{l("Troubles", "Unrest")}</td><td>{l("Malus forts + risque crise", "Strong penalties + crisis risk")}</td></tr>
-              <tr><td>&lt;30</td><td>{l("Revolte", "Revolt")}</td><td>{l("Impact severe sur l'economie", "Severe economic impact")}</td></tr>
-            </tbody>
-          </table>
-        </div>
-
-        <h4>{l("Main d'oeuvre et equipages", "Workforce and crews")}</h4>
-        <div className="wiki-table-wrap">
-          <table className="wiki-table">
-            <thead>
-              <tr>
-                <th>{l("Bloc", "Block")}</th>
-                <th>{l("Exigence niveau 1", "Level 1 requirement")}</th>
-                <th>{l("Detail", "Detail")}</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td>{l("Raffinerie Carbone", "Carbon Refinery")}</td>
-                <td>50</td>
-                <td>{l("Le besoin augmente avec les niveaux", "Requirement scales with levels")}</td>
-              </tr>
-              <tr>
-                <td>{l("Fabrique Titane", "Titanium Factory")}</td>
-                <td>60</td>
-                <td>{l("Le besoin augmente avec les niveaux", "Requirement scales with levels")}</td>
-              </tr>
-              <tr>
-                <td>{l("Compacteur Osmium", "Osmium Compactor")}</td>
-                <td>80</td>
-                <td>{l("Le besoin augmente avec les niveaux", "Requirement scales with levels")}</td>
-              </tr>
-              <tr>
-                <td>{l("Synchrotron Adamantium", "Adamantium Synchrotron")}</td>
-                <td>120</td>
-                <td>{l("Le besoin augmente avec les niveaux", "Requirement scales with levels")}</td>
-              </tr>
-              <tr>
-                <td>{l("Vaisseaux (equipage)", "Ships (crew)")}</td>
-                <td>{l("Variable selon unite", "Varies by unit")}</td>
-                <td>{l("Ex: Eclaireur 5, Titanide 30, Colosse 80", "Ex: Scout 5, Titanid 30, Colossus 80")}</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-
-        <h4>{l("Batiments civils de population", "Civil population buildings")}</h4>
-        <div className="wiki-table-wrap">
-          <table className="wiki-table">
-            <thead>
-              <tr>
-                <th>{l("Batiment", "Building")}</th>
-                <th>{l("Deblocage", "Unlock")}</th>
-                <th>{l("Role", "Role")}</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr><td>{l("Quartiers residentiels", "Residential Quarters")}</td><td>0</td><td>{l("+capacite habitation, +stabilite", "+housing capacity, +stability")}</td></tr>
-              <tr><td>{l("Cantine hydroponique", "Hydroponic Canteen")}</td><td>0</td><td>{l("+production nourriture", "+food production")}</td></tr>
-              <tr><td>{l("Centre medical", "Medical Center")}</td><td>500</td><td>{l("+croissance, +sante, +stabilite", "+growth, +health, +stability")}</td></tr>
-              <tr><td>{l("Parc orbital", "Orbital Park")}</td><td>500</td><td>{l("+loisirs, +stabilite", "+leisure, +stability")}</td></tr>
-              <tr><td>{l("Academie technique", "Technical Academy")}</td><td>2000</td><td>{l("+part Ingenieurs", "+Engineer share")}</td></tr>
-              <tr><td>{l("Universite orbitale", "Orbital University")}</td><td>8000</td><td>{l("+part Scientifiques", "+Scientist share")}</td></tr>
-            </tbody>
-          </table>
-        </div>
-
-        <h4>{l("Exemples concrets", "Concrete examples")}</h4>
-        <div className="wiki-table-wrap">
-          <table className="wiki-table">
-            <thead>
-              <tr>
-                <th>{l("Situation", "Situation")}</th>
-                <th>{l("Calcul", "Calculation")}</th>
-                <th>{l("Resultat", "Result")}</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td>{l("Population 12 450", "Population 12,450")}</td>
-                <td>floor(12 450 / 1000) = 12</td>
-                <td>{l("+12% production globale", "+12% global production")}</td>
-              </tr>
-              <tr>
-                <td>{l("Ingenieurs 2 500", "Engineers 2,500")}</td>
-                <td>floor(2 500 / 500) = 5</td>
-                <td>{l("-5% temps de construction", "-5% construction time")}</td>
-              </tr>
-              <tr>
-                <td>{l("Scientifiques 1 350", "Scientists 1,350")}</td>
-                <td>floor(1 350 / 300) = 4</td>
-                <td>{l("+4% vitesse de recherche", "+4% research speed")}</td>
-              </tr>
-              <tr>
-                <td>{l("Croissance brute a 12 450 hab.", "Base growth at 12,450 pop")}</td>
-                <td>12 450 x 0.004 = 49.8 /h</td>
-                <td>{l("~50 habitants/h avant modifs", "~50 pop/h before modifiers")}</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-
-        <details className="wiki-spoiler">
-          <summary>{l("FAQ population", "Population FAQ")}</summary>
-          <div className="wiki-faq-list">
-            <article className="wiki-faq-item">
-              <strong>{l("Pourquoi ma population ne monte plus ?", "Why did my population stop growing?")}</strong>
-              <span>{l("Cause principale: famine ou surpopulation. Verifiez nourriture et capacite habitation.", "Main causes: famine or overcapacity. Check food and housing capacity.")}</span>
-            </article>
-            <article className="wiki-faq-item">
-              <strong>{l("Pourquoi ma production baisse alors que mes batiments montent ?", "Why is production lower while my buildings level up?")}</strong>
-              <span>{l("Souvent manque de travailleurs, stabilite faible, ou crise sociale active.", "Usually worker shortage, low stability, or an active social crisis.")}</span>
-            </article>
-            <article className="wiki-faq-item">
-              <strong>{l("Comment debloquer les batiments de population avances ?", "How do I unlock advanced population buildings?")}</strong>
-              <span>{l("Atteignez les paliers de population (500, 2000, 8000) et maintenez une colonie stable.", "Reach population thresholds (500, 2,000, 8,000) and keep colony stability high.")}</span>
-            </article>
-          </div>
-        </details>
-      </section>
-
-      <section id="wiki-vaisseaux" className="wiki-section">
-        <header className="wiki-section-head">
-          <h3>{l("4. Vaisseaux & Defenses", "4. Ships & Defenses")}</h3>
-          <p>{l("Le systeme militaire combine puissance brute, endurance, vitesse, capacite et energie quantique.", "The military system combines raw power, endurance, speed, capacity and quantum energy.")}</p>
-        </header>
-
-        <div className="wiki-note">
-          <strong>{l("Note strategique", "Strategic note")}</strong>
-          <span>{militaryDescription}</span>
-        </div>
-
-        <div className="wiki-tabs">
-          <button className={militaryPhase === "light" ? "active" : ""} onClick={() => setMilitaryPhase("light")}>
-            {l("Combat leger", "Light combat")}
-          </button>
-          <button className={militaryPhase === "mid" ? "active" : ""} onClick={() => setMilitaryPhase("mid")}>
-            {l("Combat moyen", "Mid combat")}
-          </button>
-          <button className={militaryPhase === "heavy" ? "active" : ""} onClick={() => setMilitaryPhase("heavy")}>
-            {l("Combat lourd", "Heavy combat")}
-          </button>
-        </div>
-
-        <details className="wiki-spoiler">
-          <summary>{l("Formules de combat simplifiees", "Simplified combat formulas")}</summary>
-          <pre>
-{l(
-`1) Tri des unites par vitesse
-2) Tir: degats = force x random(0.9 -> 1.1) - endurance_cible
-3) Clamp degats >= 0
-4) Application simultanee des cycles
-5) Consommation d'energie quantique selon distance et composition`,
-`1) Sort units by speed
-2) Shot: damage = force x random(0.9 -> 1.1) - target_endurance
-3) Clamp damage >= 0
-4) Apply cycles simultaneously
-5) Consume quantum energy based on distance and fleet composition`
-)}
-          </pre>
-        </details>
-
-        <h4>{l("Vaisseaux", "Ships")}</h4>
-        <div className="wiki-table-wrap">
-          <table className="wiki-table">
-            <thead>
-              <tr>
-                <th>{l("Nom", "Name")}</th>
-                <th>{l("Force", "Force")}</th>
-                <th>{l("Endurance", "Endurance")}</th>
-                <th>{l("Vitesse", "Speed")}</th>
-                <th>{l("Capacite", "Capacity")}</th>
-                <th>{l("Energie/h", "Energy/h")}</th>
-                <th>{l("Cout", "Cost")}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {ships.map((ship) => (
-                <tr key={`wiki_ship_${ship.id}`}>
-                  <td>{ship.name}</td>
-                  <td>{ship.force}</td>
-                  <td>{ship.endurance}</td>
-                  <td>{ship.speed ?? "-"}</td>
-                  <td>{ship.capacity ?? "-"}</td>
-                  <td>{ship.quantumPerHour ?? "-"}</td>
-                  <td>{formatWikiCost(ship.cost)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-
-        <h4>{l("Defenses planetaires", "Planetary Defenses")}</h4>
-        <div className="wiki-table-wrap">
-          <table className="wiki-table">
-            <thead>
-              <tr>
-                <th>{l("Nom", "Name")}</th>
-                <th>{l("Force", "Force")}</th>
-                <th>{l("Endurance", "Endurance")}</th>
-                <th>{l("Portee", "Range")}</th>
-                <th>{l("Recharge", "Reload")}</th>
-                <th>{l("Cout", "Cost")}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {defenses.map((defense) => (
-                <tr key={`wiki_defense_${defense.id}`}>
-                  <td>{defense.name}</td>
-                  <td>{defense.force}</td>
-                  <td>{defense.endurance}</td>
-                  <td>{defense.range ?? "-"}</td>
-                  <td>{defense.reload ?? "-"}</td>
-                  <td>{formatWikiCost(defense.cost)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </section>
-
-      <section id="wiki-technologies" className="wiki-section">
-        <header className="wiki-section-head">
-          <h3>{l("5. Les Technologies", "5. Technologies")}</h3>
-          <p>{l("Progression scientifique a croissance exponentielle: economie, combat, defense, commandement et energie.", "Exponential scientific progression: economy, combat, defense, command and energy.")}</p>
-        </header>
-
-        <div className="wiki-note">
-          <strong>{l("Note strategique", "Strategic note")}</strong>
-          <span>{techDescription}</span>
-        </div>
-
-        <div className="wiki-tabs">
-          <button className={techPhase === "base" ? "active" : ""} onClick={() => setTechPhase("base")}>
-            {l("Technologies de base", "Base technologies")}
-          </button>
-          <button className={techPhase === "advanced" ? "active" : ""} onClick={() => setTechPhase("advanced")}>
-            {l("Technologies avancees", "Advanced technologies")}
-          </button>
-          <button className={techPhase === "endgame" ? "active" : ""} onClick={() => setTechPhase("endgame")}>
-            {l("Technologies endgame", "Endgame technologies")}
-          </button>
-        </div>
-
-        <details className="wiki-spoiler">
-          <summary>{l("Formules de recherche", "Research formulas")}</summary>
-          <pre>
-{l(
-`TechCost(n) = TechCost_base x 1.6^(n - 1)
-TechTime(n) = TechTime_base x 1.5^(n - 1)
-Les bonus se cumulent multiplicativement`,
-`TechCost(n) = TechCost_base x 1.6^(n - 1)
-TechTime(n) = TechTime_base x 1.5^(n - 1)
-Bonuses stack multiplicatively`
-)}
-          </pre>
-        </details>
-
-        <div className="wiki-table-wrap">
-          <table className="wiki-table">
-            <thead>
-              <tr>
-                <th>{l("Technologie", "Technology")}</th>
-                <th>{l("Categorie", "Category")}</th>
-                <th>{l("Effet", "Effect")}</th>
-                <th>{l("Niv. max", "Max lvl")}</th>
-                <th>{l("Cout base", "Base cost")}</th>
-                <th>{l("Temps base", "Base time")}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {techRows
-                .filter((tech) => {
-                  if (techPhase === "base") return tech.category === "eco" || tech.category === "unlock";
-                  if (techPhase === "advanced") return tech.category === "military" || tech.category === "defense" || tech.category === "energy";
-                  return tech.category === "strategy" || tech.id === "architecture_capitale" || tech.id === "stabilisation_singulite";
-                })
-                .map((tech) => (
-                  <tr key={`wiki_tech_${tech.id}`}>
-                    <td>{tech.name}</td>
-                    <td>{tech.category}</td>
-                    <td>{tech.effectPerLevel ?? tech.description}</td>
-                    <td>{tech.maxLevel ?? l("Illimite", "Unlimited")}</td>
-                    <td>{formatWikiCost(tech.baseCost)}</td>
-                    <td>{formatDuration(tech.baseTimeSec)}</td>
-                  </tr>
-                ))}
-            </tbody>
-          </table>
-        </div>
-      </section>
-
-      <section id="wiki-champs" className="wiki-section">
-        <header className="wiki-section-head">
-          <h3>{l("6. Carte & Champs de ressources", "6. Map & Resource fields")}</h3>
-          <p>
-            {l(
-              "Les champs de ressources ajoutent une economie opportuniste: trajet court, exploitation longue, risque PvP et gains differes au retour.",
-              "Resource fields add an opportunistic economy: short travel, long extraction, PvP risk, and delayed rewards on return."
-            )}
-          </p>
-        </header>
-
-        <div className="wiki-note">
-          <strong>{l("Boucle de gameplay", "Gameplay loop")}</strong>
-          <span>
-            {l(
-              "Reperez un champ -> envoyez une flotte -> extrayez progressivement -> revenez avec ressources + bonus d'items.",
-              "Find a field -> send a fleet -> extract progressively -> return with resources + bonus items."
-            )}
-          </span>
-        </div>
-
-        <div className="wiki-info-grid">
-          <article className="wiki-info-card">
-            <strong>{l("Spawn dynamique", "Dynamic spawn")}</strong>
-            <span>
-              {l(
-                "Chaque champ a une rarete, une qualite et 1 a 4 ressources. Les positions evitent le chevauchement avec planetes et autres champs.",
-                "Each field has a rarity, a quality tier, and 1 to 4 resources. Positions avoid overlaps with planets and other fields."
-              )}
-            </span>
-          </article>
-          <article className="wiki-info-card">
-            <strong>{l("Exploitation en 3 phases", "3-phase extraction")}</strong>
-            <span>
-              {l(
-                "Aller, extraction sur site, puis retour. Les ressources ne sont creditees qu'au retour de la flotte.",
-                "Outbound, on-site extraction, then return. Resources are credited only when the fleet returns."
-              )}
-            </span>
-          </article>
-          <article className="wiki-info-card">
-            <strong>{l("Information partielle", "Partial intel")}</strong>
-            <span>
-              {l(
-                "Le proprietaire voit le contenu et le cumul en cours. Les rivaux voient seulement l'occupation et peuvent attaquer.",
-                "The owner sees field contents and live extraction totals. Rivals only see occupancy status and can engage."
-              )}
-            </span>
-          </article>
-        </div>
-
-        <h4>{l("Raretes de champs", "Field rarities")}</h4>
-        <div className="wiki-table-wrap">
-          <table className="wiki-table">
-            <thead>
-              <tr>
-                <th>{l("Rarete", "Rarity")}</th>
-                <th>{l("Probabilite", "Probability")}</th>
-                <th>{l("Multiplicateur quantite", "Quantity multiplier")}</th>
-                <th>{l("Types de ressources", "Resource types")}</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td>{l("Commun", "Common")}</td>
-                <td>45%</td>
-                <td>x0.8</td>
-                <td>1-2</td>
-              </tr>
-              <tr>
-                <td>{l("Inhabituel", "Uncommon")}</td>
-                <td>28%</td>
-                <td>x1.0</td>
-                <td>2</td>
-              </tr>
-              <tr>
-                <td>{l("Rare", "Rare")}</td>
-                <td>16%</td>
-                <td>x1.25</td>
-                <td>2-3</td>
-              </tr>
-              <tr>
-                <td>{l("Epique", "Epic")}</td>
-                <td>8%</td>
-                <td>x1.6</td>
-                <td>3</td>
-              </tr>
-              <tr>
-                <td>{l("Legendaire", "Legendary")}</td>
-                <td>2.5%</td>
-                <td>x2.1</td>
-                <td>3-4</td>
-              </tr>
-              <tr>
-                <td>{l("Mythique", "Mythic")}</td>
-                <td>0.5%</td>
-                <td>x3.0</td>
-                <td>4</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-
-        <h4>{l("Qualite interne du champ", "Field quality tiers")}</h4>
-        <div className="wiki-table-wrap">
-          <table className="wiki-table">
-            <thead>
-              <tr>
-                <th>{l("Qualite", "Quality")}</th>
-                <th>{l("Multiplicateur", "Multiplier")}</th>
-                <th>{l("Distribution", "Distribution")}</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td>{l("Pauvre", "Poor")}</td>
-                <td>x0.70</td>
-                <td>20%</td>
-              </tr>
-              <tr>
-                <td>{l("Standard", "Standard")}</td>
-                <td>x1.00</td>
-                <td>50%</td>
-              </tr>
-              <tr>
-                <td>{l("Riche", "Rich")}</td>
-                <td>x1.40</td>
-                <td>25%</td>
-              </tr>
-              <tr>
-                <td>{l("Exceptionnel", "Exceptional")}</td>
-                <td>x2.00</td>
-                <td>5%</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-
-        <article className="wiki-checklist">
-          <h4>{l("Procedure recommandee", "Recommended procedure")}</h4>
-          <ul>
-            <li>{l("1) Ouvrir la carte puis cibler un champ avec un trajet court.", "1) Open the map and pick a field with short travel.")}</li>
-            <li>{l("2) Composer une flotte avec capacite transport + harvest speed suffisantes.", "2) Build a fleet with enough transport capacity + harvest speed.")}</li>
-            <li>{l("3) Lancer la collecte depuis la fenetre du champ.", "3) Start collection from the field popup.")}</li>
-            <li>{l("4) Surveiller la section Flottes en vol et le cumul visible sur le champ.", "4) Monitor In-flight fleets and live extraction shown on the field.")}</li>
-            <li>{l("5) Rappeler la flotte si risque militaire ou capacite atteinte.", "5) Recall early if military risk is high or cargo is near full.")}</li>
-            <li>{l("6) Recuperer les gains a l'arrivee via la messagerie de recompenses.", "6) Claim return gains through reward inbox messages.")}</li>
-          </ul>
-        </article>
-
-        <details className="wiki-spoiler">
-          <summary>{l("Formules de trajet/extraction", "Travel/extraction formulas")}</summary>
-          <pre>
-{`travelTime = max(120s, distance / fleetMapSpeed)
-extractionTime = clamp(totalWork / totalHarvestSpeed, 3600s, 7200s)
-collectedRatio = exploitedSeconds / extractionTime
-collectedAmount = fieldAmount * collectedRatio
-returnedAmount = min(collectedAmount, fleetTransportCapacity)`}
-          </pre>
-        </details>
-
-        <h4>{l("Guide de composition de flotte de recolte", "Harvest fleet composition guide")}</h4>
-        <div className="wiki-table-wrap">
-          <table className="wiki-table">
-            <thead>
-              <tr>
-                <th>{l("Profil", "Profile")}</th>
-                <th>{l("Composition type", "Typical composition")}</th>
-                <th>{l("Objectif", "Objective")}</th>
-                <th>{l("Quand l'utiliser", "When to use it")}</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td>{l("Eco securisee", "Safe economy")}</td>
-                <td>
-                  {l(
-                    "Argo majoritaires + Pegase en support + 1-2 escadres d'escorte.",
-                    "Argo majority + Pegase support + 1-2 escort squads."
-                  )}
-                </td>
-                <td>
-                  {l(
-                    "Maximiser la capacite de retour avec un risque militaire modere.",
-                    "Maximize return cargo with moderate military risk."
-                  )}
-                </td>
-                <td>{l("Zones calmes ou heures creuses.", "Quiet zones or low-activity hours.")}</td>
-              </tr>
-              <tr>
-                <td>{l("Collecte rapide", "Fast collection")}</td>
-                <td>
-                  {l(
-                    "Pegase + Eclaireur Stellaire + petite escorte mobile.",
-                    "Pegase + Stellar Scout + small mobile escort."
-                  )}
-                </td>
-                <td>
-                  {l(
-                    "Arriver vite, extraire partiellement, recall avant contre-attaque.",
-                    "Arrive fast, extract partially, recall before counterattack."
-                  )}
-                </td>
-                <td>{l("Carte contestee, priorite au tempo.", "Contested map, tempo priority.")}</td>
-              </tr>
-              <tr>
-                <td>{l("Champ dispute", "Contested field")}</td>
-                <td>
-                  {l(
-                    "Arche Spatiale/Argo + Spectre/Tempest + noyau lourd (Titanide/Colosse).",
-                    "Space Ark/Argo + Spectre/Tempest + heavy core (Titanide/Colossus)."
-                  )}
-                </td>
-                <td>
-                  {l(
-                    "Tenue de position et protection du cargo pendant l'extraction.",
-                    "Hold position and protect cargo during extraction."
-                  )}
-                </td>
-                <td>{l("Secteurs hostiles ou cibles legendaires/mythiques.", "Hostile sectors or legendary/mythic targets.")}</td>
-              </tr>
-              <tr>
-                <td>{l("Opportuniste", "Opportunist")}</td>
-                <td>
-                  {l(
-                    "Petite flotte mixte orientee vitesse + capacite minimale rentable.",
-                    "Small mixed fleet focused on speed + minimum profitable cargo."
-                  )}
-                </td>
-                <td>
-                  {l(
-                    "Prendre plusieurs champs moyens plutot qu'un gros champ risqu�.",
-                    "Chain multiple medium fields instead of one risky large field."
-                  )}
-                </td>
-                <td>{l("Sessions courtes et micro-management actif.", "Short sessions with active micro-management.")}</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-
-        <article className="wiki-checklist">
-          <h4>{l("Regles de composition", "Composition rules")}</h4>
-          <ul>
-            <li>{l("Toujours valider la capacite transport avant le depart.", "Always validate transport capacity before launch.")}</li>
-            <li>{l("Ajuster la puissance d'escorte selon la valeur du champ.", "Scale escort strength with field value.")}</li>
-            <li>{l("Ne laissez pas une flotte lente sans couverture sur un champ riche.", "Do not leave a slow fleet uncovered on a rich field.")}</li>
-            <li>{l("Utiliser le rappel anticipe pour verrouiller les gains deja extraits.", "Use early recall to secure already extracted gains.")}</li>
-          </ul>
-        </article>
-
-        <details className="wiki-spoiler">
-          <summary>{l("FAQ avancee PvP carte", "Advanced map PvP FAQ")}</summary>
-          <div className="wiki-faq-list">
-            <article className="wiki-faq-item">
-              <strong>{l("Quand attaquer une flotte de collecte adverse ?", "When should I attack an enemy harvest fleet?")}</strong>
-              <span>
-                {l(
-                  "Le meilleur timing est pendant l'extraction: la flotte est immobilisee sur champ et exposee. Une victoire coupe la collecte et peut annuler ses gains.",
-                  "Best timing is during extraction: the fleet is stationary on the field and exposed. A win interrupts collection and can cancel its gains."
-                )}
-              </span>
-            </article>
-            <article className="wiki-faq-item">
-              <strong>{l("Comment limiter les pertes en zone hostile ?", "How do I limit losses in hostile sectors?")}</strong>
-              <span>
-                {l(
-                  "Preferez des cycles courts: extraction partielle + retour rapide. Le rendement theorique est plus faible, mais le rendement net est souvent meilleur.",
-                  "Prefer short cycles: partial extraction + fast return. Theoretical yield is lower, but net yield is often better."
-                )}
-              </span>
-            </article>
-            <article className="wiki-faq-item">
-              <strong>{l("Que voient les autres joueurs sur mon champ ?", "What do other players see on my field?")}</strong>
-              <span>
-                {l(
-                  "Ils voient qu'il est occupe et par qui, mais pas les ressources exactes ni les quantites restantes.",
-                  "They see that it is occupied and by whom, but not exact resources or remaining amounts."
-                )}
-              </span>
-            </article>
-            <article className="wiki-faq-item">
-              <strong>{l("Pourquoi je ne recois pas les ressources instantanement ?", "Why don't I get resources instantly?")}</strong>
-              <span>
-                {l(
-                  "Les ressources de champ sont creditees au retour de la flotte, via un message de recompense. C'est volontaire pour creer un vrai risque logistique.",
-                  "Field resources are credited when the fleet returns, through a reward message. This is intentional to create real logistic risk."
-                )}
-              </span>
-            </article>
-            <article className="wiki-faq-item">
-              <strong>{l("Cap entrepot plein: la collecte est-elle perdue ?", "Warehouse cap full: is harvesting lost?")}</strong>
-              <span>
-                {l(
-                  "Non. Comme pour les arrivages externes, le retour de flotte peut depasser le cap de production passive.",
-                  "No. As with external deliveries, fleet returns can exceed passive production cap."
-                )}
-              </span>
-            </article>
-          </div>
-        </details>
-      </section>
-
-      <section id="wiki-inbox" className="wiki-section">
-        <header className="wiki-section-head">
-          <h3>{l("7. Messagerie & Recompenses", "7. Inbox & Rewards")}</h3>
-          <p>
-            {l(
-              "La messagerie est persistante et separee du chat: rapports, recompenses, systeme et conversations joueurs.",
-              "Inbox is persistent and separate from chat: reports, rewards, system messages, and player conversations."
-            )}
-          </p>
-        </header>
-
-        <div className="wiki-note">
-          <strong>{l("Regle cle", "Key rule")}</strong>
-          <span>
-            {l(
-              "Les recompenses avec pieces jointes sont generees et validees cote serveur (claim idempotent).",
-              "Attachment rewards are generated and validated server-side (idempotent claim)."
-            )}
-          </span>
-        </div>
-
-        <h4>{l("Types de messages", "Message types")}</h4>
-        <div className="wiki-table-wrap">
-          <table className="wiki-table">
-            <thead>
-              <tr>
-                <th>{l("Type", "Type")}</th>
-                <th>{l("Contenu", "Content")}</th>
-                <th>{l("Action", "Action")}</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td>{l("Recompense", "Reward")}</td>
-                <td>{l("Coffres, accelerateurs, butin de retour de flotte.", "Chests, accelerators, and fleet return loot.")}</td>
-                <td>{l("Reclamer", "Claim")}</td>
-              </tr>
-              <tr>
-                <td>{l("Combat", "Combat")}</td>
-                <td>{l("Rapports de bataille et de pertes.", "Battle and loss reports.")}</td>
-                <td>{l("Lire / archiver", "Read / archive")}</td>
-              </tr>
-              <tr>
-                <td>{l("Systeme", "System")}</td>
-                <td>{l("Annonces globales et evenements.", "Global announcements and events.")}</td>
-                <td>{l("Lire", "Read")}</td>
-              </tr>
-              <tr>
-                <td>{l("Joueur", "Player")}</td>
-                <td>{l("Messages asynchrones regroupes par discussion.", "Asynchronous messages grouped by conversation.")}</td>
-                <td>{l("Repondre", "Reply")}</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-
-        <h4>{l("Coffre quotidien de midi (heure serveur)", "Noon daily chest (server time)")}</h4>
-        <p>
-          {l(
-            "Chaque jour a 12:00 serveur, un message de recompense est envoye. Le bouton Ouvrir ajoute les items directement a l'inventaire.",
-            "Each day at 12:00 server time, a reward message is sent. The Open button adds items directly to inventory."
-          )}
-        </p>
-
-        <div className="wiki-table-wrap">
-          <table className="wiki-table">
-            <thead>
-              <tr>
-                <th>{l("Acceleration garantie (x1)", "Guaranteed accelerator (x1)")}</th>
-                <th>{l("Probabilite", "Probability")}</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr><td>{l("Faille Temporelle 1 min", "Time Rift 1 min")}</td><td>50%</td></tr>
-              <tr><td>{l("Faille Temporelle 5 min", "Time Rift 5 min")}</td><td>35%</td></tr>
-              <tr><td>{l("Faille Temporelle 1 h", "Time Rift 1 h")}</td><td>13%</td></tr>
-              <tr><td>{l("Faille Temporelle 3 h", "Time Rift 3 h")}</td><td>1.8%</td></tr>
-              <tr><td>{l("Faille Temporelle 12 h", "Time Rift 12 h")}</td><td>0.2%</td></tr>
-            </tbody>
-          </table>
-        </div>
-
-        <div className="wiki-table-wrap">
-          <table className="wiki-table">
-            <thead>
-              <tr>
-                <th>{l("Coffre de ressources garanti (x1)", "Guaranteed resource chest (x1)")}</th>
-                <th>{l("Probabilite", "Probability")}</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr><td>{l("Classique", "Classic")}</td><td>60%</td></tr>
-              <tr><td>{l("Inhabituel", "Uncommon")}</td><td>27%</td></tr>
-              <tr><td>{l("Rare", "Rare")}</td><td>10%</td></tr>
-              <tr><td>{l("Legendaire", "Legendary")}</td><td>2.7%</td></tr>
-              <tr><td>{l("Divin", "Divine")}</td><td>0.3%</td></tr>
-            </tbody>
-          </table>
-        </div>
-
-        <details className="wiki-spoiler">
-          <summary>{l("Regles serveur (anti-abus)", "Server rules (anti-abuse)")}</summary>
-          <pre>
-{l(
-`- Un coffre quotidien max par joueur et par jour serveur
-- Contenu genere cote serveur au moment du claim
-- Claim idempotent: aucune double recompense possible
-- Expiration des messages de recompense apres 72h
-- +1 badge Inbox a reception, +1 badge Inventaire si item obtenu`,
-`- One daily chest max per player per server day
-- Content generated server-side at claim time
-- Idempotent claim: no double reward possible
-- Reward messages expire after 72h
-- +1 Inbox badge on arrival, +1 Inventory badge when item is granted`
-)}
-          </pre>
-        </details>
-      </section>
-    </main>
+    <WikiKnowledgeScreen
+      language={language}
+      buildingRows={buildingRows}
+      ships={ships}
+      defenses={defenses}
+      techRows={techRows}
+      formatWikiCost={formatWikiCost}
+    />
   );
 }
 
@@ -14254,14 +14706,6 @@ function PopulationScreen({
   buildingTimeReductionFactor: number;
   onNavigate: (screen: UIScreen) => void;
 }) {
-  const l = (fr: string, en: string) => (language === "en" ? en : fr);
-  const roomLevels = useMemo(() => buildRoomLevelMap(rooms), [rooms]);
-  const populationFillPct = Math.max(0, Math.min(100, (snapshot.totalPopulation / Math.max(1, snapshot.capacity)) * 100));
-  const foodFillPct = Math.max(0, Math.min(100, (snapshot.foodStock / Math.max(1, snapshot.foodCapacity)) * 100));
-  const workforceLoadPct = Math.max(0, Math.min(100, (snapshot.requiredWorkers / Math.max(1, snapshot.workers)) * 100));
-  const constructionSpeedPct = (1 / Math.max(0.01, snapshot.constructionTimeFactor) - 1) * 100;
-  const researchSpeedPct = (1 / Math.max(0.01, snapshot.researchTimeFactor) - 1) * 100;
-
   const populationBuildingOrder: PopulationBuildingId[] = [
     "quartiers_residentiels",
     "cantine_hydroponique",
@@ -14271,14 +14715,19 @@ function PopulationScreen({
     "universite_orbitale"
   ];
 
+  const roomLevels = useMemo(() => buildRoomLevelMap(rooms), [rooms]);
+
   const nextPopulationUnlock = useMemo(() => {
     const rows = (Object.entries(POPULATION_BUILD_UNLOCK_MIN) as Array<[PopulationBuildingId, number]>)
       .filter(([, minPopulation]) => Number(minPopulation) > snapshot.totalPopulation)
       .sort((a, b) => a[1] - b[1]);
     if (rows.length <= 0) return null;
     const [roomType, minPopulation] = rows[0];
-    return { roomType, minPopulation };
-  }, [snapshot.totalPopulation]);
+    return {
+      name: roomDisplayName(roomType, language),
+      minPopulation
+    };
+  }, [language, snapshot.totalPopulation]);
 
   const buildingRows = useMemo(() => {
     const formatPercent = (value: number) => `${value >= 0 ? "+" : ""}${(value * 100).toFixed(1)}%`;
@@ -14292,40 +14741,81 @@ function PopulationScreen({
       const effects = POPULATION_BUILDING_EFFECTS[roomType] ?? {};
       const effectRows: string[] = [];
       if (effects.housingCapPerLevel) {
-        effectRows.push(l(`+${Math.floor(effects.housingCapPerLevel).toLocaleString()} capacite habitation / niveau`, `+${Math.floor(effects.housingCapPerLevel).toLocaleString()} housing capacity / level`));
+        effectRows.push(
+          language === "en"
+            ? `+${Math.floor(effects.housingCapPerLevel).toLocaleString()} housing capacity / level`
+            : `+${Math.floor(effects.housingCapPerLevel).toLocaleString()} capacite habitation / niveau`
+        );
       }
       if (effects.foodPerHourPerLevel) {
-        effectRows.push(l(`+${Math.floor(effects.foodPerHourPerLevel).toLocaleString()}/h nourriture / niveau`, `+${Math.floor(effects.foodPerHourPerLevel).toLocaleString()}/h food / level`));
+        effectRows.push(
+          language === "en"
+            ? `+${Math.floor(effects.foodPerHourPerLevel).toLocaleString()}/h food / level`
+            : `+${Math.floor(effects.foodPerHourPerLevel).toLocaleString()}/h nourriture / niveau`
+        );
       }
       if (effects.growthBonusPerLevel) {
-        effectRows.push(l(`${formatPercent(effects.growthBonusPerLevel)} croissance / niveau`, `${formatPercent(effects.growthBonusPerLevel)} growth / level`));
+        effectRows.push(
+          language === "en"
+            ? `${formatPercent(effects.growthBonusPerLevel)} growth / level`
+            : `${formatPercent(effects.growthBonusPerLevel)} croissance / niveau`
+        );
       }
       if (effects.stabilityPerLevel) {
-        effectRows.push(l(`+${effects.stabilityPerLevel.toFixed(2)} stabilite structurelle / niveau`, `+${effects.stabilityPerLevel.toFixed(2)} structural stability / level`));
+        effectRows.push(
+          language === "en"
+            ? `+${effects.stabilityPerLevel.toFixed(2)} structural stability / level`
+            : `+${effects.stabilityPerLevel.toFixed(2)} stabilite structurelle / niveau`
+        );
       }
       if (effects.leisurePerLevel) {
-        effectRows.push(l(`+${effects.leisurePerLevel.toFixed(2)} score loisirs / niveau`, `+${effects.leisurePerLevel.toFixed(2)} leisure score / level`));
+        effectRows.push(
+          language === "en"
+            ? `+${effects.leisurePerLevel.toFixed(2)} leisure score / level`
+            : `+${effects.leisurePerLevel.toFixed(2)} score loisirs / niveau`
+        );
       }
       if (effects.healthPerLevel) {
-        effectRows.push(l(`+${effects.healthPerLevel.toFixed(2)} score sante / niveau`, `+${effects.healthPerLevel.toFixed(2)} health score / level`));
+        effectRows.push(
+          language === "en"
+            ? `+${effects.healthPerLevel.toFixed(2)} health score / level`
+            : `+${effects.healthPerLevel.toFixed(2)} score sante / niveau`
+        );
       }
       if (effects.engineerSharePerLevel) {
-        effectRows.push(l(`${formatPercent(effects.engineerSharePerLevel)} part ingenieurs / niveau`, `${formatPercent(effects.engineerSharePerLevel)} engineers share / level`));
+        effectRows.push(
+          language === "en"
+            ? `${formatPercent(effects.engineerSharePerLevel)} engineers share / level`
+            : `${formatPercent(effects.engineerSharePerLevel)} part ingenieurs / niveau`
+        );
       }
       if (effects.scientistSharePerLevel) {
-        effectRows.push(l(`${formatPercent(effects.scientistSharePerLevel)} part scientifiques / niveau`, `${formatPercent(effects.scientistSharePerLevel)} scientists share / level`));
+        effectRows.push(
+          language === "en"
+            ? `${formatPercent(effects.scientistSharePerLevel)} scientists share / level`
+            : `${formatPercent(effects.scientistSharePerLevel)} part scientifiques / niveau`
+        );
       }
+      const nextCostEntries = (Object.entries(nextCost) as Array<[ResourceId, number]>)
+        .filter(([, amount]) => Number(amount) > 0)
+        .map(([resourceId, amount]) => ({
+          resourceId,
+          amount,
+          affordable: Math.floor(Number(resourceAmounts[resourceId] ?? 0)) >= Math.floor(Number(amount ?? 0))
+        }));
       return {
         roomType,
+        name: roomDisplayName(roomType, language),
+        image: ROOM_CONFIG[roomType].image,
         level,
         unlocked,
         unlockPopulation,
-        nextCost,
+        nextCostEntries,
         nextTimeSec,
         effectRows
       };
     });
-  }, [buildingCostReductionFactor, buildingTimeReductionFactor, language, roomLevels, snapshot.totalPopulation]);
+  }, [buildingCostReductionFactor, buildingTimeReductionFactor, language, resourceAmounts, roomLevels, snapshot.totalPopulation]);
 
   const adviceRows = useMemo(() => {
     const rows: Array<{
@@ -14341,12 +14831,12 @@ function PopulationScreen({
       rows.push({
         id: "over_capacity",
         tone: "danger",
-        title: l("Surpopulation active", "Overcapacity active"),
-        text: l(
-          "Votre production subit deja -25%. Priorite absolue: monter Quartiers residentiels pour augmenter la capacite.",
-          "Your production already suffers -25%. Top priority: upgrade Residential Quarters to increase capacity."
-        ),
-        actionLabel: l("Ouvrir Jeu", "Open Game"),
+        title: language === "en" ? "Overcapacity active" : "Surpopulation active",
+        text:
+          language === "en"
+            ? "Your production already suffers -25%. Top priority: upgrade Residential Quarters to increase capacity."
+            : "Votre production subit deja -25%. Priorite absolue: monter Quartiers residentiels pour augmenter la capacite.",
+        actionLabel: language === "en" ? "Open Game" : "Ouvrir Jeu",
         actionScreen: "game"
       });
     }
@@ -14355,12 +14845,12 @@ function PopulationScreen({
       rows.push({
         id: "food_shortage",
         tone: "danger",
-        title: l("Nourriture critique", "Critical food"),
-        text: l(
-          "La croissance s'arrete et la stabilite chute. Montez Cantine hydroponique et securisez les ressources de base.",
-          "Growth is halted and stability drops. Upgrade Hydroponic Canteen and secure base resources."
-        ),
-        actionLabel: l("Voir Ressources", "Open Resources"),
+        title: language === "en" ? "Critical food" : "Nourriture critique",
+        text:
+          language === "en"
+            ? "Growth is halted and stability drops. Upgrade Hydroponic Canteen and secure base resources."
+            : "La croissance s'arrete et la stabilite chute. Montez Cantine hydroponique et securisez les ressources de base.",
+        actionLabel: language === "en" ? "Open Resources" : "Voir Ressources",
         actionScreen: "resources"
       });
     }
@@ -14369,12 +14859,12 @@ function PopulationScreen({
       rows.push({
         id: "stability_low",
         tone: "warn",
-        title: l("Stabilite fragile", "Fragile stability"),
-        text: l(
-          "Sous 70%, des malus apparaissent. Parc orbital et Centre medical sont les leviers les plus efficaces.",
-          "Below 70%, penalties apply. Orbital Park and Medical Center are your best levers."
-        ),
-        actionLabel: l("Aller a Jeu", "Go to Game"),
+        title: language === "en" ? "Fragile stability" : "Stabilite fragile",
+        text:
+          language === "en"
+            ? "Below 70%, penalties apply. Orbital Park and Medical Center are your best levers."
+            : "Sous 70%, des malus apparaissent. Parc orbital et Centre medical sont les leviers les plus efficaces.",
+        actionLabel: language === "en" ? "Go to Game" : "Aller a Jeu",
         actionScreen: "game"
       });
     }
@@ -14383,12 +14873,12 @@ function PopulationScreen({
       rows.push({
         id: "workers_short",
         tone: "warn",
-        title: l("Main-d'oeuvre insuffisante", "Insufficient workforce"),
-        text: l(
-          "Vos exploitations tournent en sous-regime. Augmentez la population totale et evitez de surmultiplier les lignes de production.",
-          "Your extraction lines are under-powered. Increase total population and avoid overexpanding production lines."
-        ),
-        actionLabel: l("Plan population", "Population plan"),
+        title: language === "en" ? "Insufficient workforce" : "Main-d'oeuvre insuffisante",
+        text:
+          language === "en"
+            ? "Your extraction lines are under-powered. Increase total population and avoid overexpanding production lines."
+            : "Vos exploitations tournent en sous-regime. Augmentez la population totale et evitez de surmultiplier les lignes de production.",
+        actionLabel: language === "en" ? "Population plan" : "Plan population",
         actionScreen: "population"
       });
     }
@@ -14397,12 +14887,12 @@ function PopulationScreen({
       rows.push({
         id: "growth_zero",
         tone: "warn",
-        title: l("Croissance nulle", "Zero growth"),
-        text: l(
-          "Sans croissance, vous bloquez votre progression long terme. Verifiez capacite, nourriture et stabilite.",
-          "Without growth, long-term progression stalls. Check capacity, food, and stability."
-        ),
-        actionLabel: l("Voir stats", "Review stats"),
+        title: language === "en" ? "Zero growth" : "Croissance nulle",
+        text:
+          language === "en"
+            ? "Without growth, long-term progression stalls. Check capacity, food, and stability."
+            : "Sans croissance, vous bloquez votre progression long terme. Verifiez capacite, nourriture et stabilite.",
+        actionLabel: language === "en" ? "Review stats" : "Voir stats",
         actionScreen: "population"
       });
     }
@@ -14411,12 +14901,12 @@ function PopulationScreen({
       rows.push({
         id: "good_state",
         tone: "good",
-        title: l("Etat sain", "Healthy state"),
-        text: l(
-          "Votre colonie est stable. Vous pouvez pousser les batiments avances (Academie, Universite) pour accelerer construction et recherche.",
-          "Your colony is stable. You can push advanced buildings (Academy, University) to speed up construction and research."
-        ),
-        actionLabel: l("Ouvrir Technologie", "Open Technology"),
+        title: language === "en" ? "Healthy state" : "Etat sain",
+        text:
+          language === "en"
+            ? "Your colony is stable. You can push advanced buildings (Academy, University) to speed up construction and research."
+            : "Votre colonie est stable. Vous pouvez pousser les batiments avances (Academie, Universite) pour accelerer construction et recherche.",
+        actionLabel: language === "en" ? "Open Technology" : "Ouvrir Technologie",
         actionScreen: "technology"
       });
     }
@@ -14425,12 +14915,12 @@ function PopulationScreen({
       rows.push({
         id: "default_balance",
         tone: "good",
-        title: l("Routine recommandee", "Recommended routine"),
-        text: l(
-          "Gardez un oeil sur 3 indicateurs: capacite habitation, balance nourriture, stabilite. Ajustez avant de lancer des upgrades lourds.",
-          "Monitor 3 indicators: housing capacity, food balance, and stability. Adjust before launching heavy upgrades."
-        ),
-        actionLabel: l("Retour Jeu", "Back to Game"),
+        title: language === "en" ? "Recommended routine" : "Routine recommandee",
+        text:
+          language === "en"
+            ? "Monitor 3 indicators: housing capacity, food balance, and stability. Adjust before launching heavy upgrades."
+            : "Gardez un oeil sur 3 indicateurs: capacite habitation, balance nourriture, stabilite. Ajustez avant de lancer des upgrades lourds.",
+        actionLabel: language === "en" ? "Back to Game" : "Retour Jeu",
         actionScreen: "game"
       });
     }
@@ -14438,208 +14928,20 @@ function PopulationScreen({
     return rows.slice(0, 5);
   }, [language, snapshot]);
 
-  const signedPct = (value: number) => `${value >= 0 ? "+" : ""}${value.toFixed(1)}%`;
-
   return (
-    <main className="population-shell-page">
-      <section className="population-hero">
-        <div>
-          <h2>{l("Centre de commandement population", "Population command center")}</h2>
-          <p>
-            {l(
-              "Pilotez votre croissance, votre stabilite et vos bonus de production. Cette page explique chaque mecanique avec vos valeurs en direct.",
-              "Control your growth, stability, and production modifiers. This page explains each mechanic with your live values."
-            )}
-          </p>
-        </div>
-        <div className="population-hero-actions">
-          <button type="button" onClick={() => onNavigate("game")}>{l("Aller a Jeu", "Go to Game")}</button>
-          <button type="button" onClick={() => onNavigate("resources")}>{l("Voir Ressources", "View Resources")}</button>
-          <button type="button" onClick={() => onNavigate("technology")}>{l("Voir Technologie", "View Technology")}</button>
-        </div>
-      </section>
-
-      <section className="population-kpi-grid-page">
-        <article className="population-kpi-card">
-          <small>{l("Population", "Population")}</small>
-          <strong>{snapshot.totalPopulation.toLocaleString()} / {snapshot.capacity.toLocaleString()}</strong>
-          <div className="population-kpi-track"><div style={{ width: `${populationFillPct}%` }} /></div>
-        </article>
-        <article className="population-kpi-card">
-          <small>{l("Croissance totale", "Total growth")}</small>
-          <strong>{snapshot.growthPerHour >= 0 ? "+" : ""}{snapshot.growthPerHour.toFixed(0)}/h</strong>
-          <p>{l("Migration", "Migration")}: {snapshot.migrationPerHour >= 0 ? "+" : ""}{snapshot.migrationPerHour.toFixed(0)}/h</p>
-        </article>
-        <article className="population-kpi-card">
-          <small>{l("Stabilite", "Stability")}</small>
-          <strong>{snapshot.stability.toFixed(1)}%</strong>
-          <p className={`population-band-text ${snapshot.stabilityBand}`}>
-            {populationStabilityBandLabel(snapshot.stabilityBand, language)}
-          </p>
-        </article>
-        <article className="population-kpi-card">
-          <small>{l("Nourriture", "Food")}</small>
-          <strong>{Math.floor(snapshot.foodStock).toLocaleString()} / {snapshot.foodCapacity.toLocaleString()}</strong>
-          <div className="population-kpi-track food"><div style={{ width: `${foodFillPct}%` }} /></div>
-          <p>{snapshot.foodBalancePerHour >= 0 ? "+" : ""}{snapshot.foodBalancePerHour.toFixed(0)}/h</p>
-        </article>
-        <article className="population-kpi-card">
-          <small>{l("Main-d'oeuvre", "Workforce")}</small>
-          <strong>{snapshot.requiredWorkers.toLocaleString()} / {snapshot.workers.toLocaleString()}</strong>
-          <div className="population-kpi-track workforce"><div style={{ width: `${workforceLoadPct}%` }} /></div>
-          <p>{l("Libre", "Free")}: {snapshot.availableWorkers.toLocaleString()}</p>
-        </article>
-        <article className="population-kpi-card">
-          <small>{l("Niveau civilisation", "Civilization tier")}</small>
-          <strong>{l(snapshot.civilizationTier.nameFr, snapshot.civilizationTier.nameEn)}</strong>
-          <p>{l("Evenement", "Event")}: {snapshot.activeEvent ? populationEventLabel(snapshot.activeEvent.type, language) : l("Aucun", "None")}</p>
-        </article>
-      </section>
-
-      <section className="population-main-grid">
-        <article className="population-panel-card">
-          <h3>{l("Bonus & malus actuels", "Current bonuses & penalties")}</h3>
-          <ul className="population-impact-list">
-            <li className={snapshot.productionBonusPct >= 0 ? "bonus" : "malus"}>
-              {l("Production globale", "Global production")}: {signedPct(snapshot.productionBonusPct)}
-            </li>
-            <li className={constructionSpeedPct >= 0 ? "bonus" : "malus"}>
-              {l("Vitesse construction", "Construction speed")}: {signedPct(constructionSpeedPct)}
-            </li>
-            <li className={researchSpeedPct >= 0 ? "bonus" : "malus"}>
-              {l("Vitesse recherche", "Research speed")}: {signedPct(researchSpeedPct)}
-            </li>
-            <li className={snapshot.workforceMultiplier >= 1 ? "bonus" : "malus"}>
-              {l("Efficacite main-d'oeuvre", "Workforce efficiency")}: {signedPct((snapshot.workforceMultiplier - 1) * 100)}
-            </li>
-            <li className={snapshot.foodBalancePerHour >= 0 ? "bonus" : "malus"}>
-              {l("Balance nourriture", "Food balance")}: {snapshot.foodBalancePerHour >= 0 ? "+" : ""}{snapshot.foodBalancePerHour.toFixed(0)}/h
-            </li>
-          </ul>
-
-          {nextPopulationUnlock ? (
-            <p className="population-next-unlock">
-              {l("Prochain debloquage", "Next unlock")}:{" "}
-              <strong>{roomDisplayName(nextPopulationUnlock.roomType, language)}</strong>{" "}
-              {l("a", "at")} {nextPopulationUnlock.minPopulation.toLocaleString()} {l("population", "population")}
-            </p>
-          ) : null}
-        </article>
-
-        <article className="population-panel-card">
-          <h3>{l("Conseils actionnables", "Actionable guidance")}</h3>
-          <div className="population-advice-stack">
-            {adviceRows.map((row) => (
-              <div key={row.id} className={`population-advice ${row.tone}`}>
-                <strong>{row.title}</strong>
-                <p>{row.text}</p>
-                {row.actionLabel && row.actionScreen ? (
-                  <button type="button" onClick={() => onNavigate(row.actionScreen)}>
-                    {row.actionLabel}
-                  </button>
-                ) : null}
-              </div>
-            ))}
-          </div>
-        </article>
-      </section>
-
-      <section className="population-formula-card">
-        <h3>{l("Comment fonctionne la population (didactique)", "How population works (didactic)")}</h3>
-        <div className="population-formula-table-wrap">
-          <table className="population-formula-table">
-            <thead>
-              <tr>
-                <th>{l("Mecanique", "Mechanic")}</th>
-                <th>{l("Regle", "Rule")}</th>
-                <th>{l("Votre valeur actuelle", "Your current value")}</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td>{l("Croissance naturelle", "Natural growth")}</td>
-                <td>{l("Population x 0.4%/h (+ migration)", "Population x 0.4%/h (+ migration)")}</td>
-                <td>{snapshot.growthPerHour >= 0 ? "+" : ""}{snapshot.growthPerHour.toFixed(0)}/h</td>
-              </tr>
-              <tr>
-                <td>{l("Bonus production population", "Population production bonus")}</td>
-                <td>{l("+1% par tranche de 1 000 habitants", "+1% per 1,000 inhabitants")}</td>
-                <td>{l("Integre dans", "Included in")} {signedPct(snapshot.productionBonusPct)}</td>
-              </tr>
-              <tr>
-                <td>{l("Ingenieurs", "Engineers")}</td>
-                <td>{l("-1% temps construction / 500", "-1% construction time / 500")}</td>
-                <td>{snapshot.engineers.toLocaleString()} ({signedPct(snapshot.constructionSpeedBonusPct)})</td>
-              </tr>
-              <tr>
-                <td>{l("Scientifiques", "Scientists")}</td>
-                <td>{l("+1% vitesse recherche / 300", "+1% research speed / 300")}</td>
-                <td>{snapshot.scientists.toLocaleString()} ({signedPct(snapshot.researchSpeedBonusPct)})</td>
-              </tr>
-              <tr>
-                <td>{l("Surpopulation", "Overcapacity")}</td>
-                <td>{l("Si population > capacite: -25% production", "If population > capacity: -25% production")}</td>
-                <td>{snapshot.isOverCapacity ? l("Actif", "Active") : l("Inactif", "Inactive")}</td>
-              </tr>
-              <tr>
-                <td>{l("Nourriture", "Food")}</td>
-                <td>{l("Si deficit: croissance arretee + malus", "If deficit: growth halted + penalties")}</td>
-                <td>{snapshot.foodShortage ? l("Penurie active", "Shortage active") : l("Equilibre", "Balanced")}</td>
-              </tr>
-              <tr>
-                <td>{l("Stabilite", "Stability")}</td>
-                <td>{l("90+ bonus, 70-90 normal, <70 malus progressifs", "90+ bonus, 70-90 normal, <70 progressive penalties")}</td>
-                <td>{snapshot.stability.toFixed(1)}% ({populationStabilityBandLabel(snapshot.stabilityBand, language)})</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </section>
-
-      <section className="population-buildings-card">
-        <h3>{l("Leviers de gestion: batiments population", "Management levers: population buildings")}</h3>
-        <div className="population-building-grid">
-          {buildingRows.map((row) => (
-            <article key={row.roomType} className={`population-building-item ${row.unlocked ? "unlocked" : "locked"}`}>
-              <header>
-                <strong>{roomDisplayName(row.roomType, language)}</strong>
-                <span>{l("Niveau", "Level")} {row.level}</span>
-              </header>
-
-              {!row.unlocked ? (
-                <p className="population-building-lock">
-                  {l("Deblocage a", "Unlock at")} {row.unlockPopulation.toLocaleString()} {l("population", "population")}
-                </p>
-              ) : null}
-
-              <ul>
-                {row.effectRows.length > 0 ? (
-                  row.effectRows.map((effect) => <li key={`${row.roomType}_${effect}`}>{effect}</li>)
-                ) : (
-                  <li>{l("Effet passif de support population.", "Passive support effect for population.")}</li>
-                )}
-              </ul>
-
-              <div className="population-building-cost">
-                <small>{l("Cout prochain niveau", "Next level cost")}</small>
-                <ResourceCostDisplay cost={row.nextCost} available={resourceAmounts} language={language} compact />
-              </div>
-
-              <p className="population-building-time">
-                {l("Temps prochain niveau", "Next level time")}: {formatDuration(row.nextTimeSec)}
-              </p>
-
-              <button type="button" onClick={() => onNavigate("game")}>
-                {l("Construire / ameliorer dans Jeu", "Build / upgrade in Game")}
-              </button>
-            </article>
-          ))}
-        </div>
-      </section>
-    </main>
+    <PopulationCommandScreen
+      language={language}
+      snapshot={snapshot}
+      adviceRows={adviceRows}
+      buildingRows={buildingRows}
+      nextPopulationUnlock={nextPopulationUnlock}
+      stabilityBandLabel={populationStabilityBandLabel(snapshot.stabilityBand, language)}
+      activeEventLabel={snapshot.activeEvent ? populationEventLabel(snapshot.activeEvent.type, language) : null}
+      activeCrisisLabel={snapshot.activeCrisis ? populationCrisisLabel(snapshot.activeCrisis.type, language) : null}
+      onNavigate={onNavigate as (screen: "game" | "resources" | "technology" | "hangar" | "population") => void}
+    />
   );
 }
-
 function ResourceScreen({
   language,
   amounts,
@@ -14650,7 +14952,8 @@ function ResourceScreen({
   loading,
   error,
   offlineSeconds,
-  lastSavedAt
+  lastSavedAt,
+  onNavigate
 }: {
   language: UILanguage;
   amounts: Record<string, number>;
@@ -14662,6 +14965,7 @@ function ResourceScreen({
   error: string;
   offlineSeconds: number;
   lastSavedAt: number | null;
+  onNavigate: (screen: UIScreen) => void;
 }) {
   const l = (fr: string, en: string) => (language === "en" ? en : fr);
   const sectioned = useMemo(
@@ -14673,7 +14977,10 @@ function ResourceScreen({
   );
 
   const totalPerSecond = RESOURCE_DEFS.filter((r) => unlockedIds.includes(r.id)).reduce((sum, r) => sum + rates[r.id], 0);
-  const globalResourceImpacts = useMemo(() => {
+  const constructionPerSecond = sectioned.construction.reduce((sum, row) => sum + (unlockedIds.includes(row.id) ? rates[row.id] : 0), 0);
+  const researchPerSecond = sectioned.research.reduce((sum, row) => sum + (unlockedIds.includes(row.id) ? rates[row.id] : 0), 0);
+
+  const impactRows = useMemo(() => {
     const rows: Array<{ id: string; kind: "bonus" | "malus"; label: string }> = [];
     const formatPercent = (value: number) => `${value >= 0 ? "+" : ""}${value.toFixed(1)}%`;
     const pushRow = (id: string, value: number, frLabel: string, enLabel: string) => {
@@ -14709,162 +15016,42 @@ function ResourceScreen({
 
     pushRow("event", populationSnapshot.eventProductionPct, "Evenement en cours", "Active event");
     pushRow("crisis", populationSnapshot.crisisPenaltyPct, "Crise sociale", "Social crisis");
-    pushRow(
-      "total",
-      populationSnapshot.productionBonusPct,
-      "Impact total sur la production",
-      "Total production impact"
-    );
+    pushRow("total", populationSnapshot.productionBonusPct, "Impact total sur la production", "Total production impact");
     return rows;
   }, [language, populationSnapshot]);
 
+  const buildResourceRows = (defs: ResourceDef[]) =>
+    defs.map((res) => ({
+      id: res.id as ResourceId,
+      name: resourceDisplayName(res.id as ResourceId, language),
+      machine: resourceMachineDisplay(res.id as ResourceId, language),
+      section: res.section,
+      rarity: res.rarity,
+      unlocked: unlockedIds.includes(res.id),
+      amount: Math.floor(amounts[res.id] ?? 0),
+      rate: rates[res.id] ?? 0,
+      techBonuses: getUnlockedResourceTechBonuses(res.id as ResourceId, technologyLevels, language)
+    }));
+
   return (
-    <main className="resource-shell">
-      <section className="resource-summary">
-        <div className="resource-pill">
-          <strong>{l("Production totale", "Total production")}</strong>
-          <span>{totalPerSecond.toFixed(2)} / s</span>
-        </div>
-        <div className="resource-pill">
-          <strong>{l("Simulation hors-ligne", "Offline simulation")}</strong>
-          <span>{offlineSeconds > 0 ? `+${offlineSeconds}s` : l("Aucune", "None")}</span>
-        </div>
-        <div className="resource-pill">
-          <strong>{l("Derniere sauvegarde", "Last save")}</strong>
-          <span>{lastSavedAt ? new Date(lastSavedAt).toLocaleTimeString() : l("En attente", "Pending")}</span>
-        </div>
-      </section>
-
-      {loading ? <p className="resource-state">{l("Chargement des ressources...", "Loading resources...")}</p> : null}
-      {error ? <p className="resource-error">{error}</p> : null}
-
-      <section className="resource-section">
-        <h2>{l("Ressources de Base - Construction", "Base Resources - Construction")}</h2>
-        <div className="resource-grid">
-          {sectioned.construction.map((res) => {
-            const unlocked = unlockedIds.includes(res.id);
-            const techBonuses = getUnlockedResourceTechBonuses(res.id as ResourceId, technologyLevels, language);
-            return (
-              <article key={res.id} className="resource-card">
-                <header>
-                  <strong>{resourceDisplayName(res.id as ResourceId, language)}</strong>
-                  <span>R{res.rarity}</span>
-                </header>
-                <p>{resourceMachineDisplay(res.id as ResourceId, language)}</p>
-                {unlocked ? (
-                  <>
-                    <div className="resource-values">
-                      <div>
-                        <small>{l("Stock", "Stock")}</small>
-                        <span>{Math.floor(amounts[res.id] ?? 0).toLocaleString()}</span>
-                      </div>
-                      <div>
-                        <small>{l("Prod/sec", "Prod/sec")}</small>
-                        <span>+{rates[res.id].toFixed(2)}</span>
-                      </div>
-                    </div>
-                    {techBonuses.length > 0 ? (
-                      <div className="resource-tech-bonus">
-                        <small>{l("Bonus technologies actifs", "Active tech bonuses")}</small>
-                        <ul>
-                          {techBonuses.map((row) => (
-                            <li key={`${res.id}_${row.techId}`}>
-                              {row.name} Lv.{row.level}: +{row.bonusPercent.toFixed(1)}%
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                    ) : null}
-                    {globalResourceImpacts.length > 0 ? (
-                      <div className="resource-impact-list">
-                        <small>{l("Bonus / malus actifs", "Active bonuses / penalties")}</small>
-                        <ul>
-                          {globalResourceImpacts.map((impact, impactIndex) => (
-                            <li
-                              key={`${res.id}_impact_${impact.id}_${impactIndex}`}
-                              className={`resource-impact-item ${impact.kind}`}
-                            >
-                              {impact.label}
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                    ) : null}
-                  </>
-                ) : (
-                  <div className="resource-lock">{l("Verrouille: technologie requise", "Locked: technology required")}</div>
-                )}
-              </article>
-            );
-          })}
-        </div>
-      </section>
-
-      <section className="resource-section">
-        <h2>{l("Ressources de Recherche - Haute Technologie", "Research Resources - High Technology")}</h2>
-        <div className="resource-grid">
-          {sectioned.research.map((res) => {
-            const unlocked = unlockedIds.includes(res.id);
-            const techBonuses = getUnlockedResourceTechBonuses(res.id as ResourceId, technologyLevels, language);
-            return (
-              <article key={res.id} className="resource-card">
-                <header>
-                  <strong>{resourceDisplayName(res.id as ResourceId, language)}</strong>
-                  <span>R{res.rarity}</span>
-                </header>
-                <p>{resourceMachineDisplay(res.id as ResourceId, language)}</p>
-                {unlocked ? (
-                  <>
-                    <div className="resource-values">
-                      <div>
-                        <small>{l("Stock", "Stock")}</small>
-                        <span>{Math.floor(amounts[res.id] ?? 0).toLocaleString()}</span>
-                      </div>
-                      <div>
-                        <small>{l("Prod/sec", "Prod/sec")}</small>
-                        <span>+{rates[res.id].toFixed(2)}</span>
-                      </div>
-                    </div>
-                    {techBonuses.length > 0 ? (
-                      <div className="resource-tech-bonus">
-                        <small>{l("Bonus technologies actifs", "Active tech bonuses")}</small>
-                        <ul>
-                          {techBonuses.map((row) => (
-                            <li key={`${res.id}_${row.techId}`}>
-                              {row.name} Lv.{row.level}: +{row.bonusPercent.toFixed(1)}%
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                    ) : null}
-                    {globalResourceImpacts.length > 0 ? (
-                      <div className="resource-impact-list">
-                        <small>{l("Bonus / malus actifs", "Active bonuses / penalties")}</small>
-                        <ul>
-                          {globalResourceImpacts.map((impact, impactIndex) => (
-                            <li
-                              key={`${res.id}_impact_${impact.id}_${impactIndex}`}
-                              className={`resource-impact-item ${impact.kind}`}
-                            >
-                              {impact.label}
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                    ) : null}
-                  </>
-                ) : (
-                  <div className="resource-lock">{l("Verrouille: technologie requise", "Locked: technology required")}</div>
-                )}
-              </article>
-            );
-          })}
-        </div>
-      </section>
-    </main>
+    <ResourceCommandScreen
+      language={language}
+      loading={loading}
+      error={error}
+      offlineSeconds={offlineSeconds}
+      lastSavedAt={lastSavedAt}
+      totalPerSecond={totalPerSecond}
+      constructionPerSecond={constructionPerSecond}
+      researchPerSecond={researchPerSecond}
+      unlockedCount={unlockedIds.length}
+      totalCount={RESOURCE_DEFS.length}
+      impactRows={impactRows}
+      constructionRows={buildResourceRows(sectioned.construction)}
+      researchRows={buildResourceRows(sectioned.research)}
+      onNavigate={onNavigate as (screen: "game" | "resources" | "technology" | "population") => void}
+    />
   );
 }
-
 function InventoryScreen({
   language,
   loading,
@@ -15370,6 +15557,223 @@ function InboxScreen({
     }
     return item.id || l("Effet special.", "Special effect.");
   };
+
+  const combatUnitDefs = useMemo(() => new Map(HANGAR_UNIT_DEFS.map((def) => [def.id, def])), []);
+
+  const resolveCombatUnitImage = (unitId: string) =>
+    HANGAR_SHIP_IMAGE_MAP[unitId] ?? HANGAR_DEFENSE_IMAGE_MAP[unitId] ?? "/room-images/item-acceleration.png";
+
+  const normalizeCombatFleetRows = (rowsRaw: unknown) => {
+    const rows = Array.isArray(rowsRaw) ? rowsRaw : [];
+    return rows
+      .map((row) => {
+        const source = row && typeof row === "object" ? (row as Record<string, any>) : {};
+        const unitId = String(source.unitId || "").trim();
+        const quantity = Math.max(0, Math.floor(Number(source.quantity || 0)));
+        const def = combatUnitDefs.get(unitId);
+        const fallbackName = def?.name || unitId || l("Unite inconnue", "Unknown unit");
+        return {
+          unitId,
+          quantity,
+          category: def?.category || String(source.category || "ship"),
+          force: Math.max(0, Number(source.force ?? def?.force ?? 0)),
+          endurance: Math.max(0, Number(source.endurance ?? def?.endurance ?? 0)),
+          speed: Math.max(0, Number(source.speed ?? def?.speed ?? 0)),
+          name: hangarUnitDisplayName(unitId, fallbackName, language),
+          image: resolveCombatUnitImage(unitId)
+        };
+      })
+      .filter((row) => row.unitId && row.quantity > 0)
+      .sort((a, b) => b.quantity - a.quantity);
+  };
+
+  const normalizeCombatLossRows = (lossesRaw: unknown) => {
+    const source = lossesRaw && typeof lossesRaw === "object" ? (lossesRaw as Record<string, unknown>) : {};
+    return Object.entries(source)
+      .map(([unitId, quantityRaw]) => {
+        const quantity = Math.max(0, Math.floor(Number(quantityRaw || 0)));
+        const def = combatUnitDefs.get(unitId);
+        const fallbackName = def?.name || unitId || l("Unite inconnue", "Unknown unit");
+        return {
+          unitId,
+          quantity,
+          category: def?.category || "ship",
+          name: hangarUnitDisplayName(unitId, fallbackName, language),
+          image: resolveCombatUnitImage(unitId)
+        };
+      })
+      .filter((row) => row.quantity > 0)
+      .sort((a, b) => b.quantity - a.quantity);
+  };
+
+  const normalizeCombatResources = (resourceRaw: unknown) =>
+    RESOURCE_DEFS.map((def) => {
+      const amount = Math.max(0, Math.floor(Number((resourceRaw as Record<string, unknown> | null | undefined)?.[def.id] || 0)));
+      return amount > 0
+        ? {
+            resourceId: def.id,
+            amount,
+            name: resourceDisplayName(def.id, language)
+          }
+        : null;
+    }).filter(Boolean) as Array<{ resourceId: ResourceId; amount: number; name: string }>;
+
+  const summarizeCombatFleet = (rows: Array<{ quantity: number; force?: number; endurance?: number }>) => {
+    let units = 0;
+    let force = 0;
+    let endurance = 0;
+    for (const row of rows) {
+      const quantity = Math.max(0, Math.floor(Number(row.quantity || 0)));
+      units += quantity;
+      force += Math.max(0, Number(row.force || 0)) * quantity;
+      endurance += Math.max(0, Number(row.endurance || 0)) * quantity;
+    }
+    return { units, force, endurance };
+  };
+
+  const normalizeCombatSummary = (summaryRaw: unknown, fallbackRows: Array<{ quantity: number; force?: number; endurance?: number }>) => {
+    const fallback = summarizeCombatFleet(fallbackRows);
+    const source = summaryRaw && typeof summaryRaw === "object" ? (summaryRaw as Record<string, any>) : {};
+    return {
+      units: Math.max(0, Math.floor(Number(source.units ?? source.totalUnits ?? fallback.units))),
+      force: Math.max(0, Math.floor(Number(source.force ?? source.totalForce ?? fallback.force))),
+      endurance: Math.max(0, Math.floor(Number(source.endurance ?? source.totalEndurance ?? fallback.endurance)))
+    };
+  };
+
+  const selectedCombatReport = useMemo(() => {
+    if (!selectedMessage?.combatReport || typeof selectedMessage.combatReport !== "object") return null;
+    const report = selectedMessage.combatReport as Record<string, any>;
+    const attacker = report.attacker && typeof report.attacker === "object" ? report.attacker : {};
+    const defender = report.defender && typeof report.defender === "object" ? report.defender : {};
+    const perspective =
+      String(attacker.userId || "") === currentUserId
+        ? "attacker"
+        : String(defender.userId || "") === currentUserId
+          ? "defender"
+          : "observer";
+    const result = String(report.result || "unknown").trim().toLowerCase();
+    const resultLabel =
+      result === "attacker"
+        ? perspective === "attacker"
+          ? l("Victoire offensive", "Offensive victory")
+          : perspective === "defender"
+            ? l("Defaite defensive", "Defensive defeat")
+            : l("Victoire attaquant", "Attacker victory")
+        : result === "defender"
+          ? perspective === "defender"
+            ? l("Defense reussie", "Defense held")
+            : perspective === "attacker"
+              ? l("Offensive repoussee", "Attack repelled")
+              : l("Victoire defenseur", "Defender victory")
+          : result === "mutual"
+            ? l("Destruction mutuelle", "Mutual destruction")
+            : l("Issue inconnue", "Unknown outcome");
+    const resultTone = result === "attacker" ? "attacker" : result === "defender" ? "defender" : result === "mutual" ? "mutual" : "neutral";
+    const location = report.location && typeof report.location === "object" ? report.location : {};
+    const attackerFleet = normalizeCombatFleetRows(attacker.fleet);
+    const defenderFleet = normalizeCombatFleetRows(defender.fleet);
+    const attackerSurvivors = normalizeCombatFleetRows(report.attackerSurvivors);
+    const defenderSurvivors = normalizeCombatFleetRows(report.defenderSurvivors);
+    const attackerRetreated = result === "defender" && attackerSurvivors.length > 0;
+    const defenderRouted = result === "attacker" && defenderSurvivors.length > 0;
+    const rounds = Array.isArray(report.rounds)
+      ? report.rounds
+          .map((round) => {
+            const source = round && typeof round === "object" ? (round as Record<string, any>) : {};
+            const attackerLosses = normalizeCombatLossRows(source.attackerLosses);
+            const defenderLosses = normalizeCombatLossRows(source.defenderLosses);
+            return {
+              round: Math.max(0, Math.floor(Number(source.round || 0))),
+              attackerLosses,
+              defenderLosses
+            };
+          })
+          .filter((round) => round.round > 0 && (round.attackerLosses.length > 0 || round.defenderLosses.length > 0))
+      : [];
+    return {
+      battleType: String(report.battleType || "generic"),
+      fieldId: String(report.fieldId || ""),
+      locationLabel: String(location.label || "").trim(),
+      battleAt: Math.max(0, Math.floor(Number(report.battleAt || 0))),
+      perspective,
+      result,
+      resultLabel,
+      resultTone,
+      attacker: {
+        userId: String(attacker.userId || ""),
+        username: String(attacker.username || attacker.userId || l("Attaquant", "Attacker")),
+        fleet: attackerFleet,
+        survivors: attackerSurvivors,
+        survivorLabel: attackerRetreated ? l("Survivants en repli", "Retreating survivors") : l("Survivants", "Survivors"),
+        losses: normalizeCombatLossRows(report.losses?.attacker),
+        summary: normalizeCombatSummary(report.attackerSummary, attackerSurvivors)
+      },
+      defender: {
+        userId: String(defender.userId || ""),
+        username: String(defender.username || defender.userId || l("Defenseur", "Defender")),
+        fleet: defenderFleet,
+        survivors: defenderSurvivors,
+        survivorLabel: defenderRouted ? l("Survivants en fuite", "Routed survivors") : l("Survivants", "Survivors"),
+        losses: normalizeCombatLossRows(report.losses?.defender),
+        summary: normalizeCombatSummary(report.defenderSummary, defenderSurvivors)
+      },
+      loot: normalizeCombatResources(report.loot),
+      protectedCargo: normalizeCombatResources(report.protectedCargo),
+      rounds
+    };
+  }, [selectedMessage, currentUserId, language]);
+
+  const renderCombatFleetRows = (
+    rows: Array<{ unitId: string; quantity: number; name: string; image: string }>,
+    emptyLabel: string,
+    tone: "attacker" | "defender" | "neutral"
+  ) => (
+    <div className={`combat-fleet-list tone-${tone}`}>
+      {rows.length <= 0 ? (
+        <p className="combat-empty">{emptyLabel}</p>
+      ) : (
+        rows.map((row) => (
+          <article key={`${tone}_${row.unitId}_${row.quantity}_${row.name}`} className="combat-fleet-row">
+            <img
+              src={row.image}
+              alt={row.name}
+              className="combat-fleet-row-image"
+              loading="lazy"
+              onError={(event) => {
+                const img = event.currentTarget as HTMLImageElement;
+                if (!img.src.endsWith("/room-images/item-acceleration.png")) {
+                  img.src = "/room-images/item-acceleration.png";
+                }
+              }}
+            />
+            <span className="combat-fleet-row-name">{row.name}</span>
+            <strong className="combat-fleet-row-qty">x{row.quantity.toLocaleString()}</strong>
+          </article>
+        ))
+      )}
+    </div>
+  );
+
+  const renderCombatResourceRows = (
+    rows: Array<{ resourceId: ResourceId; amount: number; name: string }>,
+    emptyLabel: string,
+    tone: "loot" | "protected"
+  ) => (
+    <div className={`combat-resource-list tone-${tone}`}>
+      {rows.length <= 0 ? (
+        <p className="combat-empty">{emptyLabel}</p>
+      ) : (
+        rows.map((row) => (
+          <article key={`${tone}_${row.resourceId}_${row.amount}`} className="combat-resource-row">
+            <span className="top-resource-icon combat-resource-icon" style={getResourceMenuSpriteStyle(row.resourceId)} />
+            <span className="combat-resource-name">{row.name}</span>
+            <strong className="combat-resource-qty">+{row.amount.toLocaleString()}</strong>
+          </article>
+        ))
+      )}
+    </div>
+  );
 
   const selectedMessageIsDailyNoonChest = useMemo(() => {
     if (!selectedMessage) return false;
@@ -16054,11 +16458,117 @@ function InboxScreen({
             </div>
             <p className="inbox-body">{inboxDisplayBody(selectedMessage)}</p>
 
-            {selectedMessage.combatReport ? (
-              <details className="inbox-spoiler">
-                <summary>{l("Details rapport de combat", "Combat report details")}</summary>
-                <pre>{JSON.stringify(selectedMessage.combatReport, null, 2)}</pre>
-              </details>
+            {selectedCombatReport ? (
+              <section className="inbox-combat-report">
+                <header className="combat-report-head">
+                  <div className="combat-report-head-main">
+                    <span className={`combat-result-chip tone-${selectedCombatReport.resultTone}`}>{selectedCombatReport.resultLabel}</span>
+                    <strong>{selectedCombatReport.locationLabel || l("Zone de combat non identifiee", "Unidentified combat zone")}</strong>
+                  </div>
+                  <div className="combat-report-head-meta">
+                    <span>{l("Impact", "Impact")}: {selectedCombatReport.battleAt ? new Date(selectedCombatReport.battleAt * 1000).toLocaleString() : "-"}</span>
+                    {selectedCombatReport.rounds.length > 0 ? (
+                      <span>{l("Rounds", "Rounds")}: {selectedCombatReport.rounds.length.toLocaleString()}</span>
+                    ) : null}
+                  </div>
+                </header>
+
+                <div className="combat-side-grid">
+                  <article className="combat-side-card attacker">
+                    <header className="combat-side-head">
+                      <div>
+                        <small>{l("Attaquant", "Attacker")}</small>
+                        <strong>{selectedCombatReport.attacker.username}</strong>
+                      </div>
+                      <span className="combat-side-chip">{selectedCombatReport.attacker.summary.units.toLocaleString()} {l("unites", "units")}</span>
+                    </header>
+                    <div className="combat-side-stats">
+                      <span>{l("Force", "Force")}: {Math.floor(Number(selectedCombatReport.attacker.summary.force || 0)).toLocaleString()}</span>
+                      <span>{l("Endurance", "Endurance")}: {Math.floor(Number(selectedCombatReport.attacker.summary.endurance || 0)).toLocaleString()}</span>
+                    </div>
+                    <div className="combat-block">
+                      <h4>{l("Composition engagee", "Committed fleet")}</h4>
+                      {renderCombatFleetRows(selectedCombatReport.attacker.fleet, l("Aucune unite detaillee.", "No units listed."), "attacker")}
+                    </div>
+                    <div className="combat-block">
+                      <h4>{selectedCombatReport.attacker.survivorLabel}</h4>
+                      {renderCombatFleetRows(selectedCombatReport.attacker.survivors, l("Aucun survivant.", "No survivors."), "neutral")}
+                    </div>
+                    <div className="combat-block">
+                      <h4>{l("Pertes subies", "Losses taken")}</h4>
+                      {renderCombatFleetRows(selectedCombatReport.attacker.losses, l("Aucune perte.", "No losses."), "attacker")}
+                    </div>
+                  </article>
+
+                  <article className="combat-side-card defender">
+                    <header className="combat-side-head">
+                      <div>
+                        <small>{l("Defenseur", "Defender")}</small>
+                        <strong>{selectedCombatReport.defender.username}</strong>
+                      </div>
+                      <span className="combat-side-chip">{selectedCombatReport.defender.summary.units.toLocaleString()} {l("unites", "units")}</span>
+                    </header>
+                    <div className="combat-side-stats">
+                      <span>{l("Force", "Force")}: {Math.floor(Number(selectedCombatReport.defender.summary.force || 0)).toLocaleString()}</span>
+                      <span>{l("Endurance", "Endurance")}: {Math.floor(Number(selectedCombatReport.defender.summary.endurance || 0)).toLocaleString()}</span>
+                    </div>
+                    <div className="combat-block">
+                      <h4>{l("Composition engagee", "Committed fleet")}</h4>
+                      {renderCombatFleetRows(selectedCombatReport.defender.fleet, l("Aucune unite detaillee.", "No units listed."), "defender")}
+                    </div>
+                    <div className="combat-block">
+                      <h4>{selectedCombatReport.defender.survivorLabel}</h4>
+                      {renderCombatFleetRows(selectedCombatReport.defender.survivors, l("Aucun survivant.", "No survivors."), "neutral")}
+                    </div>
+                    <div className="combat-block">
+                      <h4>{l("Pertes subies", "Losses taken")}</h4>
+                      {renderCombatFleetRows(selectedCombatReport.defender.losses, l("Aucune perte.", "No losses."), "defender")}
+                    </div>
+                  </article>
+                </div>
+
+                <div className="combat-outcome-grid">
+                  <article className="combat-outcome-card tone-loot">
+                    <header>
+                      <strong>{l("Butin capture", "Loot captured")}</strong>
+                      <span>{selectedCombatReport.loot.length > 0 ? l("Credite immediatement", "Granted immediately") : l("Aucun", "None")}</span>
+                    </header>
+                    {renderCombatResourceRows(selectedCombatReport.loot, l("Aucun butin sur ce combat.", "No loot from this combat."), "loot")}
+                  </article>
+                  <article className="combat-outcome-card tone-protected">
+                    <header>
+                      <strong>{l("Cargo protege", "Protected cargo")}</strong>
+                      <span>{selectedCombatReport.protectedCargo.length > 0 ? l("Sauve au moment de l'impact", "Saved at impact") : l("Aucun", "None")}</span>
+                    </header>
+                    {renderCombatResourceRows(selectedCombatReport.protectedCargo, l("Aucun cargo sauve sur cette issue.", "No cargo protected in this outcome."), "protected")}
+                  </article>
+                </div>
+
+                {selectedCombatReport.rounds.length > 0 ? (
+                  <details className="inbox-spoiler combat-rounds-spoiler">
+                    <summary>{l("Chronologie des rounds", "Round timeline")}</summary>
+                    <div className="combat-rounds-list">
+                      {selectedCombatReport.rounds.map((round) => (
+                        <article key={`round_${round.round}`} className="combat-round-card">
+                          <header>
+                            <strong>{l("Round", "Round")} {round.round.toLocaleString()}</strong>
+                          </header>
+                          <div className="combat-round-grid">
+                            <div>
+                              <small>{l("Pertes attaquant", "Attacker losses")}</small>
+                              {renderCombatFleetRows(round.attackerLosses, l("Aucune perte.", "No losses."), "attacker")}
+                            </div>
+                            <div>
+                              <small>{l("Pertes defenseur", "Defender losses")}</small>
+                              {renderCombatFleetRows(round.defenderLosses, l("Aucune perte.", "No losses."), "defender")}
+                            </div>
+                          </div>
+                        </article>
+                      ))}
+                    </div>
+                  </details>
+                ) : null}
+              </section>
             ) : null}
 
             {selectedMessage.hasAttachments ? (
@@ -17199,6 +17709,8 @@ function LoginIntroCinematic({
 
 function ProfileScreen({
   language,
+  title,
+  subtitle,
   profileUsername,
   profileEmail,
   profileLanguage,
@@ -17215,6 +17727,8 @@ function ProfileScreen({
   onSubmit
 }: {
   language: UILanguage;
+  title: string;
+  subtitle: string;
   profileUsername: string;
   profileEmail: string;
   profileLanguage: "fr" | "en";
@@ -17235,8 +17749,8 @@ function ProfileScreen({
   return (
     <main className="profile-layout">
       <form className="profile-card" onSubmit={onSubmit}>
-        <h2>{l("Identite du Commandant", "Commander Identity")}</h2>
-        <p>{l("Personnalisez votre presence dans le reseau de l'hyperstructure.", "Customize your presence in the hyperstructure network.")}</p>
+        <h2>{title}</h2>
+        <p>{subtitle}</p>
 
         <div className="profile-grid">
           <label>
@@ -18137,5 +18651,16 @@ function UpgradeModal({
     </div>
   );
 }
+
+
+
+
+
+
+
+
+
+
+
 
 

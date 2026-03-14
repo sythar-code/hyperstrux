@@ -1,4 +1,4 @@
-// Runtime JS for Nakama. Mirrors hyperstructure_economy.ts logic.
+﻿// Runtime JS for Nakama. Mirrors hyperstructure_economy.ts logic.
 
 var ECONOMY_COLLECTION = "hyperstructure";
 var ECONOMY_KEY = "economy_state_v1";
@@ -9,6 +9,8 @@ var ALLIANCE_PROFILE_COLLECTION = "hyperstructure";
 var ALLIANCE_PROFILE_KEY = "alliance_profile_v1";
 var PLAYER_PROFILE_COLLECTION = "player_profile";
 var PLAYER_PROFILE_KEY = "profile_v1";
+var RANKING_PROGRESS_COLLECTION = "hyperstructure_ranking";
+var RANKING_PROGRESS_KEY = "progress_v1";
 var ALLIANCES_PUBLIC_COLLECTION = "alliances";
 var ALLIANCE_MEMBERS_COLLECTION = "alliance_members";
 var ALLIANCE_INDEX_COLLECTION = "alliance_index";
@@ -25,9 +27,30 @@ var COST_MULTIPLIER = 1.55;
 var TIME_MULTIPLIER = 1.45;
 var STORAGE_BASE = 10000;
 var STORAGE_MULTIPLIER = 1.6;
-var DEFAULT_ALLIANCE_MEMBER_CAP = 30;
+var TECH_COST_MULTIPLIER = 1.6;
+var DEFAULT_ALLIANCE_MEMBER_CAP = 50;
 var ALLIANCE_VOTE_DURATION_SEC = 24 * 60 * 60;
 var ALLIANCE_VOTE_MIN_PARTICIPATION = 0.4;
+var ALLIANCE_LEVEL_XP_STEP = 500000;
+var ALLIANCE_OPERATION_LIMIT = 24;
+var ALLIANCE_OPERATION_KINDS = ["attack", "defense", "harvest", "logistics"];
+var ALLIANCE_TECH_BRANCH_IDS = ["logistics", "industry", "military", "exploration", "diplomacy"];
+var ALLIANCE_TECH_BRANCH_DEFS = {
+  logistics: { id: "logistics", baseWeightedCost: 180000, maxLevel: 25 },
+  industry: { id: "industry", baseWeightedCost: 220000, maxLevel: 25 },
+  military: { id: "military", baseWeightedCost: 260000, maxLevel: 25 },
+  exploration: { id: "exploration", baseWeightedCost: 200000, maxLevel: 25 },
+  diplomacy: { id: "diplomacy", baseWeightedCost: 160000, maxLevel: 25 }
+};
+var ALLIANCE_QUEST_IDS = ["economic_drive", "armada_readiness", "research_conclave"];
+var ALLIANCE_BASTION_BONUS_MILESTONES = [
+  { level: 1, key: "production", value: 2 },
+  { level: 5, key: "fleet_slot", value: 1 },
+  { level: 10, key: "fleet_speed", value: 5 },
+  { level: 20, key: "build_speed", value: 5 },
+  { level: 50, key: "production", value: 10 },
+  { level: 100, key: "storage", value: 15 }
+];
 var ALLIANCE_CREATE_COST = {
   carbone: 50000,
   titane: 5000,
@@ -67,6 +90,7 @@ var MAP_MAX_EXTRACTION_SECONDS = 7200;
 var MAP_BASE_ACTIVE_FLEET_SLOTS = 1;
 var MAP_ACTIVE_FLEET_SLOT_STEP = 3;
 var MAP_ACTIVE_FLEET_SLOTS_MAX = 11;
+var MAP_WORLD_MAINTENANCE_OWNER_LIMIT = 32;
 var MAP_FIELD_MIN_LIFETIME_SEC = 48 * 60 * 60;
 var MAP_FIELD_MAX_LIFETIME_SEC = 120 * 60 * 60;
 var ALLIANCE_NAME_REGEX = /^[A-Za-z0-9 _-]+$/;
@@ -99,6 +123,7 @@ var POINT_MULTIPLIERS = {
   defense: 1.0,
   research: 1.0
 };
+var RESOURCE_BUILDING_POINT_MULTIPLIER = 5.0;
 
 var RESOURCE_RARITY = {
   carbone: 10,
@@ -217,6 +242,23 @@ var MAP_HARVEST_UNIT_STATS = {
   colosse: { harvestSpeed: 20, harvestCapacity: 12000, mapSpeed: 300 }
 };
 
+var MAP_FUEL_BASE_CREDITS_PER_1000 = {
+  eclaireur_stellaire: 2,
+  foudroyant: 3,
+  aurore: 5,
+  spectre: 7,
+  tempest: 10,
+  titanide: 14,
+  colosse: 20,
+  pegase: 1,
+  argo: 2,
+  arche_spatiale: 4
+};
+var MAP_FUEL_DISTANCE_NORMALIZER = 1000;
+var MAP_FUEL_MIN_DISTANCE_FACTOR = 0.8;
+var MAP_FUEL_ATTACK_MULTIPLIER = 1.2;
+var MAP_FUEL_HARVEST_MULTIPLIER = 1.0;
+
 var BUILDING_DEFS = {
   carbone: { baseProductionPerSec: 3.0, baseBuildSeconds: 60 },
   titane: { baseProductionPerSec: 1.55, baseBuildSeconds: 120 },
@@ -242,6 +284,12 @@ var BASE_BUILDING_RESOURCE_COSTS = {
   aetherium: { carbone: 80000, titane: 30000, osmium: 10000 },
   isotope7: { carbone: 150000, titane: 60000, osmium: 20000 },
   singulite: { carbone: 300000, titane: 120000, osmium: 50000, adamantium: 5000 },
+  quartiers_residentiels: { carbone: 3000, titane: 1200 },
+  cantine_hydroponique: { carbone: 2500, titane: 1100 },
+  centre_medical: { carbone: 3800, titane: 1500, osmium: 300 },
+  parc_orbital: { carbone: 3200, titane: 1300, osmium: 200 },
+  academie_technique: { carbone: 6200, titane: 2400, osmium: 600 },
+  universite_orbitale: { carbone: 9000, titane: 3200, osmium: 1200, adamantium: 100 },
   entrepot: { carbone: 1000, titane: 500 }
 };
 
@@ -268,6 +316,131 @@ var HANGAR_UNIT_DEFS = {
   projecteur_emp_silence: { id: "projecteur_emp_silence", category: "defense", buildSeconds: 600, cost: { carbone: 24000, titane: 10000, osmium: 2000, neodyme: 600 } },
   mur_photonique_prisme: { id: "mur_photonique_prisme", category: "defense", buildSeconds: 720, cost: { carbone: 40000, titane: 18000, osmium: 6000, adamantium: 800 } },
   lance_gravitationnel_ancre: { id: "lance_gravitationnel_ancre", category: "defense", buildSeconds: 960, cost: { carbone: 90000, titane: 45000, osmium: 12000, adamantium: 2500, aetherium: 600 } }
+};
+
+var UNIT_COMBAT_STATS = {
+  eclaireur_stellaire: { label: "Eclaireur Stellaire", force: 5, endurance: 40, speed: 120, role: "scout", lootCapacity: 10000 },
+  foudroyant: { label: "Foudroyant", force: 8, endurance: 65, speed: 160, role: "interceptor", lootCapacity: 12000 },
+  aurore: { label: "Aurore", force: 15, endurance: 120, speed: 450, role: "strike", lootCapacity: 7000 },
+  spectre: { label: "Spectre", force: 25, endurance: 260, speed: 900, role: "strike", lootCapacity: 5000 },
+  tempest: { label: "Tempest", force: 45, endurance: 550, speed: 1200, role: "assault", lootCapacity: 4000 },
+  titanide: { label: "Titanide", force: 85, endurance: 1100, speed: 850, role: "cruiser", lootCapacity: 8000 },
+  colosse: { label: "Colosse", force: 160, endurance: 2200, speed: 650, role: "capital", lootCapacity: 12000 },
+  pegase: { label: "Pegase", force: 0, endurance: 50, speed: 80, role: "transport", lootCapacity: 50000 },
+  argo: { label: "Argo", force: 0, endurance: 120, speed: 70, role: "transport", lootCapacity: 200000 },
+  arche_spatiale: { label: "Arche Spatiale", force: 0, endurance: 300, speed: 50, role: "transport", lootCapacity: 500000 },
+  projecteur_photonique: { label: "Projecteur Photonique", force: 15, endurance: 300, speed: 0, role: "turret_light", lootCapacity: 0 },
+  lame_de_plasma: { label: "Lame de Plasma", force: 45, endurance: 900, speed: 0, role: "turret_medium", lootCapacity: 0 },
+  lanceur_orbitral: { label: "Lanceur Orbitral", force: 90, endurance: 1800, speed: 0, role: "turret_heavy", lootCapacity: 0 },
+  champ_aegis: { label: "Champ Aegis", force: 0, endurance: 4000, speed: 0, role: "shield", lootCapacity: 0 },
+  tourelle_rafale: { label: "Tourelle Cinetique Rafale", force: 22, endurance: 450, speed: 0, role: "turret_light", lootCapacity: 0 },
+  batterie_eclat: { label: "Batterie Flak Eclat", force: 30, endurance: 650, speed: 0, role: "turret_light", lootCapacity: 0 },
+  canon_ion_aiguillon: { label: "Canon ION Aiguillon", force: 55, endurance: 1100, speed: 0, role: "turret_medium", lootCapacity: 0 },
+  mine_orbitale_veille: { label: "Mine Orbitale Veille", force: 110, endurance: 900, speed: 0, role: "turret_heavy", lootCapacity: 0 },
+  canon_rail_longue_vue: { label: "Canon Rail Longue-Vue", force: 140, endurance: 2200, speed: 0, role: "turret_heavy", lootCapacity: 0 },
+  projecteur_emp_silence: { label: "Projecteur EMP Silence", force: 35, endurance: 1600, speed: 0, role: "turret_medium", lootCapacity: 0 },
+  mur_photonique_prisme: { label: "Mur Photonique Prisme", force: 0, endurance: 7500, speed: 0, role: "shield", lootCapacity: 0 },
+  lance_gravitationnel_ancre: { label: "Lance Gravitationnel Ancre", force: 240, endurance: 5000, speed: 0, role: "turret_heavy", lootCapacity: 0 }
+};
+
+var COMBAT_TARGET_WEIGHTS = {
+  defaults: {
+    scout: 1.0,
+    interceptor: 1.0,
+    strike: 1.0,
+    assault: 1.0,
+    cruiser: 1.0,
+    capital: 1.0,
+    transport: 1.0,
+    turret_light: 1.0,
+    turret_medium: 1.0,
+    turret_heavy: 1.0,
+    shield: 0.7
+  },
+  scout: {
+    scout: 1.15,
+    interceptor: 1.1,
+    transport: 1.45,
+    turret_light: 0.9,
+    turret_medium: 0.75,
+    turret_heavy: 0.6,
+    capital: 0.65,
+    shield: 0.35
+  },
+  interceptor: {
+    scout: 1.2,
+    interceptor: 1.15,
+    strike: 1.05,
+    transport: 1.3,
+    cruiser: 0.85,
+    capital: 0.7,
+    shield: 0.4
+  },
+  strike: {
+    interceptor: 1.1,
+    strike: 1.15,
+    assault: 1.1,
+    transport: 1.2,
+    turret_light: 1.05,
+    turret_medium: 1.0,
+    shield: 0.75
+  },
+  assault: {
+    strike: 1.1,
+    assault: 1.1,
+    cruiser: 1.15,
+    capital: 1.1,
+    turret_medium: 1.05,
+    turret_heavy: 1.05,
+    shield: 0.9
+  },
+  cruiser: {
+    interceptor: 1.15,
+    strike: 1.2,
+    assault: 1.1,
+    cruiser: 1.05,
+    capital: 1.0,
+    turret_heavy: 1.0,
+    transport: 1.05
+  },
+  capital: {
+    cruiser: 1.15,
+    capital: 1.25,
+    turret_heavy: 1.2,
+    shield: 1.15,
+    transport: 1.05
+  },
+  transport: {
+    transport: 0.1,
+    shield: 0.05
+  },
+  turret_light: {
+    scout: 1.25,
+    interceptor: 1.25,
+    strike: 1.0,
+    transport: 1.25,
+    cruiser: 0.7,
+    capital: 0.55,
+    shield: 0.3
+  },
+  turret_medium: {
+    interceptor: 1.05,
+    strike: 1.15,
+    assault: 1.2,
+    cruiser: 1.0,
+    transport: 1.05,
+    shield: 0.6
+  },
+  turret_heavy: {
+    assault: 1.05,
+    cruiser: 1.2,
+    capital: 1.3,
+    shield: 0.75,
+    transport: 0.9
+  },
+  shield: {
+    shield: 0
+  }
 };
 
 var HANGAR_QUEUE_MAX = 64;
@@ -554,6 +727,7 @@ function buildActiveOccupationIndexFromExpeditions(expeditions, serverNowTs) {
   for (var i = 0; i < rows.length; i++) {
     var exp = rows[i];
     if (!exp || typeof exp !== "object") continue;
+    if (getMapExpeditionMissionKind(exp) === "attack") continue;
     var expId = String(exp.id || "").trim();
     var fieldId = String(exp.fieldId || "").trim();
     var status = String(exp.status || "").trim().toLowerCase();
@@ -628,12 +802,36 @@ function reconcileMapOccupancyForPlayer(nk, economy, mapState, userId, username)
   for (var j = 0; j < expeditions.length; j++) {
     var expedition = expeditions[j];
     if (!expedition || typeof expedition !== "object") continue;
+    if (getMapExpeditionMissionKind(expedition) === "attack") continue;
     var expeditionStatus = String(expedition.status || "").trim().toLowerCase();
     if (expeditionStatus === "returning") continue;
     var expField = findMapField(mapState, expedition.fieldId);
     if (!expField) continue;
     var expId = String(expedition.id || "");
     if (!expId) continue;
+    var foreignOwnerId = String(expField.occupiedByPlayerId || "").trim();
+    var foreignFleetId = String(expField.occupyingFleetId || "").trim();
+
+    if (
+      expField.isOccupied &&
+      foreignOwnerId &&
+      foreignOwnerId !== selfId &&
+      foreignFleetId &&
+      foreignFleetId !== expId
+    ) {
+      if (expeditionStatus !== "returning") {
+        expedition.status = "returning";
+        expedition.collectedResources = {};
+        expedition.dropItemId = "";
+        expedition.dropQuantity = 0;
+        expedition.extractionEndAt = sanitizePositiveInt(Number(expedition.extractionEndAt || now)) || now;
+        expedition.returnStartAt = now;
+        expedition.returnEndAt = now + Math.max(MAP_MIN_TRAVEL_SECONDS, sanitizePositiveInt(Number(expedition.travelSeconds || MAP_MIN_TRAVEL_SECONDS)));
+        expedition.updatedAt = now;
+        changed = true;
+      }
+      continue;
+    }
 
     if (!expField.isOccupied) {
       expField.isOccupied = true;
@@ -715,17 +913,77 @@ function defaultMapFieldState() {
     version: 1,
     updatedAt: nowTs(),
     fields: [],
+    activeExpeditionUsers: [],
     totalSpawned: 0
   };
+}
+
+function normalizeStoredStringList(value) {
+  var source = Array.isArray(value) ? value : [];
+  var seen = {};
+  var out = [];
+  for (var i = 0; i < source.length; i++) {
+    var entry = String(source[i] || "").trim();
+    if (!entry || seen[entry]) continue;
+    seen[entry] = true;
+    out.push(entry);
+  }
+  return out;
 }
 
 function normalizeMapFieldState(raw) {
   var state = raw && typeof raw === "object" ? raw : defaultMapFieldState();
   if (!Array.isArray(state.fields)) state.fields = [];
+  if (!Array.isArray(state.activeExpeditionUsers)) state.activeExpeditionUsers = [];
+  state.activeExpeditionUsers = normalizeStoredStringList(state.activeExpeditionUsers);
   if (!Number.isFinite(state.version)) state.version = 1;
   if (!Number.isFinite(state.updatedAt)) state.updatedAt = nowTs();
   if (!Number.isFinite(state.totalSpawned)) state.totalSpawned = 0;
   return state;
+}
+
+function setMapActiveExpeditionUser(mapState, userId, isActive) {
+  normalizeMapFieldState(mapState);
+  var ownerId = String(userId || "").trim();
+  if (!ownerId) return false;
+  var next = normalizeStoredStringList(mapState.activeExpeditionUsers);
+  var prevLength = next.length;
+  var filtered = [];
+  for (var i = 0; i < next.length; i++) {
+    if (String(next[i] || "").trim() === ownerId) continue;
+    filtered.push(String(next[i] || "").trim());
+  }
+  if (isActive) filtered.push(ownerId);
+  mapState.activeExpeditionUsers = filtered;
+  return filtered.length !== prevLength || (isActive && filtered[filtered.length - 1] === ownerId && next.indexOf(ownerId) === -1);
+}
+
+function syncMapActiveExpeditionUserFromEconomy(mapState, userId, economy, serverNowTs) {
+  var expeditions = getResourceExpeditionList(economy);
+  var isActive = countBlockingResourceExpeditions(expeditions, serverNowTs) > 0;
+  return setMapActiveExpeditionUser(mapState, userId, isActive);
+}
+
+function collectMapMaintenanceOwnerIds(mapState, limit) {
+  normalizeMapFieldState(mapState);
+  var seen = {};
+  var out = [];
+  var safeLimit = Math.max(1, Math.min(200, sanitizePositiveInt(limit || MAP_WORLD_MAINTENANCE_OWNER_LIMIT)));
+  var indexed = normalizeStoredStringList(mapState.activeExpeditionUsers);
+  for (var i = 0; i < indexed.length && out.length < safeLimit; i++) {
+    var indexedOwner = String(indexed[i] || "").trim();
+    if (!indexedOwner || seen[indexedOwner]) continue;
+    seen[indexedOwner] = true;
+    out.push(indexedOwner);
+  }
+  var fields = Array.isArray(mapState.fields) ? mapState.fields : [];
+  for (var j = 0; j < fields.length && out.length < safeLimit; j++) {
+    var ownerId = String((fields[j] && fields[j].occupiedByPlayerId) || "").trim();
+    if (!ownerId || seen[ownerId]) continue;
+    seen[ownerId] = true;
+    out.push(ownerId);
+  }
+  return out;
 }
 
 function hashString32(input) {
@@ -845,6 +1103,26 @@ function distance2D(ax, ay, bx, by) {
   var dx = Number(ax || 0) - Number(bx || 0);
   var dy = Number(ay || 0) - Number(by || 0);
   return Math.sqrt(dx * dx + dy * dy);
+}
+
+function calculateMapFleetFuelCredits(userId, fieldX, fieldY, fleetRows, missionKind) {
+  var rows = Array.isArray(fleetRows) ? fleetRows : [];
+  var origin = mapPlayerToPlanetCoordinates(String(userId || ""));
+  var distance = distance2D(origin.x, origin.y, sanitizePositiveInt(fieldX || 0), sanitizePositiveInt(fieldY || 0));
+  var distanceFactor = Math.max(MAP_FUEL_MIN_DISTANCE_FACTOR, distance / MAP_FUEL_DISTANCE_NORMALIZER);
+  var missionMultiplier = String(missionKind || "harvest").trim().toLowerCase() === "attack"
+    ? MAP_FUEL_ATTACK_MULTIPLIER
+    : MAP_FUEL_HARVEST_MULTIPLIER;
+  var totalBase = 0;
+  for (var i = 0; i < rows.length; i++) {
+    var row = rows[i] || {};
+    var unitId = String(row.unitId || "").trim();
+    var quantity = sanitizePositiveInt(Number(row.quantity || 0));
+    if (!unitId || quantity <= 0) continue;
+    totalBase += Math.max(0, Number(MAP_FUEL_BASE_CREDITS_PER_1000[unitId] || 0)) * quantity;
+  }
+  if (totalBase <= 0) return 0;
+  return Math.max(1, Math.ceil(totalBase * distanceFactor * missionMultiplier));
 }
 
 function clampNumber(value, min, max) {
@@ -1307,6 +1585,482 @@ function calculateFleetHarvestStats(economy, fleetInput) {
   };
 }
 
+function summarizeMapFleetRuntime(fleetRows) {
+  var rows = Array.isArray(fleetRows) ? fleetRows : [];
+  var totalHarvestSpeed = 0;
+  var totalTransportCapacity = 0;
+  var weightedSpeed = 0;
+  var shipCount = 0;
+  var normalizedFleet = [];
+  for (var i = 0; i < rows.length; i++) {
+    var row = rows[i] || {};
+    var unitId = String(row.unitId || "").trim();
+    var quantity = sanitizePositiveInt(Number(row.quantity || 0));
+    if (!unitId || quantity <= 0) continue;
+    var stats = MAP_HARVEST_UNIT_STATS[unitId];
+    if (!stats) continue;
+    normalizedFleet.push({ unitId: unitId, quantity: quantity });
+    totalHarvestSpeed += sanitizePositiveInt(stats.harvestSpeed || 0) * quantity;
+    totalTransportCapacity += sanitizePositiveInt(stats.harvestCapacity || 0) * quantity;
+    weightedSpeed += sanitizePositiveInt(stats.mapSpeed || 0) * quantity;
+    shipCount += quantity;
+  }
+  return {
+    fleet: normalizedFleet,
+    totalHarvestSpeed: totalHarvestSpeed,
+    totalTransportCapacity: totalTransportCapacity,
+    mapSpeed: shipCount > 0 ? weightedSpeed / shipCount : 0
+  };
+}
+
+function calculateFleetCombatStats(economy, fleetInput) {
+  ensureHangarState(economy);
+  if (!Array.isArray(fleetInput) || fleetInput.length <= 0) throw new Error("Attack fleet payload is required.");
+  var reservedByExpeditions = getReservedHarvestShipsByExpeditions(economy);
+  var consumed = {};
+  var normalizedFleet = [];
+  var totalForce = 0;
+  var totalEndurance = 0;
+  var totalLootCapacity = 0;
+  var weightedSpeed = 0;
+  var shipCount = 0;
+
+  for (var i = 0; i < fleetInput.length; i++) {
+    var row = fleetInput[i] || {};
+    var unitId = String(row.unitId || "").trim();
+    var quantity = sanitizePositiveInt(Number(row.quantity || 0));
+    if (!unitId || quantity <= 0) continue;
+    var def = HANGAR_UNIT_DEFS[unitId];
+    var stats = UNIT_COMBAT_STATS[unitId];
+    if (!def || def.category !== "ship" || !stats) {
+      throw new Error("Invalid combat ship in fleet: " + unitId);
+    }
+    var already = consumed[unitId] || 0;
+    var inventoryAmount = sanitizePositiveInt(economy.hangarInventory[unitId] || 0);
+    var reservedAmount = sanitizePositiveInt(reservedByExpeditions[unitId] || 0);
+    var available = Math.max(0, inventoryAmount - reservedAmount);
+    if (already + quantity > available) throw new Error("Not enough available ships for " + unitId + ".");
+    consumed[unitId] = already + quantity;
+  }
+
+  var keys = Object.keys(consumed);
+  if (keys.length <= 0) throw new Error("Attack fleet payload is empty.");
+  for (var j = 0; j < keys.length; j++) {
+    var id = keys[j];
+    var qty = consumed[id];
+    var combatStats = UNIT_COMBAT_STATS[id];
+    normalizedFleet.push({ unitId: id, quantity: qty });
+    totalForce += sanitizePositiveInt(combatStats.force || 0) * qty;
+    totalEndurance += sanitizePositiveInt(combatStats.endurance || 0) * qty;
+    totalLootCapacity += sanitizePositiveInt(combatStats.lootCapacity || 0) * qty;
+    weightedSpeed += sanitizePositiveInt(combatStats.speed || 0) * qty;
+    shipCount += qty;
+  }
+
+  if (totalForce <= 0) throw new Error("Attack fleet has no combat-capable ships.");
+  return {
+    fleet: normalizedFleet,
+    totalForce: totalForce,
+    totalEndurance: totalEndurance,
+    totalLootCapacity: totalLootCapacity,
+    averageSpeed: shipCount > 0 ? weightedSpeed / shipCount : 0
+  };
+}
+
+function filterPositiveFleetRows(rows) {
+  var list = Array.isArray(rows) ? rows : [];
+  var out = [];
+  for (var i = 0; i < list.length; i++) {
+    var row = list[i] || {};
+    var unitId = String(row.unitId || "").trim();
+    var quantity = sanitizePositiveInt(Number(row.quantity || 0));
+    if (!unitId || quantity <= 0) continue;
+    out.push({ unitId: unitId, quantity: quantity });
+  }
+  return out;
+}
+
+function sumFleetQuantity(rows) {
+  var list = Array.isArray(rows) ? rows : [];
+  var total = 0;
+  for (var i = 0; i < list.length; i++) {
+    total += sanitizePositiveInt(Number((list[i] && list[i].quantity) || 0));
+  }
+  return total;
+}
+
+function limitResourceMapByCapacity(resources, capacity) {
+  var safeCapacity = sanitizePositiveInt(Number(capacity || 0));
+  var source = resources && typeof resources === "object" ? resources : {};
+  if (safeCapacity <= 0) return {};
+  var resolved = resolveReturnResources(source, source, safeCapacity);
+  return resolved.collected;
+}
+
+function applyResourceMapToEconomy(economy, resources) {
+  var source = resources && typeof resources === "object" ? resources : {};
+  var keys = Object.keys(source);
+  for (var i = 0; i < keys.length; i++) {
+    var rid = keys[i];
+    var amount = sanitizePositiveInt(source[rid] || 0);
+    if (amount <= 0) continue;
+    if (!economy.resources[rid]) economy.resources[rid] = { amount: 0 };
+    economy.resources[rid].amount += amount;
+  }
+}
+
+function mergeResourceMaps(base, extra) {
+  var out = {};
+  var first = base && typeof base === "object" ? base : {};
+  var second = extra && typeof extra === "object" ? extra : {};
+  var firstKeys = Object.keys(first);
+  for (var i = 0; i < firstKeys.length; i++) {
+    var firstId = firstKeys[i];
+    var firstAmount = sanitizePositiveInt(first[firstId] || 0);
+    if (firstAmount > 0) out[firstId] = firstAmount;
+  }
+  var secondKeys = Object.keys(second);
+  for (var j = 0; j < secondKeys.length; j++) {
+    var secondId = secondKeys[j];
+    var secondAmount = sanitizePositiveInt(second[secondId] || 0);
+    if (secondAmount <= 0) continue;
+    out[secondId] = sanitizePositiveInt(out[secondId] || 0) + secondAmount;
+  }
+  return out;
+}
+
+function roleTargetWeight(attackerRole, defenderRole) {
+  var safeDefenderRole = String(defenderRole || "transport").trim().toLowerCase();
+  var defaults = COMBAT_TARGET_WEIGHTS.defaults || {};
+  var table = COMBAT_TARGET_WEIGHTS[String(attackerRole || "").trim().toLowerCase()] || {};
+  var specific = Number(table[safeDefenderRole]);
+  if (Number.isFinite(specific)) return Math.max(0, specific);
+  var fallback = Number(defaults[safeDefenderRole]);
+  return Number.isFinite(fallback) ? Math.max(0, fallback) : 1;
+}
+
+function buildCombatPool(shipRows, defenseRows) {
+  var rows = [];
+  var addRows = function(sourceRows, kind) {
+    var list = Array.isArray(sourceRows) ? sourceRows : [];
+    for (var i = 0; i < list.length; i++) {
+      var row = list[i] || {};
+      var unitId = String(row.unitId || "").trim();
+      var quantity = sanitizePositiveInt(Number(row.quantity || 0));
+      var stats = UNIT_COMBAT_STATS[unitId];
+      if (!unitId || quantity <= 0 || !stats) continue;
+      rows.push({
+        unitId: unitId,
+        quantity: quantity,
+        damageCarry: 0,
+        kind: kind,
+        role: String(stats.role || "transport"),
+        force: sanitizePositiveInt(stats.force || 0),
+        endurance: Math.max(1, sanitizePositiveInt(stats.endurance || 1)),
+        speed: sanitizePositiveInt(stats.speed || 0),
+        lootCapacity: sanitizePositiveInt(stats.lootCapacity || 0)
+      });
+    }
+  };
+  addRows(shipRows, "ship");
+  addRows(defenseRows, "defense");
+  return rows;
+}
+
+function sideHasRemainingUnits(pool) {
+  var rows = Array.isArray(pool) ? pool : [];
+  for (var i = 0; i < rows.length; i++) {
+    if (sanitizePositiveInt(rows[i] && rows[i].quantity || 0) > 0) return true;
+  }
+  return false;
+}
+
+function sideHasRemainingOffense(pool) {
+  var rows = Array.isArray(pool) ? pool : [];
+  for (var i = 0; i < rows.length; i++) {
+    var row = rows[i] || {};
+    if (sanitizePositiveInt(row.quantity || 0) <= 0) continue;
+    if (sanitizePositiveInt(row.force || 0) > 0) return true;
+  }
+  return false;
+}
+
+function fleetHasCombatForce(rows) {
+  var list = Array.isArray(rows) ? rows : [];
+  for (var i = 0; i < list.length; i++) {
+    var row = list[i] || {};
+    var unitId = String(row.unitId || "").trim();
+    var quantity = sanitizePositiveInt(row.quantity || 0);
+    if (!unitId || quantity <= 0) continue;
+    var directForce = sanitizePositiveInt(row.force || 0);
+    if (directForce > 0) return true;
+    var stats = UNIT_COMBAT_STATS[unitId];
+    if (sanitizePositiveInt(stats && stats.force || 0) > 0) return true;
+  }
+  return false;
+}
+
+function buildResourceFieldBattleTexts(outcomeKey, fieldId, attackerSurvivors, defenderSurvivors) {
+  var attackerHasRetreatingSurvivors = sumFleetQuantity(attackerSurvivors) > 0;
+  var defenderHasRetreatingSurvivors = sumFleetQuantity(defenderSurvivors) > 0;
+  if (outcomeKey === "attacker") {
+    return {
+      attackerSummaryText: defenderHasRetreatingSurvivors
+        ? "Victoire offensive sur le champ " + String(fieldId || "") + ". La flotte de recolte ennemie a ete mise en fuite."
+        : "Victoire offensive sur le champ " + String(fieldId || "") + ".",
+      defenderSummaryText: defenderHasRetreatingSurvivors
+        ? "Votre flotte de recolte a perdu le champ et les survivants se replient depuis " + String(fieldId || "") + "."
+        : "Votre flotte de recolte a ete detruite sur le champ " + String(fieldId || "") + "."
+    };
+  }
+  if (outcomeKey === "mutual") {
+    return {
+      attackerSummaryText: "Destruction mutuelle sur le champ " + String(fieldId || "") + ".",
+      defenderSummaryText: "Votre flotte de recolte a ete aneantie dans un combat mutuel sur le champ " + String(fieldId || "") + "."
+    };
+  }
+  return {
+    attackerSummaryText: attackerHasRetreatingSurvivors
+      ? "Offensive repoussee sur le champ " + String(fieldId || "") + ". Les survivants se replient."
+      : "Offensive repoussee sur le champ " + String(fieldId || "") + ".",
+    defenderSummaryText: "Votre flotte de recolte a repousse l'attaque puis se replie depuis le champ " + String(fieldId || "") + "."
+  };
+}
+
+function allocateCombatRoundDamage(attackingPool, defendingPool, seedKey) {
+  var out = {};
+  var attackers = Array.isArray(attackingPool) ? attackingPool : [];
+  var defenders = Array.isArray(defendingPool) ? defendingPool : [];
+  for (var i = 0; i < attackers.length; i++) {
+    var attacker = attackers[i] || {};
+    var quantity = sanitizePositiveInt(attacker.quantity || 0);
+    var force = sanitizePositiveInt(attacker.force || 0);
+    if (quantity <= 0 || force <= 0) continue;
+    var liveTargets = [];
+    var totalWeight = 0;
+    for (var j = 0; j < defenders.length; j++) {
+      var defender = defenders[j] || {};
+      var defenderQty = sanitizePositiveInt(defender.quantity || 0);
+      if (defenderQty <= 0) continue;
+      var weight = roleTargetWeight(attacker.role, defender.role);
+      if (weight <= 0) continue;
+      var effectiveWeight = weight * Math.max(1, defenderQty);
+      liveTargets.push({
+        unitId: defender.unitId,
+        weight: effectiveWeight
+      });
+      totalWeight += effectiveWeight;
+    }
+    if (liveTargets.length <= 0 || totalWeight <= 0) continue;
+    var variance = 0.92 + seededFloat01(String(seedKey || "") + "|" + attacker.unitId + "|variance") * 0.16;
+    var damage = quantity * force * variance;
+    for (var k = 0; k < liveTargets.length; k++) {
+      var target = liveTargets[k];
+      out[target.unitId] = Number(out[target.unitId] || 0) + (damage * (target.weight / totalWeight));
+    }
+  }
+  return out;
+}
+
+function applyCombatDamage(pool, incomingDamage) {
+  var rows = Array.isArray(pool) ? pool : [];
+  var losses = {};
+  for (var i = 0; i < rows.length; i++) {
+    var row = rows[i] || {};
+    var unitId = String(row.unitId || "").trim();
+    var quantity = sanitizePositiveInt(row.quantity || 0);
+    if (!unitId || quantity <= 0) continue;
+    var endurance = Math.max(1, sanitizePositiveInt(row.endurance || 1));
+    var totalDamage = Number(row.damageCarry || 0) + Number(incomingDamage && incomingDamage[unitId] || 0);
+    if (!Number.isFinite(totalDamage) || totalDamage <= 0) {
+      row.damageCarry = Math.max(0, Number(row.damageCarry || 0));
+      continue;
+    }
+    var destroyed = Math.min(quantity, Math.floor(totalDamage / endurance));
+    if (destroyed > 0) {
+      row.quantity = quantity - destroyed;
+      losses[unitId] = sanitizePositiveInt(losses[unitId] || 0) + destroyed;
+    }
+    row.damageCarry = row.quantity > 0 ? Math.max(0, totalDamage - destroyed * endurance) : 0;
+  }
+  return losses;
+}
+
+function flattenCombatPool(pool, kind) {
+  var rows = Array.isArray(pool) ? pool : [];
+  var out = [];
+  for (var i = 0; i < rows.length; i++) {
+    var row = rows[i] || {};
+    if (kind && String(row.kind || "") !== String(kind || "")) continue;
+    var quantity = sanitizePositiveInt(row.quantity || 0);
+    if (quantity <= 0) continue;
+    out.push({ unitId: String(row.unitId || ""), quantity: quantity });
+  }
+  return out;
+}
+
+function evaluateCombatSide(pool) {
+  var rows = Array.isArray(pool) ? pool : [];
+  var totalUnits = 0;
+  var totalForce = 0;
+  var totalEndurance = 0;
+  for (var i = 0; i < rows.length; i++) {
+    var row = rows[i] || {};
+    var quantity = sanitizePositiveInt(row.quantity || 0);
+    if (quantity <= 0) continue;
+    totalUnits += quantity;
+    totalForce += sanitizePositiveInt(row.force || 0) * quantity;
+    totalEndurance += Math.max(1, sanitizePositiveInt(row.endurance || 1)) * quantity;
+  }
+  return {
+    totalUnits: totalUnits,
+    totalForce: totalForce,
+    totalEndurance: totalEndurance,
+    score: totalForce * 8 + totalEndurance + totalUnits * 35
+  };
+}
+
+function resolveFleetCombat(attackerFleet, defenderFleet, attackerDefenses, defenderDefenses, seedKey) {
+  var attackerPool = buildCombatPool(attackerFleet, attackerDefenses);
+  var defenderPool = buildCombatPool(defenderFleet, defenderDefenses);
+  var roundSummaries = [];
+  var maxRounds = 10;
+  for (var round = 1; round <= maxRounds; round++) {
+    if (!sideHasRemainingUnits(attackerPool) || !sideHasRemainingUnits(defenderPool)) break;
+    if (!sideHasRemainingOffense(attackerPool) && !sideHasRemainingOffense(defenderPool)) break;
+    var attackerDamage = allocateCombatRoundDamage(attackerPool, defenderPool, String(seedKey || "") + "|r" + round + "|atk");
+    var defenderDamage = allocateCombatRoundDamage(defenderPool, attackerPool, String(seedKey || "") + "|r" + round + "|def");
+    var attackerLosses = applyCombatDamage(attackerPool, defenderDamage);
+    var defenderLosses = applyCombatDamage(defenderPool, attackerDamage);
+    roundSummaries.push({
+      round: round,
+      attackerLosses: attackerLosses,
+      defenderLosses: defenderLosses
+    });
+    if (!sideHasRemainingUnits(attackerPool) || !sideHasRemainingUnits(defenderPool)) break;
+  }
+
+  var attackerSummary = evaluateCombatSide(attackerPool);
+  var defenderSummary = evaluateCombatSide(defenderPool);
+  var attackerAlive = attackerSummary.totalUnits > 0;
+  var defenderAlive = defenderSummary.totalUnits > 0;
+  var attackerCanFight = sideHasRemainingOffense(attackerPool);
+  var defenderCanFight = sideHasRemainingOffense(defenderPool);
+  var winner = "defender";
+  if (attackerAlive && !defenderAlive) {
+    winner = "attacker";
+  } else if (!attackerAlive && defenderAlive) {
+    winner = "defender";
+  } else if (!attackerAlive && !defenderAlive) {
+    winner = "mutual";
+  } else if (attackerCanFight && !defenderCanFight) {
+    winner = "attacker";
+  } else if (!attackerCanFight && defenderCanFight) {
+    winner = "defender";
+  } else if (attackerSummary.score > defenderSummary.score * 1.03) {
+    winner = "attacker";
+  } else {
+    winner = "defender";
+  }
+
+  return {
+    winner: winner,
+    rounds: roundSummaries,
+    attackerShips: flattenCombatPool(attackerPool, "ship"),
+    defenderShips: flattenCombatPool(defenderPool, "ship"),
+    attackerDefenses: flattenCombatPool(attackerPool, "defense"),
+    defenderDefenses: flattenCombatPool(defenderPool, "defense"),
+    attackerLosses: applyLossDiff(filterPositiveFleetRows(attackerFleet), flattenCombatPool(attackerPool, "ship")),
+    defenderLosses: applyLossDiff(filterPositiveFleetRows(defenderFleet), flattenCombatPool(defenderPool, "ship")),
+    attackerSummary: attackerSummary,
+    defenderSummary: defenderSummary,
+    attackerCanFight: attackerCanFight,
+    defenderCanFight: defenderCanFight
+  };
+}
+
+function applyLossDiff(originalRows, survivorRows) {
+  var source = Array.isArray(originalRows) ? originalRows : [];
+  var survivors = Array.isArray(survivorRows) ? survivorRows : [];
+  var survivorMap = {};
+  for (var i = 0; i < survivors.length; i++) {
+    var survivor = survivors[i] || {};
+    var survivorId = String(survivor.unitId || "").trim();
+    var survivorQty = sanitizePositiveInt(survivor.quantity || 0);
+    if (!survivorId || survivorQty <= 0) continue;
+    survivorMap[survivorId] = survivorQty;
+  }
+  var losses = {};
+  for (var j = 0; j < source.length; j++) {
+    var row = source[j] || {};
+    var unitId = String(row.unitId || "").trim();
+    var quantity = sanitizePositiveInt(row.quantity || 0);
+    if (!unitId || quantity <= 0) continue;
+    var survived = sanitizePositiveInt(survivorMap[unitId] || 0);
+    var lost = Math.max(0, quantity - survived);
+    if (lost > 0) losses[unitId] = lost;
+  }
+  return losses;
+}
+
+function applyFleetLossesToHangarInventory(economy, lossMap) {
+  ensureHangarState(economy);
+  var source = lossMap && typeof lossMap === "object" ? lossMap : {};
+  var keys = Object.keys(source);
+  for (var i = 0; i < keys.length; i++) {
+    var unitId = keys[i];
+    var lost = sanitizePositiveInt(source[unitId] || 0);
+    if (lost <= 0) continue;
+    var current = sanitizePositiveInt(economy.hangarInventory[unitId] || 0);
+    var next = Math.max(0, current - lost);
+    if (next > 0) economy.hangarInventory[unitId] = next;
+    else delete economy.hangarInventory[unitId];
+  }
+}
+
+function formatFleetLossMap(lossMap) {
+  var source = lossMap && typeof lossMap === "object" ? lossMap : {};
+  var keys = Object.keys(source);
+  if (keys.length <= 0) return "Aucune";
+  var parts = [];
+  for (var i = 0; i < keys.length; i++) {
+    var unitId = keys[i];
+    var lost = sanitizePositiveInt(source[unitId] || 0);
+    if (lost <= 0) continue;
+    var label = UNIT_COMBAT_STATS[unitId] && UNIT_COMBAT_STATS[unitId].label
+      ? UNIT_COMBAT_STATS[unitId].label
+      : unitId;
+    parts.push(label + " -" + lost);
+  }
+  return parts.length > 0 ? parts.join(", ") : "Aucune";
+}
+
+function formatResourceMapShort(resourceMap) {
+  var source = resourceMap && typeof resourceMap === "object" ? resourceMap : {};
+  var keys = Object.keys(source);
+  if (keys.length <= 0) return "Aucun";
+  var resourceNameById = {
+    carbone: "Carbone",
+    titane: "Titane",
+    osmium: "Osmium",
+    adamantium: "Adamantium",
+    magmatite: "Magmatite",
+    neodyme: "Neodyme",
+    chronium: "Chronium",
+    aetherium: "Aetherium",
+    isotope7: "Isotope-7",
+    singulite: "Singulite"
+  };
+  var parts = [];
+  for (var i = 0; i < RESOURCE_IDS.length; i++) {
+    var rid = RESOURCE_IDS[i];
+    var amount = sanitizePositiveInt(source[rid] || 0);
+    if (amount <= 0) continue;
+    parts.push((resourceNameById[rid] || rid) + " +" + amount);
+  }
+  return parts.length > 0 ? parts.join(", ") : "Aucun";
+}
+
 function calculateMapTravelSeconds(userId, fieldX, fieldY, mapSpeed) {
   var origin = mapPlayerToPlanetCoordinates(userId);
   var distance = distance2D(origin.x, origin.y, fieldX, fieldY);
@@ -1732,6 +2486,11 @@ function pushMapReport(economy, report) {
   if (economy.resourceReports.length > 12) economy.resourceReports = economy.resourceReports.slice(0, 12);
 }
 
+function getMapExpeditionMissionKind(expedition) {
+  var raw = String(expedition && expedition.missionKind || "harvest").trim().toLowerCase();
+  return raw === "attack" ? "attack" : "harvest";
+}
+
 function settleReturningExpedition(economy, inventory, expedition, serverNowTs) {
   var gains = expedition.collectedResources && typeof expedition.collectedResources === "object"
     ? expedition.collectedResources
@@ -1754,6 +2513,10 @@ function settleReturningExpedition(economy, inventory, expedition, serverNowTs) 
     addItemToInventory(inventory, dropItemId, dropQuantity);
     addedItems.push({ itemId: dropItemId, quantity: dropQuantity });
     inventory.mapDropNotifications = sanitizePositiveInt(inventory.mapDropNotifications || 0) + 1;
+  }
+
+  if (getMapExpeditionMissionKind(expedition) === "attack") {
+    return null;
   }
 
   var expeditionId = String(expedition.id || "").trim();
@@ -1825,7 +2588,7 @@ function mapHarvestReportBody(report) {
       if (!itemId || qty <= 0) continue;
       var itemDef = ITEM_DEFINITIONS[itemId];
       var itemName = itemDef && itemDef.name ? itemDef.name : itemId;
-      lines.push("  • " + itemName + " x" + qty);
+      lines.push("  â€¢ " + itemName + " x" + qty);
     }
   }
   if (lines.length <= 0) lines.push("- Aucun gain");
@@ -1895,13 +2658,14 @@ function serializeMapFieldForViewer(field, viewerUserId, allowedResources) {
 function serializeMapExpedition(expedition, serverNowTs) {
   if (!expedition || typeof expedition !== "object") return null;
   var status = String(expedition.status || "travel_to_field");
+  var missionKind = getMapExpeditionMissionKind(expedition);
   var snapshotResources = expedition.snapshotResources && typeof expedition.snapshotResources === "object"
     ? expedition.snapshotResources
     : {};
   var collectedResources = expedition.collectedResources && typeof expedition.collectedResources === "object"
     ? expedition.collectedResources
     : {};
-  if (status === "extracting") {
+  if (missionKind === "harvest" && status === "extracting") {
     collectedResources = estimateExpeditionCollected(expedition, serverNowTs);
   }
   var effectiveTransportCapacity = Math.max(
@@ -1911,6 +2675,9 @@ function serializeMapExpedition(expedition, serverNowTs) {
   return {
     id: String(expedition.id || ""),
     fieldId: String(expedition.fieldId || ""),
+    missionKind: missionKind,
+    targetPlayerId: String(expedition.targetPlayerId || ""),
+    targetUsername: String(expedition.targetUsername || ""),
     status: status,
     departureAt: sanitizePositiveInt(expedition.departureAt || 0),
     arrivalAt: sanitizePositiveInt(expedition.arrivalAt || 0),
@@ -1922,6 +2689,7 @@ function serializeMapExpedition(expedition, serverNowTs) {
     extractionSeconds: sanitizePositiveInt(expedition.extractionSeconds || 0),
     totalHarvestSpeed: sanitizePositiveInt(expedition.totalHarvestSpeed || 0),
     totalTransportCapacity: effectiveTransportCapacity,
+    fuelCostCredits: sanitizePositiveInt(expedition.fuelCostCredits || 0),
     playerScore: sanitizePositiveInt(expedition.playerScore || 0),
     scoreBonus: Number.isFinite(Number(expedition.scoreBonus || 0)) ? Number(expedition.scoreBonus || 0) : 1,
     fleet: Array.isArray(expedition.fleet) ? expedition.fleet : [],
@@ -1929,6 +2697,67 @@ function serializeMapExpedition(expedition, serverNowTs) {
     collectedResources: collectedResources,
     serverNowTs: serverNowTs
   };
+}
+
+function serializePublicMapExpedition(expedition, playerId, username, serverNowTs) {
+  var base = serializeMapExpedition(expedition, serverNowTs);
+  if (!base) return null;
+  return {
+    id: String(base.id || ""),
+    playerId: String(playerId || expedition.playerId || ""),
+    username: String(username || expedition.username || playerId || ""),
+    fieldId: String(base.fieldId || ""),
+    missionKind: String(base.missionKind || "harvest"),
+    targetPlayerId: String(base.targetPlayerId || ""),
+    targetUsername: String(base.targetUsername || ""),
+    status: String(base.status || "travel_to_field"),
+    departureAt: sanitizePositiveInt(base.departureAt || 0),
+    arrivalAt: sanitizePositiveInt(base.arrivalAt || 0),
+    extractionStartAt: sanitizePositiveInt(base.extractionStartAt || 0),
+    extractionEndAt: sanitizePositiveInt(base.extractionEndAt || 0),
+    returnStartAt: sanitizePositiveInt(base.returnStartAt || 0),
+    returnEndAt: sanitizePositiveInt(base.returnEndAt || 0),
+    travelSeconds: sanitizePositiveInt(base.travelSeconds || 0),
+    serverNowTs: serverNowTs
+  };
+}
+
+function listPublicMapExpeditionsForViewer(nk, mapState, viewerUserId, serverNowTs) {
+  var ownerIds = collectMapMaintenanceOwnerIds(mapState, MAP_WORLD_MAINTENANCE_OWNER_LIMIT);
+  if (!Array.isArray(ownerIds) || ownerIds.length <= 0) return [];
+  var publicOwnerIds = [];
+  for (var i = 0; i < ownerIds.length; i++) {
+    var ownerId = String(ownerIds[i] || "").trim();
+    if (!ownerId || ownerId === String(viewerUserId || "").trim()) continue;
+    publicOwnerIds.push(ownerId);
+  }
+  if (publicOwnerIds.length <= 0) return [];
+
+  var readReqs = [];
+  for (var j = 0; j < publicOwnerIds.length; j++) {
+    readReqs.push({ collection: ECONOMY_COLLECTION, key: ECONOMY_KEY, userId: publicOwnerIds[j] });
+  }
+  var readRows = nk.storageRead(readReqs) || [];
+  var usernameIndex = resolveUsernameIndexByIds(nk, publicOwnerIds);
+  var out = [];
+
+  for (var k = 0; k < publicOwnerIds.length; k++) {
+    var ownerUserId = publicOwnerIds[k];
+    var economyRead = readRows[k] || {};
+    var ownerEconomy = ensureEconomyState(economyRead.value || defaultEconomyState());
+    ensureResourceExpeditionState(ownerEconomy);
+    var ownerUsername = String(usernameIndex[ownerUserId] || ownerEconomy.username || ownerUserId).trim() || ownerUserId;
+    var expeditionList = getResourceExpeditionList(ownerEconomy);
+    for (var ei = 0; ei < expeditionList.length; ei++) {
+      var publicExpedition = serializePublicMapExpedition(expeditionList[ei], ownerUserId, ownerUsername, serverNowTs);
+      if (!publicExpedition || !publicExpedition.id || !publicExpedition.fieldId) continue;
+      var publicStatus = String(publicExpedition.status || "").trim().toLowerCase();
+      if (publicStatus !== "travel_to_field" && publicStatus !== "returning" && publicStatus !== "extracting") continue;
+      out.push(publicExpedition);
+    }
+  }
+
+  return out;
 }
 
 function syncMapExpeditions(economy, inventory, mapState, userId, username, serverNowTs) {
@@ -1946,12 +2775,23 @@ function syncMapExpeditions(economy, inventory, mapState, userId, username, serv
       changed = true;
       continue;
     }
+    var missionKind = getMapExpeditionMissionKind(expedition);
+    if (String(expedition.missionKind || "") !== missionKind) {
+      expedition.missionKind = missionKind;
+      changed = true;
+    }
     var status = String(expedition.status || "travel_to_field").trim().toLowerCase();
     if (String(expedition.status || "") !== status) {
       expedition.status = status;
       changed = true;
     }
-    if (status !== "travel_to_field" && status !== "extracting" && status !== "returning") {
+    if (missionKind === "attack") {
+      if (status !== "travel_to_field" && status !== "returning") {
+        status = sanitizePositiveInt(expedition.returnStartAt || 0) > 0 ? "returning" : "travel_to_field";
+        expedition.status = status;
+        changed = true;
+      }
+    } else if (status !== "travel_to_field" && status !== "extracting" && status !== "returning") {
       if (sanitizePositiveInt(expedition.returnStartAt || 0) > 0) {
         status = "returning";
       } else if (sanitizePositiveInt(expedition.extractionStartAt || 0) > 0) {
@@ -1964,7 +2804,7 @@ function syncMapExpeditions(economy, inventory, mapState, userId, username, serv
     }
     var field = findMapField(mapState, expedition.fieldId);
 
-    if (status === "travel_to_field" && serverNowTs >= sanitizePositiveInt(expedition.arrivalAt || 0)) {
+    if (missionKind !== "attack" && status === "travel_to_field" && serverNowTs >= sanitizePositiveInt(expedition.arrivalAt || 0)) {
       expedition.status = "extracting";
       status = "extracting";
       expedition.extractionStartAt = sanitizePositiveInt(expedition.arrivalAt || serverNowTs);
@@ -1973,7 +2813,7 @@ function syncMapExpeditions(economy, inventory, mapState, userId, username, serv
       changed = true;
     }
 
-    if (status === "extracting" && serverNowTs >= sanitizePositiveInt(expedition.extractionEndAt || 0)) {
+    if (missionKind !== "attack" && status === "extracting" && serverNowTs >= sanitizePositiveInt(expedition.extractionEndAt || 0)) {
       if (field) {
         var fullOutcome = settleHarvestAgainstField(field, expedition, 1);
         expedition.collectedResources = fullOutcome.collected;
@@ -2012,7 +2852,8 @@ function syncMapExpeditions(economy, inventory, mapState, userId, username, serv
       if (settledAt <= 0) {
         expedition.settledAt = serverNowTs;
         try {
-          reports.push(settleReturningExpedition(economy, inventory, expedition, serverNowTs));
+          var settledReport = settleReturningExpedition(economy, inventory, expedition, serverNowTs);
+          if (settledReport) reports.push(settledReport);
         } catch (_settleErr) {
           // Failsafe: never keep a returning expedition stuck forever.
         }
@@ -2053,18 +2894,24 @@ function startMapExpedition(economy, mapState, userId, username, fieldId, fleetI
     var fieldOwnerId = String(field.occupiedByPlayerId || "");
     var fleetId = String(field.occupyingFleetId || "");
     var key = String(field.id || "") + "::" + fleetId;
-    var activeIndex = null;
     if (fieldOwnerId === String(userId || "")) {
-      activeIndex = buildActiveOccupationIndexFromExpeditions(getResourceExpeditionList(economy), serverNowTs);
-    } else if (nk && typeof nk.storageRead === "function") {
-      activeIndex = readOwnerActiveOccupationIndex(nk, fieldOwnerId, {}, serverNowTs);
+      var activeIndex = buildActiveOccupationIndexFromExpeditions(getResourceExpeditionList(economy), serverNowTs);
+      if (!fieldOwnerId || !fleetId || !activeIndex || !activeIndex[key]) {
+        clearFieldOccupation(field);
+      }
     }
-    if (!fieldOwnerId || !fleetId || !activeIndex || !activeIndex[key]) {
+    if (!fieldOwnerId || !fleetId) {
       clearFieldOccupation(field);
     }
   }
   if (field.isOccupied) throw new Error("Resource field is already occupied.");
   var stats = calculateFleetHarvestStats(economy, fleetInput);
+  var fuelCostCredits = calculateMapFleetFuelCredits(userId, field.x, field.y, stats.fleet, "harvest");
+  if (fuelCostCredits > 0) {
+    economy.premiumCredits = Math.max(0, Math.floor(Number(economy.premiumCredits || 0)));
+    if (economy.premiumCredits < fuelCostCredits) throw new Error("Not enough credits for fleet fuel.");
+    economy.premiumCredits -= fuelCostCredits;
+  }
   var travelSeconds = calculateMapTravelSeconds(userId, field.x, field.y, stats.mapSpeed);
   var extractionSeconds = calculateMapExtractionSeconds(field.remainingExtractionWork, stats.totalHarvestSpeed);
   var allowedResources = getAvailableResourcesForPlayer(economy);
@@ -2124,6 +2971,7 @@ function startMapExpedition(economy, mapState, userId, username, fieldId, fleetI
     collectedResources: {},
     dropItemId: "",
     dropQuantity: 0,
+    fuelCostCredits: fuelCostCredits,
     settledAt: 0,
     updatedAt: serverNowTs
   };
@@ -2132,6 +2980,92 @@ function startMapExpedition(economy, mapState, userId, username, fieldId, fleetI
   field.occupiedByPlayerId = userId;
   field.occupiedByUsername = username || userId;
   field.occupyingFleetId = expedition.id;
+
+  var nextExpeditions = expeditions.slice();
+  nextExpeditions.push(expedition);
+  economy.resourceExpeditions = nextExpeditions;
+  economy.resourceExpedition = expedition;
+  return expedition;
+}
+
+function summarizeCombatFleetRuntime(fleetRows) {
+  var rows = filterPositiveFleetRows(fleetRows);
+  var totalLootCapacity = 0;
+  var weightedSpeed = 0;
+  var shipCount = 0;
+  for (var i = 0; i < rows.length; i++) {
+    var row = rows[i] || {};
+    var unitId = String(row.unitId || "").trim();
+    var quantity = sanitizePositiveInt(Number(row.quantity || 0));
+    var stats = UNIT_COMBAT_STATS[unitId];
+    if (!unitId || quantity <= 0 || !stats) continue;
+    totalLootCapacity += sanitizePositiveInt(stats.lootCapacity || 0) * quantity;
+    weightedSpeed += sanitizePositiveInt(stats.speed || 0) * quantity;
+    shipCount += quantity;
+  }
+  return {
+    fleet: rows,
+    totalLootCapacity: totalLootCapacity,
+    averageSpeed: shipCount > 0 ? weightedSpeed / shipCount : 0
+  };
+}
+
+function startMapAttackExpedition(economy, mapState, userId, username, fieldId, fleetInput, serverNowTs, maxActiveSlots) {
+  ensureResourceExpeditionState(economy);
+  var expeditions = coerceObjectList(getResourceExpeditionList(economy));
+  economy.resourceExpeditions = expeditions;
+  var slotCap = Math.max(1, sanitizePositiveInt(Number(maxActiveSlots || 1)));
+  var blockingExpeditions = countBlockingResourceExpeditions(expeditions, serverNowTs);
+  if (blockingExpeditions >= slotCap) {
+    throw new Error("Active fleet slot limit reached (" + blockingExpeditions + "/" + slotCap + ").");
+  }
+  var field = findMapField(mapState, fieldId);
+  if (!field) throw new Error("Resource field not found.");
+  if (!field.isOccupied) throw new Error("No occupied resource field found.");
+  var defenderUserId = String(field.occupiedByPlayerId || "").trim();
+  if (!defenderUserId) throw new Error("No defender found on this field.");
+  if (defenderUserId === String(userId || "")) throw new Error("You cannot attack your own harvesting fleet.");
+
+  var stats = calculateFleetCombatStats(economy, fleetInput);
+  var fuelCostCredits = calculateMapFleetFuelCredits(userId, field.x, field.y, stats.fleet, "attack");
+  if (fuelCostCredits > 0) {
+    economy.premiumCredits = Math.max(0, Math.floor(Number(economy.premiumCredits || 0)));
+    if (economy.premiumCredits < fuelCostCredits) throw new Error("Not enough credits for fleet fuel.");
+    economy.premiumCredits -= fuelCostCredits;
+  }
+  var travelSeconds = calculateMapTravelSeconds(userId, field.x, field.y, stats.averageSpeed);
+  var expedition = {
+    id: makeServerId("atk", serverNowTs),
+    playerId: userId,
+    username: username || userId,
+    targetPlayerId: defenderUserId,
+    targetUsername: String(field.occupiedByUsername || defenderUserId),
+    fieldId: field.id,
+    missionKind: "attack",
+    status: "travel_to_field",
+    fleet: stats.fleet,
+    totalHarvestSpeed: 0,
+    totalTransportCapacity: stats.totalLootCapacity,
+    mapSpeed: Math.floor(stats.averageSpeed),
+    travelSeconds: travelSeconds,
+    extractionSeconds: 0,
+    departureAt: serverNowTs,
+    arrivalAt: serverNowTs + travelSeconds,
+    extractionStartAt: 0,
+    extractionEndAt: 0,
+    returnStartAt: 0,
+    returnEndAt: 0,
+    snapshotResources: {},
+    snapshotVirtual: false,
+    playerScore: 0,
+    scoreBonus: 1,
+    collectedResources: {},
+    dropItemId: "",
+    dropQuantity: 0,
+    fuelCostCredits: fuelCostCredits,
+    settledAt: 0,
+    updatedAt: serverNowTs
+  };
 
   var nextExpeditions = expeditions.slice();
   nextExpeditions.push(expedition);
@@ -2206,6 +3140,431 @@ function recallMapExpedition(economy, mapState, serverNowTs, expeditionId) {
   return expedition;
 }
 
+function attackMapFieldExpedition(attackerEconomy, defenderEconomy, mapState, attackerUserId, attackerUsername, defenderUserId, defenderUsername, fieldId, fleetInput, serverNowTs) {
+  ensureResourceExpeditionState(attackerEconomy);
+  ensureResourceExpeditionState(defenderEconomy);
+  var field = findMapField(mapState, fieldId);
+  if (!field) throw new Error("Resource field not found.");
+  if (!field.isOccupied) throw new Error("Resource field is not occupied.");
+  if (String(field.occupiedByPlayerId || "") !== String(defenderUserId || "")) {
+    throw new Error("Field occupancy is out of sync.");
+  }
+  if (String(defenderUserId || "") === String(attackerUserId || "")) {
+    throw new Error("You cannot attack your own harvesting fleet.");
+  }
+
+  var defenderExpedition = findResourceExpeditionById(defenderEconomy, String(field.occupyingFleetId || ""));
+  if (!defenderExpedition || String(defenderExpedition.fieldId || "") !== String(fieldId || "")) {
+    throw new Error("No harvesting fleet found on this field.");
+  }
+  var defenderStatus = String(defenderExpedition.status || "").trim().toLowerCase();
+  if (defenderStatus !== "extracting") {
+    throw new Error("The target fleet is not currently harvesting.");
+  }
+
+  var attackerStats = calculateFleetCombatStats(attackerEconomy, fleetInput);
+  var defenderFleet = filterPositiveFleetRows(defenderExpedition.fleet);
+  if (defenderFleet.length <= 0) {
+    throw new Error("Target fleet has no remaining ships.");
+  }
+
+  var collectedBeforeBattle = estimateExpeditionCollected(defenderExpedition, serverNowTs);
+  var fieldOutcome = applyCollectedResourcesToField(field, defenderExpedition, collectedBeforeBattle);
+  clearFieldOccupation(field);
+  if (!fieldOutcome.hasRemaining) {
+    field.remainingExtractionWork = 0;
+    field.expiresAt = serverNowTs;
+  }
+
+  var battle = resolveFleetCombat(
+    attackerStats.fleet,
+    defenderFleet,
+    [],
+    [],
+    String(fieldId || "") + "|" + String(attackerUserId || "") + "|" + String(defenderUserId || "") + "|" + String(serverNowTs || 0)
+  );
+
+  applyFleetLossesToHangarInventory(attackerEconomy, battle.attackerLosses);
+  applyFleetLossesToHangarInventory(defenderEconomy, battle.defenderLosses);
+
+  var defenderExpeditions = coerceObjectList(getResourceExpeditionList(defenderEconomy));
+  var expeditionIndex = -1;
+  for (var i = 0; i < defenderExpeditions.length; i++) {
+    if (String(defenderExpeditions[i].id || "") === String(defenderExpedition.id || "")) {
+      expeditionIndex = i;
+      break;
+    }
+  }
+  if (expeditionIndex < 0) throw new Error("Defending expedition disappeared during combat.");
+
+  var loot = {};
+  var outcomeKey = "defender";
+  if (battle.winner === "attacker" || battle.winner === "mutual") {
+    defenderExpeditions.splice(expeditionIndex, 1);
+    defenderEconomy.resourceExpeditions = defenderExpeditions;
+    refreshResourceExpeditionLegacyMirror(defenderEconomy);
+    if (battle.winner === "attacker") {
+      var attackerSurvivorRuntime = summarizeMapFleetRuntime(battle.attackerShips);
+      loot = limitResourceMapByCapacity(
+        collectedBeforeBattle,
+        Math.max(0, sanitizePositiveInt(attackerSurvivorRuntime.totalTransportCapacity || attackerStats.totalLootCapacity || 0))
+      );
+      applyResourceMapToEconomy(attackerEconomy, loot);
+      outcomeKey = "attacker";
+    } else {
+      outcomeKey = "mutual";
+    }
+  } else {
+    var retreatRuntime = summarizeMapFleetRuntime(battle.defenderShips);
+    var returnTravelSeconds = calculateMapTravelSeconds(defenderUserId, field.x, field.y, retreatRuntime.mapSpeed || MAP_HARVEST_UNIT_STATS.pegase.mapSpeed);
+    defenderExpedition.fleet = battle.defenderShips;
+    defenderExpedition.totalHarvestSpeed = retreatRuntime.totalHarvestSpeed;
+    defenderExpedition.totalTransportCapacity = retreatRuntime.totalTransportCapacity;
+    defenderExpedition.mapSpeed = Math.floor(retreatRuntime.mapSpeed || MAP_HARVEST_UNIT_STATS.pegase.mapSpeed);
+    defenderExpedition.collectedResources = collectedBeforeBattle;
+    defenderExpedition.status = "returning";
+    defenderExpedition.extractionEndAt = serverNowTs;
+    defenderExpedition.returnStartAt = serverNowTs;
+    defenderExpedition.returnEndAt = serverNowTs + returnTravelSeconds;
+    defenderExpedition.travelSeconds = returnTravelSeconds;
+    defenderExpedition.updatedAt = serverNowTs;
+    var recalledTotal = sumResourceMap(defenderExpedition.collectedResources);
+    if (recalledTotal > 0) {
+      var rolled = rollMapFieldDrop();
+      defenderExpedition.dropItemId = rolled.itemId;
+      defenderExpedition.dropQuantity = rolled.quantity;
+    } else {
+      defenderExpedition.dropItemId = "";
+      defenderExpedition.dropQuantity = 0;
+    }
+    defenderExpeditions[expeditionIndex] = defenderExpedition;
+    defenderEconomy.resourceExpeditions = defenderExpeditions;
+    refreshResourceExpeditionLegacyMirror(defenderEconomy);
+    outcomeKey = "defender";
+  }
+
+  var battleTexts = buildResourceFieldBattleTexts(outcomeKey, fieldId, battle.attackerShips, battle.defenderShips);
+  var attackerSummaryText = battleTexts.attackerSummaryText;
+  var defenderSummaryText = battleTexts.defenderSummaryText;
+  var location = {
+    fieldId: String(fieldId || ""),
+    x: sanitizePositiveInt(field.x || 0),
+    y: sanitizePositiveInt(field.y || 0),
+    label: "Champ de ressources " + String(fieldId || "") + " [" + sanitizePositiveInt(field.x || 0) + ", " + sanitizePositiveInt(field.y || 0) + "]"
+  };
+  var attackerFleetReport = filterPositiveFleetRows(attackerStats.fleet);
+  var defenderFleetReport = filterPositiveFleetRows(defenderFleet);
+
+  return {
+    fieldId: String(fieldId || ""),
+    result: outcomeKey,
+    loot: loot,
+    attackerLosses: battle.attackerLosses,
+    defenderLosses: battle.defenderLosses,
+    battleAt: serverNowTs,
+    attackerReport: {
+      title: "Rapport de combat #" + String(fieldId || "").toUpperCase(),
+      summary:
+        attackerSummaryText +
+        "\nButin: " + formatResourceMapShort(loot) +
+        "\nPertes attaquant: " + formatFleetLossMap(battle.attackerLosses) +
+        "\nPertes defenseur: " + formatFleetLossMap(battle.defenderLosses),
+      battleType: "resource_field",
+      fieldId: String(fieldId || ""),
+      location: location,
+      attacker: { userId: attackerUserId, username: attackerUsername || attackerUserId, fleet: attackerFleetReport },
+      defender: { userId: defenderUserId, username: defenderUsername || defenderUserId, fleet: defenderFleetReport },
+      result: outcomeKey,
+      loot: loot,
+      protectedCargo: outcomeKey === "defender" ? collectedBeforeBattle : {},
+      losses: {
+        attacker: battle.attackerLosses,
+        defender: battle.defenderLosses
+      },
+      rounds: battle.rounds,
+      attackerSurvivors: battle.attackerShips,
+      defenderSurvivors: battle.defenderShips,
+      attackerSummary: battle.attackerSummary,
+      defenderSummary: battle.defenderSummary,
+      battleAt: serverNowTs
+    },
+    defenderReport: {
+      title: "Rapport de combat #" + String(fieldId || "").toUpperCase(),
+      summary:
+        defenderSummaryText +
+        "\nCargo protege: " + formatResourceMapShort(outcomeKey === "defender" ? collectedBeforeBattle : {}) +
+        "\nPertes defenseur: " + formatFleetLossMap(battle.defenderLosses) +
+        "\nPertes attaquant: " + formatFleetLossMap(battle.attackerLosses),
+      battleType: "resource_field",
+      fieldId: String(fieldId || ""),
+      location: location,
+      attacker: { userId: attackerUserId, username: attackerUsername || attackerUserId, fleet: attackerFleetReport },
+      defender: { userId: defenderUserId, username: defenderUsername || defenderUserId, fleet: defenderFleetReport },
+      result: outcomeKey,
+      loot: outcomeKey === "defender" ? {} : loot,
+      protectedCargo: outcomeKey === "defender" ? collectedBeforeBattle : {},
+      losses: {
+        attacker: battle.attackerLosses,
+        defender: battle.defenderLosses
+      },
+      rounds: battle.rounds,
+      attackerSurvivors: battle.attackerShips,
+      defenderSurvivors: battle.defenderShips,
+      attackerSummary: battle.attackerSummary,
+      defenderSummary: battle.defenderSummary,
+      battleAt: serverNowTs
+    }
+  };
+}
+
+function resolveAttackExpeditionImpact(attackerEconomy, defenderEconomy, mapState, attackerUserId, attackerUsername, defenderUserId, defenderUsername, expedition, serverNowTs) {
+  ensureResourceExpeditionState(attackerEconomy);
+  ensureResourceExpeditionState(defenderEconomy);
+  if (!expedition || typeof expedition !== "object") {
+    return { changed: false, attackerReport: null, defenderReport: null };
+  }
+
+  var fieldId = String(expedition.fieldId || "").trim();
+  var attackerExpeditions = coerceObjectList(getResourceExpeditionList(attackerEconomy));
+  var attackerIndex = -1;
+  for (var ai = 0; ai < attackerExpeditions.length; ai++) {
+    if (String(attackerExpeditions[ai].id || "") === String(expedition.id || "")) {
+      attackerIndex = ai;
+      expedition = attackerExpeditions[ai];
+      break;
+    }
+  }
+  if (attackerIndex < 0) return { changed: false, attackerReport: null, defenderReport: null };
+
+  var field = findMapField(mapState, fieldId);
+  if (!field || !field.isOccupied || String(field.occupiedByPlayerId || "").trim() !== String(defenderUserId || "").trim()) {
+    expedition.status = "returning";
+    expedition.returnStartAt = serverNowTs;
+    expedition.returnEndAt = serverNowTs + Math.max(MAP_MIN_TRAVEL_SECONDS, sanitizePositiveInt(Number(expedition.travelSeconds || MAP_MIN_TRAVEL_SECONDS)));
+    expedition.collectedResources = {};
+    expedition.dropItemId = "";
+    expedition.dropQuantity = 0;
+    expedition.updatedAt = serverNowTs;
+    attackerEconomy.resourceExpeditions = attackerExpeditions;
+    refreshResourceExpeditionLegacyMirror(attackerEconomy);
+    return { changed: true, attackerReport: null, defenderReport: null };
+  }
+
+  var defenderExpedition = findResourceExpeditionById(defenderEconomy, String(field.occupyingFleetId || ""));
+  if (!defenderExpedition || String(defenderExpedition.fieldId || "") !== fieldId || String(defenderExpedition.status || "").trim().toLowerCase() !== "extracting") {
+    clearFieldOccupation(field);
+    expedition.status = "returning";
+    expedition.returnStartAt = serverNowTs;
+    expedition.returnEndAt = serverNowTs + Math.max(MAP_MIN_TRAVEL_SECONDS, sanitizePositiveInt(Number(expedition.travelSeconds || MAP_MIN_TRAVEL_SECONDS)));
+    expedition.collectedResources = {};
+    expedition.dropItemId = "";
+    expedition.dropQuantity = 0;
+    expedition.updatedAt = serverNowTs;
+    attackerEconomy.resourceExpeditions = attackerExpeditions;
+    refreshResourceExpeditionLegacyMirror(attackerEconomy);
+    return { changed: true, attackerReport: null, defenderReport: null };
+  }
+
+  var defenderFleet = filterPositiveFleetRows(defenderExpedition.fleet);
+  var attackerFleet = filterPositiveFleetRows(expedition.fleet);
+  if (attackerFleet.length <= 0) {
+    attackerExpeditions.splice(attackerIndex, 1);
+    attackerEconomy.resourceExpeditions = attackerExpeditions;
+    refreshResourceExpeditionLegacyMirror(attackerEconomy);
+    return { changed: true, attackerReport: null, defenderReport: null };
+  }
+  if (defenderFleet.length <= 0) {
+    clearFieldOccupation(field);
+    expedition.status = "returning";
+    expedition.returnStartAt = serverNowTs;
+    expedition.returnEndAt = serverNowTs + Math.max(MAP_MIN_TRAVEL_SECONDS, sanitizePositiveInt(Number(expedition.travelSeconds || MAP_MIN_TRAVEL_SECONDS)));
+    expedition.collectedResources = {};
+    expedition.dropItemId = "";
+    expedition.dropQuantity = 0;
+    expedition.updatedAt = serverNowTs;
+    attackerEconomy.resourceExpeditions = attackerExpeditions;
+    refreshResourceExpeditionLegacyMirror(attackerEconomy);
+    return { changed: true, attackerReport: null, defenderReport: null };
+  }
+
+  var collectedBeforeBattle = estimateExpeditionCollected(defenderExpedition, serverNowTs);
+  var fieldOutcome = applyCollectedResourcesToField(field, defenderExpedition, collectedBeforeBattle);
+  clearFieldOccupation(field);
+  if (!fieldOutcome.hasRemaining) {
+    field.remainingExtractionWork = 0;
+    field.expiresAt = serverNowTs;
+  }
+
+  var battle = resolveFleetCombat(
+    attackerFleet,
+    defenderFleet,
+    [],
+    [],
+    fieldId + "|" + String(attackerUserId || "") + "|" + String(defenderUserId || "") + "|" + String(serverNowTs || 0)
+  );
+
+  applyFleetLossesToHangarInventory(attackerEconomy, battle.attackerLosses);
+  applyFleetLossesToHangarInventory(defenderEconomy, battle.defenderLosses);
+
+  var defenderExpeditions = coerceObjectList(getResourceExpeditionList(defenderEconomy));
+  var defenderIndex = -1;
+  for (var di = 0; di < defenderExpeditions.length; di++) {
+    if (String(defenderExpeditions[di].id || "") === String(defenderExpedition.id || "")) {
+      defenderIndex = di;
+      defenderExpedition = defenderExpeditions[di];
+      break;
+    }
+  }
+  if (defenderIndex < 0) {
+    attackerExpeditions.splice(attackerIndex, 1);
+    attackerEconomy.resourceExpeditions = attackerExpeditions;
+    refreshResourceExpeditionLegacyMirror(attackerEconomy);
+    return { changed: true, attackerReport: null, defenderReport: null };
+  }
+
+  var loot = {};
+  var outcomeKey = "defender";
+  var attackerRuntime = summarizeCombatFleetRuntime(battle.attackerShips);
+
+  if (battle.winner === "attacker" || battle.winner === "mutual") {
+    defenderExpeditions.splice(defenderIndex, 1);
+    defenderEconomy.resourceExpeditions = defenderExpeditions;
+    refreshResourceExpeditionLegacyMirror(defenderEconomy);
+    if (battle.winner === "attacker") {
+      loot = limitResourceMapByCapacity(
+        collectedBeforeBattle,
+        Math.max(0, sanitizePositiveInt(attackerRuntime.totalLootCapacity || expedition.totalTransportCapacity || 0))
+      );
+      outcomeKey = "attacker";
+    } else {
+      outcomeKey = "mutual";
+    }
+  } else {
+    var retreatRuntime = summarizeMapFleetRuntime(battle.defenderShips);
+    var returnTravelSeconds = calculateMapTravelSeconds(defenderUserId, field.x, field.y, retreatRuntime.mapSpeed || MAP_HARVEST_UNIT_STATS.pegase.mapSpeed);
+    defenderExpedition.fleet = battle.defenderShips;
+    defenderExpedition.totalHarvestSpeed = retreatRuntime.totalHarvestSpeed;
+    defenderExpedition.totalTransportCapacity = retreatRuntime.totalTransportCapacity;
+    defenderExpedition.mapSpeed = Math.floor(retreatRuntime.mapSpeed || MAP_HARVEST_UNIT_STATS.pegase.mapSpeed);
+    defenderExpedition.collectedResources = collectedBeforeBattle;
+    defenderExpedition.status = "returning";
+    defenderExpedition.extractionEndAt = serverNowTs;
+    defenderExpedition.returnStartAt = serverNowTs;
+    defenderExpedition.returnEndAt = serverNowTs + returnTravelSeconds;
+    defenderExpedition.travelSeconds = returnTravelSeconds;
+    defenderExpedition.updatedAt = serverNowTs;
+    var recalledTotal = sumResourceMap(defenderExpedition.collectedResources);
+    if (recalledTotal > 0) {
+      var rolled = rollMapFieldDrop();
+      defenderExpedition.dropItemId = rolled.itemId;
+      defenderExpedition.dropQuantity = rolled.quantity;
+    } else {
+      defenderExpedition.dropItemId = "";
+      defenderExpedition.dropQuantity = 0;
+    }
+    defenderExpeditions[defenderIndex] = defenderExpedition;
+    defenderEconomy.resourceExpeditions = defenderExpeditions;
+    refreshResourceExpeditionLegacyMirror(defenderEconomy);
+    outcomeKey = "defender";
+  }
+
+  if (battle.winner === "mutual" || attackerRuntime.fleet.length <= 0) {
+    attackerExpeditions.splice(attackerIndex, 1);
+    attackerEconomy.resourceExpeditions = attackerExpeditions;
+    refreshResourceExpeditionLegacyMirror(attackerEconomy);
+  } else {
+    var attackerReturnTravelSeconds = calculateMapTravelSeconds(
+      attackerUserId,
+      field.x,
+      field.y,
+      attackerRuntime.averageSpeed || sanitizePositiveInt(expedition.mapSpeed || 0) || MAP_HARVEST_UNIT_STATS.pegase.mapSpeed
+    );
+    expedition.fleet = attackerRuntime.fleet;
+    expedition.totalHarvestSpeed = 0;
+    expedition.totalTransportCapacity = Math.max(0, sanitizePositiveInt(attackerRuntime.totalLootCapacity || 0));
+    expedition.mapSpeed = Math.floor(attackerRuntime.averageSpeed || expedition.mapSpeed || MAP_HARVEST_UNIT_STATS.pegase.mapSpeed);
+    expedition.collectedResources = outcomeKey === "attacker" ? loot : {};
+    expedition.dropItemId = "";
+    expedition.dropQuantity = 0;
+    expedition.status = "returning";
+    expedition.extractionStartAt = 0;
+    expedition.extractionEndAt = 0;
+    expedition.returnStartAt = serverNowTs;
+    expedition.returnEndAt = serverNowTs + attackerReturnTravelSeconds;
+    expedition.travelSeconds = attackerReturnTravelSeconds;
+    expedition.updatedAt = serverNowTs;
+    attackerExpeditions[attackerIndex] = expedition;
+    attackerEconomy.resourceExpeditions = attackerExpeditions;
+    refreshResourceExpeditionLegacyMirror(attackerEconomy);
+  }
+
+  var battleTexts = buildResourceFieldBattleTexts(outcomeKey, fieldId, battle.attackerShips, battle.defenderShips);
+  var attackerSummaryText = battleTexts.attackerSummaryText;
+  var defenderSummaryText = battleTexts.defenderSummaryText;
+  var location = {
+    fieldId: fieldId,
+    x: sanitizePositiveInt(field.x || 0),
+    y: sanitizePositiveInt(field.y || 0),
+    label: "Champ de ressources " + fieldId + " [" + sanitizePositiveInt(field.x || 0) + ", " + sanitizePositiveInt(field.y || 0) + "]"
+  };
+
+  return {
+    changed: true,
+    attackerReport: {
+      title: "Rapport de combat #" + String(fieldId || "").toUpperCase(),
+      summary:
+        attackerSummaryText +
+        "\nButin securise: " + formatResourceMapShort(loot) +
+        "\nPertes attaquant: " + formatFleetLossMap(battle.attackerLosses) +
+        "\nPertes defenseur: " + formatFleetLossMap(battle.defenderLosses),
+      battleType: "resource_field",
+      fieldId: fieldId,
+      location: location,
+      attacker: { userId: attackerUserId, username: attackerUsername || attackerUserId, fleet: attackerFleet },
+      defender: { userId: defenderUserId, username: defenderUsername || defenderUserId, fleet: defenderFleet },
+      result: outcomeKey,
+      loot: loot,
+      protectedCargo: outcomeKey === "defender" ? collectedBeforeBattle : {},
+      losses: {
+        attacker: battle.attackerLosses,
+        defender: battle.defenderLosses
+      },
+      rounds: battle.rounds,
+      attackerSurvivors: battle.attackerShips,
+      defenderSurvivors: battle.defenderShips,
+      attackerSummary: battle.attackerSummary,
+      defenderSummary: battle.defenderSummary,
+      battleAt: serverNowTs
+    },
+    defenderReport: {
+      title: "Rapport de combat #" + String(fieldId || "").toUpperCase(),
+      summary:
+        defenderSummaryText +
+        "\nCargo protege: " + formatResourceMapShort(outcomeKey === "defender" ? collectedBeforeBattle : {}) +
+        "\nPertes defenseur: " + formatFleetLossMap(battle.defenderLosses) +
+        "\nPertes attaquant: " + formatFleetLossMap(battle.attackerLosses),
+      battleType: "resource_field",
+      fieldId: fieldId,
+      location: location,
+      attacker: { userId: attackerUserId, username: attackerUsername || attackerUserId, fleet: attackerFleet },
+      defender: { userId: defenderUserId, username: defenderUsername || defenderUserId, fleet: defenderFleet },
+      result: outcomeKey,
+      loot: outcomeKey === "defender" ? {} : loot,
+      protectedCargo: outcomeKey === "defender" ? collectedBeforeBattle : {},
+      losses: {
+        attacker: battle.attackerLosses,
+        defender: battle.defenderLosses
+      },
+      rounds: battle.rounds,
+      attackerSurvivors: battle.attackerShips,
+      defenderSurvivors: battle.defenderShips,
+      attackerSummary: battle.attackerSummary,
+      defenderSummary: battle.defenderSummary,
+      battleAt: serverNowTs
+    }
+  };
+}
+
 function withMapTransaction(nk, userId, username, update, logger, traceTag) {
   var lastError = "failed";
   for (var attempt = 0; attempt < MAP_WRITE_RETRIES; attempt++) {
@@ -2265,6 +3624,7 @@ function withMapTransaction(nk, userId, username, update, logger, traceTag) {
     var result = update(economy, inventory, mapState, ts, syncResult);
     if (traceTag && logger && typeof logger.info === "function") logger.info(traceTag + " attempt=" + (attempt + 1) + " stage=update user=" + userId);
     var occupancyRepairedAfter = reconcileMapOccupancyForPlayer(nk, economy, mapState, userId, username);
+    var activeUserIndexChanged = syncMapActiveExpeditionUserFromEconomy(mapState, userId, economy, ts);
     if (traceTag && logger && typeof logger.info === "function") logger.info(traceTag + " attempt=" + (attempt + 1) + " stage=reconcile_after user=" + userId);
     ensureMapFieldsSeeded(nk, mapState, ts);
     if (traceTag && logger && typeof logger.info === "function") logger.info(traceTag + " attempt=" + (attempt + 1) + " stage=seeded_after_sync user=" + userId + " fields=" + ((mapState.fields || []).length || 0));
@@ -2282,6 +3642,7 @@ function withMapTransaction(nk, userId, username, update, logger, traceTag) {
       mapChangedByMaintenance ||
       occupancyRepairedBefore ||
       occupancyRepairedAfter ||
+      activeUserIndexChanged ||
       !mapVersion;
     var prepMs = Date.now() - prepStartMs;
     if (traceTag && logger && typeof logger.info === "function") {
@@ -2346,22 +3707,7 @@ function withMapTransaction(nk, userId, username, update, logger, traceTag) {
       if (traceTag && logger && typeof logger.warn === "function" && totalMs > 2000) {
         logger.warn(traceTag + " slow_map_tx attempt=" + (attempt + 1) + " read_ms=" + readMs + " prep_ms=" + prepMs + " write_ms=" + writeMs + " total_ms=" + totalMs);
       }
-      if (syncResult && Array.isArray(syncResult.reports) && syncResult.reports.length > 0) {
-        for (var ri = 0; ri < syncResult.reports.length; ri++) {
-          try {
-            createMapHarvestRewardMessage(nk, userId, syncResult.reports[ri]);
-          } catch (_postErr) {
-            // Do not fail the map transaction if inbox creation fails.
-          }
-        }
-      } else if (syncResult && syncResult.report) {
-        // Backward-compatible fallback.
-        try {
-          createMapHarvestRewardMessage(nk, userId, syncResult.report);
-        } catch (_postErrSingle) {
-          // noop
-        }
-      }
+      flushMapRewardReports(nk, userId, syncResult);
       return {
         economy: economy,
         inventory: inventory,
@@ -2374,6 +3720,396 @@ function withMapTransaction(nk, userId, username, update, logger, traceTag) {
     }
   }
   throw new Error("Map transaction failed after retries: " + lastError);
+}
+
+function flushMapRewardReports(nk, userId, syncResult) {
+  if (syncResult && Array.isArray(syncResult.reports) && syncResult.reports.length > 0) {
+    for (var ri = 0; ri < syncResult.reports.length; ri++) {
+      try {
+        createMapHarvestRewardMessage(nk, userId, syncResult.reports[ri]);
+      } catch (_postErr) {
+        // Do not fail the transaction if inbox creation fails.
+      }
+    }
+  } else if (syncResult && syncResult.report) {
+    try {
+      createMapHarvestRewardMessage(nk, userId, syncResult.report);
+    } catch (_postErrSingle) {
+      // noop
+    }
+  }
+}
+
+function withMapBattleTransaction(nk, attackerUserId, attackerUsername, defenderUserId, defenderUsername, update, logger, traceTag) {
+  var lastError = "failed";
+  for (var attempt = 0; attempt < MAP_WRITE_RETRIES; attempt++) {
+    if (traceTag && logger && typeof logger.info === "function") {
+      logger.info(traceTag + " attempt=" + (attempt + 1) + " begin attacker=" + attackerUserId + " defender=" + defenderUserId);
+    }
+    var ts = nowTs();
+    var read = nk.storageRead([
+      { collection: ECONOMY_COLLECTION, key: ECONOMY_KEY, userId: attackerUserId },
+      { collection: INVENTORY_COLLECTION, key: INVENTORY_KEY, userId: attackerUserId },
+      { collection: ECONOMY_COLLECTION, key: ECONOMY_KEY, userId: defenderUserId },
+      { collection: INVENTORY_COLLECTION, key: INVENTORY_KEY, userId: defenderUserId },
+      { collection: MAP_COLLECTION, key: MAP_RESOURCE_FIELDS_KEY, userId: SYSTEM_USER_ID }
+    ]);
+
+    var attackerEconomyState = defaultEconomyState();
+    var attackerEconomyVersion = "";
+    var attackerInventoryState = defaultInventoryState(attackerUserId);
+    var attackerInventoryVersion = "";
+    var defenderEconomyState = defaultEconomyState();
+    var defenderEconomyVersion = "";
+    var defenderInventoryState = defaultInventoryState(defenderUserId);
+    var defenderInventoryVersion = "";
+    var mapState = defaultMapFieldState();
+    var mapVersion = "";
+
+    var attackerEconomyRead = read[0] || {};
+    var attackerInventoryRead = read[1] || {};
+    var defenderEconomyRead = read[2] || {};
+    var defenderInventoryRead = read[3] || {};
+    var mapRead = read[4] || {};
+
+    if (attackerEconomyRead.value) {
+      attackerEconomyState = ensureEconomyState(attackerEconomyRead.value || defaultEconomyState());
+      attackerEconomyVersion = attackerEconomyRead.version || "";
+    }
+    if (attackerInventoryRead.value) {
+      attackerInventoryState = normalizeInventory(attackerInventoryRead.value || defaultInventoryState(attackerUserId), attackerUserId);
+      attackerInventoryVersion = attackerInventoryRead.version || "";
+    }
+    if (defenderEconomyRead.value) {
+      defenderEconomyState = ensureEconomyState(defenderEconomyRead.value || defaultEconomyState());
+      defenderEconomyVersion = defenderEconomyRead.version || "";
+    }
+    if (defenderInventoryRead.value) {
+      defenderInventoryState = normalizeInventory(defenderInventoryRead.value || defaultInventoryState(defenderUserId), defenderUserId);
+      defenderInventoryVersion = defenderInventoryRead.version || "";
+    }
+    if (mapRead.value) {
+      mapState = normalizeMapFieldState(mapRead.value || defaultMapFieldState());
+      mapVersion = mapRead.version || "";
+    }
+
+    var attackerEconomy = applyOfflineProduction(attackerEconomyState, ts);
+    var attackerInventory = cloneInventory(attackerInventoryState);
+    ensureHangarState(attackerEconomy);
+    ensureResourceExpeditionState(attackerEconomy);
+
+    var defenderEconomy = applyOfflineProduction(defenderEconomyState, ts);
+    var defenderInventory = cloneInventory(defenderInventoryState);
+    ensureHangarState(defenderEconomy);
+    ensureResourceExpeditionState(defenderEconomy);
+    var resolvedBattleUsernames = resolveUsernameIndexByIds(nk, [attackerUserId, defenderUserId]);
+    attackerUsername = String(resolvedBattleUsernames[attackerUserId] || attackerUsername || attackerEconomy.username || attackerUserId).trim() || attackerUserId;
+    defenderUsername = String(resolvedBattleUsernames[defenderUserId] || defenderUsername || defenderEconomy.username || defenderUserId).trim() || defenderUserId;
+
+    var mapFingerprintBefore = JSON.stringify(mapState.fields || []);
+    ensureMapFieldsSeeded(nk, mapState, ts);
+    var attackerSync = syncMapExpedition(attackerEconomy, attackerInventory, mapState, attackerUserId, attackerUsername, ts);
+    var defenderSync = syncMapExpedition(defenderEconomy, defenderInventory, mapState, defenderUserId, defenderUsername, ts);
+    var attackerOccupancyBefore = reconcileMapOccupancyForPlayer(nk, attackerEconomy, mapState, attackerUserId, attackerUsername);
+    var defenderOccupancyBefore = reconcileMapOccupancyForPlayer(nk, defenderEconomy, mapState, defenderUserId, defenderUsername);
+    var result = update(attackerEconomy, attackerInventory, defenderEconomy, defenderInventory, mapState, ts, attackerSync, defenderSync);
+    var attackerOccupancyAfter = reconcileMapOccupancyForPlayer(nk, attackerEconomy, mapState, attackerUserId, attackerUsername);
+    var defenderOccupancyAfter = reconcileMapOccupancyForPlayer(nk, defenderEconomy, mapState, defenderUserId, defenderUsername);
+    var attackerActiveUserIndexChanged = syncMapActiveExpeditionUserFromEconomy(mapState, attackerUserId, attackerEconomy, ts);
+    var defenderActiveUserIndexChanged = syncMapActiveExpeditionUserFromEconomy(mapState, defenderUserId, defenderEconomy, ts);
+    ensureMapFieldsSeeded(nk, mapState, ts);
+
+    var forcedDirty = false;
+    if (result && typeof result === "object" && Object.prototype.hasOwnProperty.call(result, "__dirty")) {
+      forcedDirty = Boolean(result.__dirty);
+      delete result.__dirty;
+    }
+    var mapFingerprintAfter = JSON.stringify(mapState.fields || []);
+    var shouldWrite =
+      forcedDirty ||
+      attackerSync.changed ||
+      defenderSync.changed ||
+      attackerOccupancyBefore ||
+      defenderOccupancyBefore ||
+      attackerOccupancyAfter ||
+      defenderOccupancyAfter ||
+      attackerActiveUserIndexChanged ||
+      defenderActiveUserIndexChanged ||
+      mapFingerprintBefore !== mapFingerprintAfter ||
+      !mapVersion;
+
+    if (!shouldWrite) {
+      return {
+        attackerEconomy: attackerEconomy,
+        attackerInventory: attackerInventory,
+        defenderEconomy: defenderEconomy,
+        defenderInventory: defenderInventory,
+        mapState: mapState,
+        result: result,
+        attackerSync: attackerSync,
+        defenderSync: defenderSync
+      };
+    }
+
+    attackerEconomy.version = (attackerEconomy.version || 0) + 1;
+    attackerEconomy.lastUpdateTs = ts;
+    attackerInventory.version = (attackerInventory.version || 0) + 1;
+    attackerInventory.updatedAt = ts;
+    defenderEconomy.version = (defenderEconomy.version || 0) + 1;
+    defenderEconomy.lastUpdateTs = ts;
+    defenderInventory.version = (defenderInventory.version || 0) + 1;
+    defenderInventory.updatedAt = ts;
+    mapState.version = (mapState.version || 0) + 1;
+    mapState.updatedAt = ts;
+
+    try {
+      var writes = [
+        {
+          collection: ECONOMY_COLLECTION,
+          key: ECONOMY_KEY,
+          userId: attackerUserId,
+          permissionRead: 0,
+          permissionWrite: 0,
+          value: attackerEconomy
+        },
+        {
+          collection: INVENTORY_COLLECTION,
+          key: INVENTORY_KEY,
+          userId: attackerUserId,
+          permissionRead: 0,
+          permissionWrite: 0,
+          value: attackerInventory
+        },
+        {
+          collection: ECONOMY_COLLECTION,
+          key: ECONOMY_KEY,
+          userId: defenderUserId,
+          permissionRead: 0,
+          permissionWrite: 0,
+          value: defenderEconomy
+        },
+        {
+          collection: INVENTORY_COLLECTION,
+          key: INVENTORY_KEY,
+          userId: defenderUserId,
+          permissionRead: 0,
+          permissionWrite: 0,
+          value: defenderInventory
+        },
+        {
+          collection: MAP_COLLECTION,
+          key: MAP_RESOURCE_FIELDS_KEY,
+          userId: SYSTEM_USER_ID,
+          permissionRead: 2,
+          permissionWrite: 0,
+          value: mapState
+        }
+      ];
+      if (attackerEconomyVersion) writes[0].version = attackerEconomyVersion;
+      if (attackerInventoryVersion) writes[1].version = attackerInventoryVersion;
+      if (defenderEconomyVersion) writes[2].version = defenderEconomyVersion;
+      if (defenderInventoryVersion) writes[3].version = defenderInventoryVersion;
+      if (mapVersion) writes[4].version = mapVersion;
+      nk.storageWrite(writes);
+      flushMapRewardReports(nk, attackerUserId, attackerSync);
+      flushMapRewardReports(nk, defenderUserId, defenderSync);
+      return {
+        attackerEconomy: attackerEconomy,
+        attackerInventory: attackerInventory,
+        defenderEconomy: defenderEconomy,
+        defenderInventory: defenderInventory,
+        mapState: mapState,
+        result: result,
+        attackerSync: attackerSync,
+        defenderSync: defenderSync
+      };
+    } catch (err) {
+      lastError = String(err);
+    }
+  }
+  throw new Error("Map battle transaction failed after retries: " + lastError);
+}
+
+function runMapWorldMaintenance(nk, logger, maxOwners) {
+  var lastError = "failed";
+  for (var attempt = 0; attempt < MAP_WRITE_RETRIES; attempt++) {
+    try {
+      var ts = nowTs();
+      var mapRead = nk.storageRead([
+        { collection: MAP_COLLECTION, key: MAP_RESOURCE_FIELDS_KEY, userId: SYSTEM_USER_ID }
+      ]) || [];
+      var mapState = normalizeMapFieldState(mapRead[0] && mapRead[0].value || defaultMapFieldState());
+      var mapVersion = String((mapRead[0] && mapRead[0].version) || "");
+
+      compactMapFields(mapState, ts);
+      ensureMapFieldsSeeded(nk, mapState, ts);
+
+      var fingerprintBefore = JSON.stringify({
+        fields: mapState.fields || [],
+        activeExpeditionUsers: mapState.activeExpeditionUsers || []
+      });
+      var ownerIds = collectMapMaintenanceOwnerIds(mapState, maxOwners || MAP_WORLD_MAINTENANCE_OWNER_LIMIT);
+      if (ownerIds.length <= 0) {
+        if (!mapVersion) {
+          mapState.version = sanitizePositiveInt(mapState.version || 0) + 1;
+          mapState.updatedAt = ts;
+          nk.storageWrite([
+            makeStorageWriteReq(MAP_COLLECTION, MAP_RESOURCE_FIELDS_KEY, SYSTEM_USER_ID, mapState, mapVersion, 2, 0)
+          ]);
+        }
+        return { changed: !mapVersion, usersProcessed: 0, reportsSettled: 0 };
+      }
+
+      var ownerReads = [];
+      for (var i = 0; i < ownerIds.length; i++) {
+        ownerReads.push({ collection: ECONOMY_COLLECTION, key: ECONOMY_KEY, userId: ownerIds[i] });
+        ownerReads.push({ collection: INVENTORY_COLLECTION, key: INVENTORY_KEY, userId: ownerIds[i] });
+      }
+      var ownerRows = nk.storageRead(ownerReads) || [];
+      var writes = [];
+      var deferredReports = [];
+      var deferredCombatMessages = [];
+      var reportsSettled = 0;
+      var ownerStateById = {};
+      var ownerUsernameIndex = resolveUsernameIndexByIds(nk, ownerIds);
+
+      for (var j = 0; j < ownerIds.length; j++) {
+        var activeOwnerId = ownerIds[j];
+        var economyRead = ownerRows[j * 2] || {};
+        var inventoryRead = ownerRows[j * 2 + 1] || {};
+        var ownerEconomy = ensureEconomyState(economyRead.value || defaultEconomyState());
+        var ownerInventory = normalizeInventory(inventoryRead.value || defaultInventoryState(activeOwnerId), activeOwnerId);
+        var resolvedOwnerUsername = String(ownerUsernameIndex[activeOwnerId] || ownerEconomy.username || activeOwnerId).trim() || activeOwnerId;
+
+        ensureHangarState(ownerEconomy);
+        ensureResourceExpeditionState(ownerEconomy);
+        ownerStateById[activeOwnerId] = {
+          userId: activeOwnerId,
+          username: resolvedOwnerUsername,
+          economy: ownerEconomy,
+          inventory: ownerInventory,
+          economyVersion: String(economyRead.version || ""),
+          inventoryVersion: String(inventoryRead.version || ""),
+          dirty: false
+        };
+      }
+
+      for (var attackOwnerIndex = 0; attackOwnerIndex < ownerIds.length; attackOwnerIndex++) {
+        var attackOwnerId = ownerIds[attackOwnerIndex];
+        var attackOwnerState = ownerStateById[attackOwnerId];
+        if (!attackOwnerState) continue;
+        var attackExpeditions = coerceObjectList(getResourceExpeditionList(attackOwnerState.economy));
+        for (var ae = 0; ae < attackExpeditions.length; ae++) {
+          var attackExpedition = attackExpeditions[ae];
+          if (getMapExpeditionMissionKind(attackExpedition) !== "attack") continue;
+          if (String(attackExpedition.status || "").trim().toLowerCase() !== "travel_to_field") continue;
+          if (ts < sanitizePositiveInt(Number(attackExpedition.arrivalAt || 0))) continue;
+
+          var liveField = findMapField(mapState, String(attackExpedition.fieldId || ""));
+          var defenderOwnerId = String(
+            (liveField && liveField.occupiedByPlayerId) ||
+            attackExpedition.targetPlayerId ||
+            ""
+          ).trim();
+          var defenderOwnerState = defenderOwnerId ? ownerStateById[defenderOwnerId] : null;
+          var impactResult = resolveAttackExpeditionImpact(
+            attackOwnerState.economy,
+            defenderOwnerState ? defenderOwnerState.economy : defaultEconomyState(),
+            mapState,
+            attackOwnerId,
+            attackOwnerState.username,
+            defenderOwnerId,
+            defenderOwnerState ? defenderOwnerState.username : defenderOwnerId,
+            attackExpedition,
+            ts
+          );
+          if (!impactResult || !impactResult.changed) continue;
+          attackOwnerState.dirty = true;
+          if (defenderOwnerState) defenderOwnerState.dirty = true;
+          if (impactResult.attackerReport) {
+            deferredCombatMessages.push({ userId: attackOwnerId, report: impactResult.attackerReport });
+          }
+          if (impactResult.defenderReport && defenderOwnerId) {
+            deferredCombatMessages.push({ userId: defenderOwnerId, report: impactResult.defenderReport });
+          }
+        }
+      }
+
+      for (var k = 0; k < ownerIds.length; k++) {
+        var processedOwnerId = ownerIds[k];
+        var processedOwnerState = ownerStateById[processedOwnerId];
+        if (!processedOwnerState) continue;
+        var syncResult = syncMapExpedition(processedOwnerState.economy, processedOwnerState.inventory, mapState, processedOwnerId, processedOwnerState.username, ts);
+        var occupancyChanged = reconcileMapOccupancyForPlayer(nk, processedOwnerState.economy, mapState, processedOwnerId, processedOwnerState.username);
+        var activeIndexChanged = syncMapActiveExpeditionUserFromEconomy(mapState, processedOwnerId, processedOwnerState.economy, ts);
+        if (!(processedOwnerState.dirty || syncResult.changed || occupancyChanged || activeIndexChanged)) continue;
+
+        processedOwnerState.economy.version = sanitizePositiveInt(processedOwnerState.economy.version || 0) + 1;
+        processedOwnerState.economy.lastUpdateTs = ts;
+        processedOwnerState.inventory.version = sanitizePositiveInt(processedOwnerState.inventory.version || 0) + 1;
+        processedOwnerState.inventory.updatedAt = ts;
+
+        writes.push(
+          makeStorageWriteReq(ECONOMY_COLLECTION, ECONOMY_KEY, processedOwnerId, processedOwnerState.economy, processedOwnerState.economyVersion, 0, 0),
+          makeStorageWriteReq(INVENTORY_COLLECTION, INVENTORY_KEY, processedOwnerId, processedOwnerState.inventory, processedOwnerState.inventoryVersion, 0, 0)
+        );
+
+        if (syncResult && Array.isArray(syncResult.reports) && syncResult.reports.length > 0) {
+          reportsSettled += syncResult.reports.length;
+          for (var sr = 0; sr < syncResult.reports.length; sr++) {
+            deferredReports.push({ userId: processedOwnerId, report: syncResult.reports[sr] });
+          }
+        } else if (syncResult && syncResult.report) {
+          reportsSettled += 1;
+          deferredReports.push({ userId: processedOwnerId, report: syncResult.report });
+        }
+      }
+
+      compactMapFields(mapState, ts);
+      ensureMapFieldsSeeded(nk, mapState, ts);
+      var fingerprintAfter = JSON.stringify({
+        fields: mapState.fields || [],
+        activeExpeditionUsers: mapState.activeExpeditionUsers || []
+      });
+      var mapChanged = fingerprintAfter !== fingerprintBefore || !mapVersion;
+      if (!mapChanged && writes.length <= 0) {
+        return { changed: false, usersProcessed: ownerIds.length, reportsSettled: reportsSettled };
+      }
+
+      mapState.version = sanitizePositiveInt(mapState.version || 0) + 1;
+      mapState.updatedAt = ts;
+      writes.push(makeStorageWriteReq(MAP_COLLECTION, MAP_RESOURCE_FIELDS_KEY, SYSTEM_USER_ID, mapState, mapVersion, 2, 0));
+      nk.storageWrite(writes);
+
+      for (var dr = 0; dr < deferredReports.length; dr++) {
+        var deferred = deferredReports[dr] || {};
+        if (!deferred.userId || !deferred.report) continue;
+        try {
+          createMapHarvestRewardMessage(nk, String(deferred.userId || ""), deferred.report);
+        } catch (_msgErr) {
+          // noop
+        }
+      }
+
+      for (var cm = 0; cm < deferredCombatMessages.length; cm++) {
+        var combatDeferred = deferredCombatMessages[cm] || {};
+        if (!combatDeferred.userId || !combatDeferred.report) continue;
+        try {
+          createCombatReportMessage(nk, String(combatDeferred.userId || ""), combatDeferred.report);
+        } catch (_combatMsgErr) {
+          // noop
+        }
+      }
+
+      return { changed: true, usersProcessed: ownerIds.length, reportsSettled: reportsSettled };
+    } catch (err) {
+      lastError = String(err || "failed");
+    }
+  }
+  if (logger && typeof logger.warn === "function") {
+    logger.warn("map_world_maintenance_failed err=" + lastError);
+  }
+  return { changed: false, usersProcessed: 0, reportsSettled: 0, error: lastError };
 }
 
 function ensureHangarState(state) {
@@ -2997,8 +4733,200 @@ function defaultAllianceState(allianceId, ownerUserId, ownerUsername, body, serv
     militaryPower: 0,
     cachedMemberScores: {},
     cachedTotalScore: 0,
+    techTree: {},
+    questClaims: {},
+    operations: [],
     updatedAt: serverNowTs
   };
+}
+
+function sanitizeAllianceResourceMap(raw) {
+  var out = {};
+  var source = raw && typeof raw === "object" ? raw : {};
+  for (var i = 0; i < RESOURCE_IDS.length; i++) {
+    var rid = RESOURCE_IDS[i];
+    var amount = sanitizePositiveInt(Number(source[rid] || 0));
+    if (amount > 0) out[rid] = amount;
+  }
+  return out;
+}
+
+function defaultAllianceTechBranchState(branchId) {
+  return {
+    id: branchId,
+    level: 0,
+    progressWeighted: 0,
+    investedResources: {}
+  };
+}
+
+function normalizeAllianceTechTree(raw) {
+  var tree = raw && typeof raw === "object" ? raw : {};
+  var out = {};
+  for (var i = 0; i < ALLIANCE_TECH_BRANCH_IDS.length; i++) {
+    var branchId = ALLIANCE_TECH_BRANCH_IDS[i];
+    var branchRaw = tree[branchId] && typeof tree[branchId] === "object" ? tree[branchId] : {};
+    var def = ALLIANCE_TECH_BRANCH_DEFS[branchId];
+    var level = Math.max(0, Math.min(def.maxLevel, sanitizePositiveInt(branchRaw.level || 0)));
+    out[branchId] = {
+      id: branchId,
+      level: level,
+      progressWeighted: Math.max(0, Math.floor(Number(branchRaw.progressWeighted || 0))),
+      investedResources: sanitizeAllianceResourceMap(branchRaw.investedResources)
+    };
+  }
+  return out;
+}
+
+function normalizeAllianceQuestClaims(raw) {
+  var source = raw && typeof raw === "object" ? raw : {};
+  var out = {};
+  for (var i = 0; i < ALLIANCE_QUEST_IDS.length; i++) {
+    var questId = ALLIANCE_QUEST_IDS[i];
+    out[questId] = Math.max(0, sanitizePositiveInt(source[questId] || 0));
+  }
+  return out;
+}
+
+function normalizeAllianceOperations(raw, serverNowTs) {
+  var source = Array.isArray(raw) ? raw : [];
+  var out = [];
+  var seen = {};
+  for (var i = 0; i < source.length; i++) {
+    var row = source[i] || {};
+    var id = String(row.id || "").trim();
+    if (!id || seen[id]) continue;
+    seen[id] = true;
+    var kind = String(row.kind || "attack").trim().toLowerCase();
+    if (ALLIANCE_OPERATION_KINDS.indexOf(kind) === -1) kind = "attack";
+    var status = String(row.status || "active").trim().toLowerCase();
+    if (status !== "completed" && status !== "cancelled") status = "active";
+    out.push({
+      id: id,
+      kind: kind,
+      status: status,
+      title: String(row.title || "").trim().slice(0, 96),
+      target: String(row.target || "").trim().slice(0, 96),
+      note: String(row.note || "").trim().slice(0, 320),
+      scheduledAt: sanitizePositiveInt(row.scheduledAt || 0),
+      ownerUserId: String(row.ownerUserId || "").trim(),
+      ownerUsername: String(row.ownerUsername || "").trim(),
+      createdAt: sanitizePositiveInt(row.createdAt || serverNowTs),
+      updatedAt: sanitizePositiveInt(row.updatedAt || serverNowTs)
+    });
+    if (out.length >= ALLIANCE_OPERATION_LIMIT) break;
+  }
+  return out;
+}
+
+function getAllianceTechTargetWeightedCost(branchId, level) {
+  var def = ALLIANCE_TECH_BRANCH_DEFS[branchId] || ALLIANCE_TECH_BRANCH_DEFS.logistics;
+  var lvl = Math.max(0, sanitizePositiveInt(level || 0));
+  return Math.max(1, Math.floor(def.baseWeightedCost * Math.pow(1.55, lvl)));
+}
+
+function getAllianceTotalContributionXp(alliance) {
+  var total = 0;
+  var byUser = alliance && alliance.contributionPoints && typeof alliance.contributionPoints === "object" ? alliance.contributionPoints : {};
+  for (var userId in byUser) {
+    if (!Object.prototype.hasOwnProperty.call(byUser, userId)) continue;
+    total += Math.max(0, Math.floor(Number(byUser[userId] || 0)));
+  }
+  if (total > 0) return total;
+  return Math.max(0, Math.floor(sumWeightedResources((alliance && alliance.investedResources) || {})));
+}
+
+function normalizeAllianceProgress(alliance) {
+  var totalXp = getAllianceTotalContributionXp(alliance);
+  var normalizedLevel = Math.max(1, Math.floor(totalXp / ALLIANCE_LEVEL_XP_STEP) + 1);
+  var xpIntoLevel = totalXp - (normalizedLevel - 1) * ALLIANCE_LEVEL_XP_STEP;
+  alliance.bastionLevel = normalizedLevel;
+  alliance.bastionProgress = Math.max(0, Math.min(0.999999, xpIntoLevel / ALLIANCE_LEVEL_XP_STEP));
+  alliance.bastionInvested = sanitizeAllianceResourceMap(alliance.bastionInvested || alliance.investedResources);
+  return {
+    totalXp: totalXp,
+    level: normalizedLevel,
+    xpIntoLevel: xpIntoLevel,
+    xpToNext: ALLIANCE_LEVEL_XP_STEP,
+    progressPct: Math.max(0, Math.min(100, (xpIntoLevel / ALLIANCE_LEVEL_XP_STEP) * 100))
+  };
+}
+
+function totalAllianceTechLevels(alliance) {
+  var tree = normalizeAllianceTechTree(alliance && alliance.techTree);
+  var total = 0;
+  for (var i = 0; i < ALLIANCE_TECH_BRANCH_IDS.length; i++) {
+    total += Math.max(0, sanitizePositiveInt(tree[ALLIANCE_TECH_BRANCH_IDS[i]].level || 0));
+  }
+  return total;
+}
+
+function computeAllianceTechEffects(tree) {
+  var safeTree = normalizeAllianceTechTree(tree);
+  return {
+    fleetCapacityBonus: safeTree.logistics.level * 1.5,
+    fleetSpeedBonus: safeTree.logistics.level * 1.2,
+    fuelReductionBonus: safeTree.logistics.level * 0.8,
+    productionBonus: safeTree.industry.level * 2.0,
+    buildingCostReductionBonus: safeTree.industry.level * 0.8,
+    extractionBonus: safeTree.industry.level * 1.25,
+    fleetPowerBonus: safeTree.military.level * 1.8,
+    enduranceBonus: safeTree.military.level * 1.1,
+    defenseReloadBonus: safeTree.military.level * 0.9,
+    fieldDiscoveryBonus: safeTree.exploration.level * 1.3,
+    fieldRewardBonus: safeTree.exploration.level * 1.7,
+    acceleratorChanceBonus: safeTree.exploration.level * 0.5,
+    tradeBonus: safeTree.diplomacy.level * 1.4,
+    memberTransferBonus: safeTree.diplomacy.level * 1.0,
+    allianceMissionBonus: safeTree.diplomacy.level * 1.6
+  };
+}
+
+function getAllianceUnlockedBastionBonuses(level) {
+  var unlocked = [];
+  var next = [];
+  var safeLevel = Math.max(1, sanitizePositiveInt(level || 1));
+  for (var i = 0; i < ALLIANCE_BASTION_BONUS_MILESTONES.length; i++) {
+    var bonus = ALLIANCE_BASTION_BONUS_MILESTONES[i];
+    if (safeLevel >= bonus.level) unlocked.push(bonus);
+    else next.push(bonus);
+  }
+  return {
+    unlocked: unlocked,
+    next: next.slice(0, 3)
+  };
+}
+
+function recomputeAlliancePublicStats(alliance) {
+  var totalXp = getAllianceTotalContributionXp(alliance);
+  var techLevels = totalAllianceTechLevels(alliance);
+  var previous = alliance && alliance.publicStats && typeof alliance.publicStats === "object" ? alliance.publicStats : {};
+  alliance.publicStats = {
+    pointsTotauxAlliance:
+      sanitizePositiveInt(alliance.cachedTotalScore || 0) +
+      Math.floor(totalXp * 0.12) +
+      techLevels * 25000 +
+      sanitizePositiveInt(alliance.warPoints || 0) * 20,
+    warsWon: sanitizePositiveInt(previous.warsWon || 0),
+    warsLost: sanitizePositiveInt(previous.warsLost || 0),
+    pvpVictories: sanitizePositiveInt(previous.pvpVictories || 0),
+    totalInvestedXp: totalXp
+  };
+  return alliance.publicStats;
+}
+
+function ensureAllianceStrategicState(alliance, serverNowTs) {
+  if (!alliance || typeof alliance !== "object") return alliance;
+  alliance.memberCap = Math.max(DEFAULT_ALLIANCE_MEMBER_CAP, sanitizePositiveInt(alliance.memberCap || DEFAULT_ALLIANCE_MEMBER_CAP));
+  alliance.investedResources = sanitizeAllianceResourceMap(alliance.investedResources);
+  alliance.contributionPoints = alliance.contributionPoints && typeof alliance.contributionPoints === "object" ? alliance.contributionPoints : {};
+  alliance.bastionInvested = sanitizeAllianceResourceMap(alliance.bastionInvested || alliance.investedResources);
+  alliance.techTree = normalizeAllianceTechTree(alliance.techTree);
+  alliance.questClaims = normalizeAllianceQuestClaims(alliance.questClaims);
+  alliance.operations = normalizeAllianceOperations(alliance.operations, serverNowTs || nowTs());
+  normalizeAllianceProgress(alliance);
+  recomputeAlliancePublicStats(alliance);
+  return alliance;
 }
 
 function readAllianceProfile(nk, userId) {
@@ -3058,6 +4986,182 @@ function readStorageObject(nk, collection, key, userId) {
   return { state: read[0].value || null, version: read[0].version || "" };
 }
 
+function sanitizeResourceCostMap(raw) {
+  var source = raw && typeof raw === "object" ? raw : {};
+  var out = {};
+  for (var i = 0; i < RESOURCE_IDS.length; i++) {
+    var rid = RESOURCE_IDS[i];
+    var amount = sanitizePositiveInt(Number(source[rid] || 0));
+    if (amount > 0) out[rid] = amount;
+  }
+  return out;
+}
+
+function defaultRankingProgressState() {
+  return {
+    version: 1,
+    updatedAt: 0,
+    roomLevels: {},
+    researchPoints: 0,
+    constructionJob: null,
+    researchJob: null
+  };
+}
+
+function normalizeRankingConstructionJob(raw) {
+  if (!raw || typeof raw !== "object") return null;
+  var roomType = String(raw.roomType || "").trim();
+  var targetLevel = sanitizePositiveInt(Number(raw.targetLevel || 0));
+  var costPaid = sanitizeResourceCostMap(raw.costPaid);
+  if (!roomType && Object.keys(costPaid).length <= 0) return null;
+  return {
+    mode: String(raw.mode || "").trim().toLowerCase() === "upgrade" ? "upgrade" : "build",
+    roomType: roomType,
+    targetLevel: targetLevel,
+    costPaid: costPaid
+  };
+}
+
+function normalizeRankingResearchJob(raw) {
+  if (!raw || typeof raw !== "object") return null;
+  var technologyId = String(raw.technologyId || "").trim();
+  var targetLevel = sanitizePositiveInt(Number(raw.targetLevel || 0));
+  var costPaid = sanitizeResourceCostMap(raw.costPaid);
+  if (!technologyId && Object.keys(costPaid).length <= 0) return null;
+  return {
+    technologyId: technologyId,
+    targetLevel: targetLevel,
+    costPaid: costPaid
+  };
+}
+
+function normalizeRankingProgressSnapshot(raw) {
+  var source = raw && typeof raw === "object" ? raw : {};
+  var next = defaultRankingProgressState();
+  var roomLevels = {};
+  if (source.roomLevels && typeof source.roomLevels === "object" && !Array.isArray(source.roomLevels)) {
+    for (var buildingId in BASE_BUILDING_RESOURCE_COSTS) {
+      if (!Object.prototype.hasOwnProperty.call(BASE_BUILDING_RESOURCE_COSTS, buildingId)) continue;
+      var levelFromMap = sanitizePositiveInt(Number(source.roomLevels[buildingId] || 0));
+      if (levelFromMap > 0) roomLevels[buildingId] = levelFromMap;
+    }
+  }
+  var rooms = Array.isArray(source.rooms) ? source.rooms : [];
+  for (var i = 0; i < rooms.length; i++) {
+    var row = rooms[i] || {};
+    var roomType = String(row.type || "").trim();
+    if (!Object.prototype.hasOwnProperty.call(BASE_BUILDING_RESOURCE_COSTS, roomType)) continue;
+    var level = sanitizePositiveInt(Number(row.level || 0));
+    if (level <= 0) continue;
+    if (!roomLevels[roomType] || level > roomLevels[roomType]) roomLevels[roomType] = level;
+  }
+  next.roomLevels = roomLevels;
+  next.researchPoints = sanitizePositiveInt(Number(source.researchPoints || 0));
+  next.constructionJob = normalizeRankingConstructionJob(source.constructionJob);
+  if (!next.constructionJob && source.activeConstructionCost && typeof source.activeConstructionCost === "object") {
+    next.constructionJob = normalizeRankingConstructionJob({
+      mode: "build",
+      roomType: "",
+      targetLevel: 0,
+      costPaid: source.activeConstructionCost
+    });
+  }
+  next.researchJob = normalizeRankingResearchJob(source.researchJob);
+  if (!next.researchJob && source.activeResearchCost && typeof source.activeResearchCost === "object") {
+    next.researchJob = normalizeRankingResearchJob({
+      technologyId: "",
+      targetLevel: 0,
+      costPaid: source.activeResearchCost
+    });
+  }
+  next.updatedAt = sanitizePositiveInt(Number(source.updatedAt || nowTs()));
+  return next;
+}
+
+function mergeRankingProgressState(base, patch) {
+  var merged = defaultRankingProgressState();
+  var safeBase = base && typeof base === "object" ? base : defaultRankingProgressState();
+  var safePatch = patch && typeof patch === "object" ? patch : defaultRankingProgressState();
+  merged.version = Math.max(1, sanitizePositiveInt(Number(safeBase.version || 1)));
+  merged.updatedAt = Math.max(
+    sanitizePositiveInt(Number(safeBase.updatedAt || 0)),
+    sanitizePositiveInt(Number(safePatch.updatedAt || 0)),
+    nowTs()
+  );
+  merged.roomLevels = {};
+  for (var buildingId in BASE_BUILDING_RESOURCE_COSTS) {
+    if (!Object.prototype.hasOwnProperty.call(BASE_BUILDING_RESOURCE_COSTS, buildingId)) continue;
+    var baseLevel = sanitizePositiveInt(Number((safeBase.roomLevels && safeBase.roomLevels[buildingId]) || 0));
+    var patchLevel = sanitizePositiveInt(Number((safePatch.roomLevels && safePatch.roomLevels[buildingId]) || 0));
+    var nextLevel = Math.max(baseLevel, patchLevel);
+    if (nextLevel > 0) merged.roomLevels[buildingId] = nextLevel;
+  }
+  merged.researchPoints = Math.max(
+    sanitizePositiveInt(Number(safeBase.researchPoints || 0)),
+    sanitizePositiveInt(Number(safePatch.researchPoints || 0))
+  );
+  merged.constructionJob = normalizeRankingConstructionJob(safePatch.constructionJob);
+  merged.researchJob = normalizeRankingResearchJob(safePatch.researchJob);
+  return merged;
+}
+
+function readRankingProgressState(nk, userId) {
+  var read = nk.storageRead([{ collection: RANKING_PROGRESS_COLLECTION, key: RANKING_PROGRESS_KEY, userId: userId }]);
+  if (!read || read.length === 0) return { state: defaultRankingProgressState(), version: "" };
+  var obj = read[0];
+  var state = mergeRankingProgressState(defaultRankingProgressState(), normalizeRankingProgressSnapshot(obj.value || {}));
+  state.version = Math.max(1, sanitizePositiveInt(Number(state.version || 1)));
+  return { state: state, version: obj.version || "" };
+}
+
+function writeRankingProgressState(nk, userId, state, expectedVersion) {
+  var req = {
+    collection: RANKING_PROGRESS_COLLECTION,
+    key: RANKING_PROGRESS_KEY,
+    userId: userId,
+    permissionRead: 0,
+    permissionWrite: 0,
+    value: state
+  };
+  if (expectedVersion) req.version = expectedVersion;
+  var write = nk.storageWrite([req]);
+  return (write[0] && write[0].version) || "";
+}
+
+function buildScoreComputationState(economy, rankingProgress) {
+  var scoring = {
+    buildings: {},
+    building_upgrade_slot: null,
+    building_construct_slot: null,
+    research_slot: null,
+    hangarQueue: Array.isArray(economy && economy.hangarQueue) ? economy.hangarQueue : [],
+    hangarInventory: economy && economy.hangarInventory && typeof economy.hangarInventory === "object" ? economy.hangarInventory : {},
+    researchPoints: sanitizePositiveInt(Number((rankingProgress && rankingProgress.researchPoints) || 0))
+  };
+
+  for (var buildingId in BASE_BUILDING_RESOURCE_COSTS) {
+    if (!Object.prototype.hasOwnProperty.call(BASE_BUILDING_RESOURCE_COSTS, buildingId)) continue;
+    var hasProgressLevel =
+      Boolean(rankingProgress && rankingProgress.roomLevels) &&
+      Object.prototype.hasOwnProperty.call(rankingProgress.roomLevels, buildingId);
+    var progressLevel = sanitizePositiveInt(Number((rankingProgress && rankingProgress.roomLevels && rankingProgress.roomLevels[buildingId]) || 0));
+    var economyLevel = sanitizePositiveInt(Number((economy && economy.buildings && economy.buildings[buildingId] && economy.buildings[buildingId].level) || 0));
+    var level = hasProgressLevel ? progressLevel : economyLevel;
+    if ((buildingId === "carbone" || buildingId === "titane" || buildingId === "entrepot") && level <= 0) level = 1;
+    scoring.buildings[buildingId] = { level: level };
+  }
+
+  if (rankingProgress && rankingProgress.constructionJob && Object.keys(rankingProgress.constructionJob.costPaid || {}).length > 0) {
+    scoring.building_construct_slot = {
+      cost: sanitizeResourceCostMap(rankingProgress.constructionJob.costPaid),
+      buildingId: String(rankingProgress.constructionJob.roomType || ""),
+      targetLevel: sanitizePositiveInt(Number(rankingProgress.constructionJob.targetLevel || 0))
+    };
+  }
+
+  return scoring;
+}
+
 function defaultAllianceInbox(userId) {
   return {
     userId: userId || "",
@@ -3083,6 +5187,7 @@ function sanitizeAllianceTag(raw) {
 function validateAllianceCreatePayload(body) {
   var name = sanitizeAllianceName(body.name);
   var tag = sanitizeAllianceTag(body.tag);
+  var motto = String(body.motto || "").trim();
   var description = String(body.description || "").trim();
   var logoUrl = String(body.logoUrl || "").trim();
 
@@ -3090,6 +5195,7 @@ function validateAllianceCreatePayload(body) {
   if (!ALLIANCE_NAME_REGEX.test(name)) throw new Error("Alliance name contains invalid characters.");
   if (tag.length < 2 || tag.length > 5) throw new Error("Alliance tag must be 2..5 characters.");
   if (!ALLIANCE_TAG_REGEX.test(tag)) throw new Error("Alliance tag must be alphanumeric only.");
+  if (motto.length > 96) throw new Error("Alliance motto max length is 96.");
   if (description.length > 500) throw new Error("Alliance description max length is 500.");
   if (logoUrl.length > 512) throw new Error("Alliance logo URL max length is 512.");
 
@@ -3103,7 +5209,7 @@ function validateAllianceCreatePayload(body) {
     }
   }
 
-  return { name: name, tag: tag, description: description, logoUrl: logoUrl };
+  return { name: name, tag: tag, motto: motto, description: description, logoUrl: logoUrl };
 }
 
 function hasEnoughResourcesForCost(economy, cost) {
@@ -3139,6 +5245,8 @@ function getAllianceMemberList(alliance, leaderUserId, now) {
 }
 
 function buildAllianceDto(alliance, members) {
+  ensureAllianceStrategicState(alliance, nowTs());
+  normalizeAllianceVotes(alliance, nowTs());
   var memberList = Array.isArray(members) ? members : getAllianceMemberList(alliance, alliance.leaderUserId || "", nowTs());
   var leader = null;
   var officers = [];
@@ -3150,16 +5258,25 @@ function buildAllianceDto(alliance, members) {
     id: alliance.id,
     name: alliance.name,
     tag: alliance.tag,
+    motto: alliance.motto || "",
     description: alliance.description || "",
     logoUrl: alliance.logoUrl || alliance.logo || "",
     createdAt: Number(alliance.createdAt || nowTs()),
     leaderUserId: alliance.leaderUserId || (leader && leader.userId) || "",
     officersUserIds: Array.isArray(alliance.officersUserIds) ? alliance.officersUserIds : officers.map(function (m) { return m.userId; }),
     memberCount: Array.isArray(memberList) ? memberList.length : Number(alliance.memberCount || 0),
+    memberCap: sanitizePositiveInt(alliance.memberCap || DEFAULT_ALLIANCE_MEMBER_CAP) || DEFAULT_ALLIANCE_MEMBER_CAP,
     isRecruiting: alliance.isRecruiting !== false,
     publicStats: alliance.publicStats || { pointsTotauxAlliance: Number(alliance.cachedTotalScore || 0), warsWon: 0, warsLost: 0 },
     bastionLevel: Number(alliance.bastionLevel || 1),
     bastionInvested: alliance.bastionInvested || alliance.investedResources || {},
+    investedResources: alliance.investedResources || {},
+    contributionPoints: alliance.contributionPoints || {},
+    warPoints: sanitizePositiveInt(alliance.warPoints || 0),
+    techTree: normalizeAllianceTechTree(alliance.techTree),
+    questClaims: normalizeAllianceQuestClaims(alliance.questClaims),
+    operations: normalizeAllianceOperations(alliance.operations, nowTs()),
+    votes: Array.isArray(alliance.votes) ? alliance.votes.slice(0, 40) : [],
     members: memberList,
     applications: Array.isArray(alliance.applications) ? alliance.applications : [],
     invites: Array.isArray(alliance.invites) ? alliance.invites : [],
@@ -3168,6 +5285,7 @@ function buildAllianceDto(alliance, members) {
 }
 
 function buildAlliancePublicState(alliance, members) {
+  ensureAllianceStrategicState(alliance, nowTs());
   var memberList = Array.isArray(members) ? members : getAllianceMemberList(alliance, alliance.leaderUserId || "", nowTs());
   var leaderUserId = String(alliance.leaderUserId || "");
   if (!leaderUserId) {
@@ -3195,6 +5313,7 @@ function buildAlliancePublicState(alliance, members) {
     leaderUserId: leaderUserId,
     officersUserIds: officerIds,
     memberCount: Array.isArray(memberList) ? memberList.length : sanitizePositiveInt(alliance.memberCount || 0),
+    memberCap: sanitizePositiveInt(alliance.memberCap || DEFAULT_ALLIANCE_MEMBER_CAP) || DEFAULT_ALLIANCE_MEMBER_CAP,
     isRecruiting: alliance.isRecruiting !== false,
     publicStats: alliance.publicStats || {
       pointsTotauxAlliance: Number(alliance.cachedTotalScore || 0),
@@ -3203,6 +5322,8 @@ function buildAlliancePublicState(alliance, members) {
     },
     bastionLevel: Number(alliance.bastionLevel || 1),
     bastionInvested: alliance.bastionInvested || alliance.investedResources || {},
+    operationsActive: normalizeAllianceOperations(alliance.operations, nowTs()).filter(function(op) { return op.status === "active"; }).length,
+    techLevels: totalAllianceTechLevels(alliance),
     updatedAt: sanitizePositiveInt(alliance.updatedAt || nowTs())
   };
 }
@@ -3299,6 +5420,7 @@ function readAllianceCompositeState(nk, allianceId) {
     cleanAllianceInvites(alliance, ts);
     cleanAllianceApplications(alliance, ts);
     alliance.logs = Array.isArray(alliance.logs) ? alliance.logs : [];
+    ensureAllianceStrategicState(alliance, ts);
   }
   return {
     alliance: alliance,
@@ -3411,7 +5533,7 @@ function cumulativeApproxCost(baseAmount, level) {
   return baseAmount * ((Math.pow(COST_MULTIPLIER, lvl) - 1) / (COST_MULTIPLIER - 1));
 }
 
-function computePlayerPointBreakdown(state) {
+function computePlayerPointBreakdown(state, transientProgress) {
   var economy = 0;
   var militaryShips = 0;
   var militaryDefenses = 0;
@@ -3422,12 +5544,16 @@ function computePlayerPointBreakdown(state) {
     var lvl = Math.max(0, sanitizePositiveInt((state.buildings[bId] && state.buildings[bId].level) || 0));
     if (lvl <= 0) continue;
     var base = BASE_BUILDING_RESOURCE_COSTS[bId] || {};
+    var buildingMultiplier = POINT_MULTIPLIERS.building;
+    if (RESOURCE_IDS.indexOf(bId) !== -1) {
+      buildingMultiplier *= RESOURCE_BUILDING_POINT_MULTIPLIER;
+    }
     var weighted = 0;
     for (var rid in base) {
       if (!Object.prototype.hasOwnProperty.call(base, rid)) continue;
       weighted += cumulativeApproxCost(Number(base[rid] || 0), lvl) * (RESOURCE_POINT_WEIGHTS[rid] || 0);
     }
-    economy += weighted * POINT_MULTIPLIERS.building;
+    economy += weighted * buildingMultiplier;
   }
 
   ensureHangarState(state);
@@ -3442,6 +5568,16 @@ function computePlayerPointBreakdown(state) {
     else militaryDefenses += weightedCost * POINT_MULTIPLIERS.defense;
   }
 
+  var queue = Array.isArray(state.hangarQueue) ? state.hangarQueue : [];
+  for (var q = 0; q < queue.length; q++) {
+    var queued = queue[q] || {};
+    var queuedDef = HANGAR_UNIT_DEFS[queued.unitId];
+    if (!queuedDef) continue;
+    var queuedWeightedCost = sumWeightedResources(queued.batchCost || {});
+    if (queuedDef.category === "ship") militaryShips += queuedWeightedCost * POINT_MULTIPLIERS.ship;
+    else militaryDefenses += queuedWeightedCost * POINT_MULTIPLIERS.defense;
+  }
+
   var military = militaryShips + militaryDefenses;
   var researchScore = research * POINT_MULTIPLIERS.research;
   var total = economy + military + researchScore;
@@ -3453,58 +5589,192 @@ function computePlayerPointBreakdown(state) {
   };
 }
 
-function applyClientProgressMirror(state, snapshot) {
-  if (!snapshot || typeof snapshot !== "object") return false;
-  var changed = false;
+function computeAllianceMemberLiveStats(state, userId, username) {
+  var points = computePlayerPointBreakdown(state);
+  var productionPerSec = 0;
+  var totalShips = 0;
+  var totalDefenses = 0;
 
-  var rooms = Array.isArray(snapshot.rooms) ? snapshot.rooms : [];
-  for (var i = 0; i < rooms.length; i++) {
-    var row = rooms[i] || {};
-    var roomType = String(row.type || "").trim();
-    if (!roomType || !state.buildings || !Object.prototype.hasOwnProperty.call(state.buildings, roomType)) continue;
-    var nextLevel = sanitizePositiveInt(Number(row.level || 0));
-    if (nextLevel <= 0) continue;
-    var currentLevel = sanitizePositiveInt(Number((state.buildings[roomType] && state.buildings[roomType].level) || 0));
-    if (nextLevel > currentLevel) {
-      state.buildings[roomType].level = nextLevel;
-      changed = true;
+  for (var i = 0; i < RESOURCE_IDS.length; i++) {
+    var resourceId = RESOURCE_IDS[i];
+    var level = sanitizePositiveInt((state.buildings[resourceId] && state.buildings[resourceId].level) || 0);
+    var base = BUILDING_DEFS[resourceId] && BUILDING_DEFS[resourceId].baseProductionPerSec ? BUILDING_DEFS[resourceId].baseProductionPerSec : 0;
+    productionPerSec += calculateProduction(base, level, 0);
+  }
+
+  var hangarInventory = state && state.hangarInventory && typeof state.hangarInventory === "object" ? state.hangarInventory : {};
+  for (var unitId in hangarInventory) {
+    if (!Object.prototype.hasOwnProperty.call(hangarInventory, unitId)) continue;
+    var qty = sanitizePositiveInt(hangarInventory[unitId] || 0);
+    if (qty <= 0) continue;
+    var unitDef = HANGAR_UNIT_DEFS[unitId];
+    if (!unitDef) continue;
+    if (unitDef.category === "ship") totalShips += qty;
+    else totalDefenses += qty;
+  }
+
+  return {
+    userId: String(userId || ""),
+    username: String(username || userId || ""),
+    totalScore: points.total,
+    economyScore: points.economy,
+    militaryScore: points.military,
+    researchScore: points.research,
+    productionPerSec: Number(productionPerSec || 0),
+    shipCount: totalShips,
+    defenseCount: totalDefenses,
+    storageCapacity: storageCapacity(state)
+  };
+}
+
+function buildAllianceLiveOverview(nk, alliance, members) {
+  var ts = nowTs();
+  var totalXp = getAllianceTotalContributionXp(alliance);
+  var progress = normalizeAllianceProgress(alliance);
+  var safeMembers = Array.isArray(members) ? members : [];
+  var memberStats = [];
+  var totals = {
+    totalProductionPerSec: 0,
+    totalShips: 0,
+    totalDefenses: 0,
+    militaryPower: 0,
+    economyPower: 0,
+    researchPower: 0,
+    totalScore: 0,
+    storageCapacity: 0
+  };
+
+  for (var i = 0; i < safeMembers.length; i++) {
+    var member = safeMembers[i] || {};
+    var userId = String(member.userId || "").trim();
+    if (!userId) continue;
+    var username = String(member.username || userId);
+    var economyRead = readEconomyState(nk, userId);
+    var economy = applyOfflineProduction(economyRead.state, ts);
+    var stat = computeAllianceMemberLiveStats(economy, userId, username);
+    stat.role = normalizeAllianceMemberRole(member.role);
+    stat.joinedAt = sanitizePositiveInt(member.joinedAt || ts);
+    stat.contributionXp = sanitizePositiveInt((alliance.contributionPoints && alliance.contributionPoints[userId]) || 0);
+    memberStats.push(stat);
+    totals.totalProductionPerSec += stat.productionPerSec;
+    totals.totalShips += stat.shipCount;
+    totals.totalDefenses += stat.defenseCount;
+    totals.militaryPower += stat.militaryScore;
+    totals.economyPower += stat.economyScore;
+    totals.researchPower += stat.researchScore;
+    totals.totalScore += stat.totalScore;
+    totals.storageCapacity += stat.storageCapacity;
+  }
+
+  memberStats.sort(function(a, b) {
+    if (b.contributionXp !== a.contributionXp) return b.contributionXp - a.contributionXp;
+    if (b.totalScore !== a.totalScore) return b.totalScore - a.totalScore;
+    return String(a.username || "").localeCompare(String(b.username || ""));
+  });
+
+  return {
+    level: progress.level,
+    totalXp: totalXp,
+    xpIntoLevel: progress.xpIntoLevel,
+    xpToNext: progress.xpToNext,
+    progressPct: progress.progressPct,
+    totalInvestedResources: sanitizeAllianceResourceMap(alliance.investedResources),
+    totalInvestedRaw: Object.keys(sanitizeAllianceResourceMap(alliance.investedResources)).reduce(function(sum, rid) {
+      return sum + sanitizePositiveInt(alliance.investedResources[rid] || 0);
+    }, 0),
+    techLevels: totalAllianceTechLevels(alliance),
+    memberStats: memberStats,
+    totals: totals,
+    unlockedBastionBonuses: getAllianceUnlockedBastionBonuses(progress.level),
+    techEffects: computeAllianceTechEffects(alliance.techTree),
+    rankingScore: sanitizePositiveInt((alliance.publicStats && alliance.publicStats.pointsTotauxAlliance) || 0),
+    warsWon: sanitizePositiveInt((alliance.publicStats && alliance.publicStats.warsWon) || 0),
+    warsLost: sanitizePositiveInt((alliance.publicStats && alliance.publicStats.warsLost) || 0),
+    pvpVictories: sanitizePositiveInt((alliance.publicStats && alliance.publicStats.pvpVictories) || 0)
+  };
+}
+
+function buildAllianceQuestReward(questId, tier) {
+  var safeTier = Math.max(1, sanitizePositiveInt(tier || 1));
+  if (questId === "economic_drive") {
+    return {
+      title: "Recompense cooperative",
+      body: "Votre alliance a valide une quete economique collective.",
+      attachments: {
+        credits: 50 * safeTier,
+        chests: [{ chestType: safeTier >= 4 ? "RARE" : "UNCOMMON", quantity: 1 }]
+      }
+    };
+  }
+  if (questId === "armada_readiness") {
+    return {
+      title: "Prime d'armada",
+      body: "Votre alliance a atteint un palier de puissance militaire.",
+      attachments: {
+        items: [{ itemId: safeTier >= 4 ? "TIME_RIFT_3600" : "TIME_RIFT_300", quantity: 1 }],
+        credits: 35 * safeTier
+      }
+    };
+  }
+  return {
+    title: "Prime de recherche d'alliance",
+    body: "Votre alliance a finance une avancee technologique collective.",
+    attachments: {
+      items: [{ itemId: safeTier >= 5 ? "TIME_RIFT_3600" : "TIME_RIFT_60", quantity: Math.min(5, safeTier) }],
+      chests: [{ chestType: safeTier >= 5 ? "LEGENDARY" : "CLASSIC", quantity: 1 }]
     }
+  };
+}
+
+function buildAllianceQuestBoard(alliance, overview) {
+  var claims = normalizeAllianceQuestClaims(alliance.questClaims);
+  var quests = [];
+  var techLevels = sanitizePositiveInt(overview.techLevels || 0);
+  var totals = overview.totals || {};
+
+  var definitions = [
+    {
+      id: "economic_drive",
+      progress: sanitizePositiveInt(overview.totalXp || 0),
+      targetBase: 600000
+    },
+    {
+      id: "armada_readiness",
+      progress: sanitizePositiveInt(totals.totalShips || 0),
+      targetBase: 40
+    },
+    {
+      id: "research_conclave",
+      progress: techLevels,
+      targetBase: 5
+    }
+  ];
+
+  for (var i = 0; i < definitions.length; i++) {
+    var def = definitions[i];
+    var claimedTier = Math.max(0, sanitizePositiveInt(claims[def.id] || 0));
+    var nextTier = claimedTier + 1;
+    var target = def.id === "economic_drive"
+      ? def.targetBase * nextTier
+      : def.id === "armada_readiness"
+        ? def.targetBase * nextTier
+        : def.targetBase + claimedTier * 3;
+    quests.push({
+      id: def.id,
+      tier: nextTier,
+      claimedTier: claimedTier,
+      progress: sanitizePositiveInt(def.progress || 0),
+      target: Math.max(1, sanitizePositiveInt(target || 1)),
+      completed: sanitizePositiveInt(def.progress || 0) >= Math.max(1, sanitizePositiveInt(target || 1)),
+      reward: buildAllianceQuestReward(def.id, nextTier)
+    });
   }
 
-  var snapshotResearch = sanitizePositiveInt(Number(snapshot.researchPoints || 0));
-  var currentResearch = sanitizePositiveInt(Number(state.researchPoints || 0));
-  if (snapshotResearch > currentResearch) {
-    state.researchPoints = snapshotResearch;
-    changed = true;
-  }
-
-  return changed;
+  return quests;
 }
 
 function readEconomyStateForRanking(nk, userId, body, logger) {
   var ts = nowTs();
-  var snapshot = body && body.clientProgress && typeof body.clientProgress === "object" ? body.clientProgress : null;
-  if (!snapshot) return applyOfflineProduction(readEconomyState(nk, userId).state, ts);
-
-  var lastError = "";
-  for (var i = 0; i < ECONOMY_WRITE_RETRIES; i++) {
-    var read = readEconomyState(nk, userId);
-    var hydrated = applyOfflineProduction(read.state, ts);
-    var mutable = cloneState(hydrated);
-    var changed = applyClientProgressMirror(mutable, snapshot);
-    if (!changed) return hydrated;
-    mutable.version = (mutable.version || 0) + 1;
-    mutable.lastUpdateTs = ts;
-    try {
-      writeEconomyState(nk, userId, mutable, read.version);
-      return mutable;
-    } catch (err) {
-      lastError = String(err);
-    }
-  }
-  if (logger && typeof logger.warn === "function") {
-    logger.warn("ranking snapshot merge failed user=" + userId + " error=" + lastError);
-  }
   return applyOfflineProduction(readEconomyState(nk, userId).state, ts);
 }
 
@@ -3551,9 +5821,10 @@ function updateAllianceMemberScore(nk, logger, userId, username, points) {
   if (!allianceId) return;
 
   for (var i = 0; i < ALLIANCE_WRITE_RETRIES; i++) {
-    var allianceRead = readAllianceState(nk, allianceId);
-    var alliance = allianceRead.state;
+    var composite = readAllianceCompositeState(nk, allianceId);
+    var alliance = composite.alliance;
     if (!alliance) return;
+    var members = rebuildAllianceLeadership(alliance, composite.members, nowTs());
     if (!alliance.cachedMemberScores || typeof alliance.cachedMemberScores !== "object") alliance.cachedMemberScores = {};
     alliance.cachedMemberScores[userId] = sanitizePositiveInt(points.total);
     alliance.cachedTotalScore = 0;
@@ -3561,12 +5832,21 @@ function updateAllianceMemberScore(nk, logger, userId, username, points) {
       if (!Object.prototype.hasOwnProperty.call(alliance.cachedMemberScores, owner)) continue;
       alliance.cachedTotalScore += sanitizePositiveInt(alliance.cachedMemberScores[owner]);
     }
+    recomputeAlliancePublicStats(alliance);
     alliance.updatedAt = nowTs();
     try {
-      writeAllianceState(nk, alliance.id, alliance, allianceRead.version);
+      nk.storageWrite([
+        makeStorageWriteReq(ALLIANCE_COLLECTION, alliance.id, "", alliance, composite.privateVersion || "*", 0, 0),
+        makeStorageWriteReq(ALLIANCES_PUBLIC_COLLECTION, alliance.id, "", buildAlliancePublicState(alliance, members), composite.publicVersion || "*", 2, 0),
+        makeStorageWriteReq(ALLIANCE_MEMBERS_COLLECTION, alliance.id, "", {
+          allianceId: alliance.id,
+          members: members,
+          updatedAt: nowTs()
+        }, composite.membersVersion || "*", 0, 0)
+      ]);
       var leaderboardOwnerId = resolveAllianceLeaderboardOwnerId(alliance, userId);
       if (leaderboardOwnerId) {
-        safeLeaderboardWrite(nk, logger, LEADERBOARD_ALLIANCE_TOTAL, leaderboardOwnerId, alliance.name, alliance.cachedTotalScore, alliance.bastionLevel || 0, {
+        safeLeaderboardWrite(nk, logger, LEADERBOARD_ALLIANCE_TOTAL, leaderboardOwnerId, alliance.name, sanitizePositiveInt((alliance.publicStats && alliance.publicStats.pointsTotauxAlliance) || alliance.cachedTotalScore || 0), alliance.bastionLevel || 0, {
           allianceId: alliance.id || "",
           name: alliance.name || "",
           tag: alliance.tag || "",
@@ -3580,8 +5860,39 @@ function updateAllianceMemberScore(nk, logger, userId, username, points) {
   }
 }
 
-function syncPlayerPoints(nk, logger, userId, username, state) {
-  var points = computePlayerPointBreakdown(state);
+function syncPlayerPoints(nk, logger, userId, username, state, transientProgress) {
+  var progressRead = readRankingProgressState(nk, userId);
+  var rankingProgress = progressRead.state || defaultRankingProgressState();
+  var incomingProgress = transientProgress && typeof transientProgress === "object"
+    ? normalizeRankingProgressSnapshot(transientProgress)
+    : null;
+
+  if (incomingProgress) {
+    var mergedProgress = mergeRankingProgressState(rankingProgress, incomingProgress);
+    var previousJson = JSON.stringify(rankingProgress);
+    var nextJson = JSON.stringify(mergedProgress);
+    if (previousJson !== nextJson) {
+      try {
+        mergedProgress.version = Math.max(1, sanitizePositiveInt(Number(rankingProgress.version || 1))) + 1;
+        mergedProgress.updatedAt = nowTs();
+        writeRankingProgressState(nk, userId, mergedProgress, progressRead.version || "");
+        rankingProgress = mergedProgress;
+      } catch (errWriteProgress) {
+        if (logger && typeof logger.warn === "function") {
+          logger.warn("ranking progress sync failed user=" + userId + " error=" + errWriteProgress);
+        }
+      }
+    }
+  }
+
+  var scoringState = buildScoreComputationState(state, rankingProgress);
+  var scoringTransient = {
+    activeResearchCost:
+      rankingProgress && rankingProgress.researchJob && rankingProgress.researchJob.costPaid
+        ? rankingProgress.researchJob.costPaid
+        : null
+  };
+  var points = computePlayerPointBreakdown(scoringState, scoringTransient);
   safeLeaderboardWrite(nk, logger, LEADERBOARD_PLAYER_TOTAL, userId, username, points.total, points.military, points);
   safeLeaderboardWrite(nk, logger, LEADERBOARD_PLAYER_MILITARY, userId, username, points.military, points.total, points);
   safeLeaderboardWrite(nk, logger, LEADERBOARD_PLAYER_ECONOMY, userId, username, points.economy, points.total, points);
@@ -4052,28 +6363,33 @@ function buildAdminMapOverview(mapState, limit) {
   };
 }
 
+function resolveUsernameIndexByIds(nk, ids) {
+  var out = {};
+  var list = Array.isArray(ids) ? ids : [];
+  if (!nk || typeof nk.usersGetId !== "function" || list.length <= 0) return out;
+  for (var offset = 0; offset < list.length; offset += 100) {
+    var batch = list.slice(offset, offset + 100);
+    var users = [];
+    try {
+      users = nk.usersGetId(batch) || [];
+    } catch (_err) {
+      users = [];
+    }
+    for (var i = 0; i < users.length; i++) {
+      var row = users[i] || {};
+      var userId = String(row.id || row.userId || "").trim();
+      if (!userId) continue;
+      out[userId] = String(row.username || row.displayName || row.display_name || userId).trim() || userId;
+    }
+  }
+  return out;
+}
+
 function listAdminUserIdentities(nk, limit) {
   var ids = listAllUserIdsForInboxBroadcast(nk);
   var safeLimit = Math.max(1, Math.min(ADMIN_MAINTENANCE_USER_CAP, sanitizePositiveInt(limit || ADMIN_MAINTENANCE_USER_CAP)));
   if (ids.length > safeLimit) ids = ids.slice(0, safeLimit);
-  var usernameIndex = {};
-  if (nk && typeof nk.usersGetId === "function") {
-    for (var offset = 0; offset < ids.length; offset += 100) {
-      var batch = ids.slice(offset, offset + 100);
-      var users = [];
-      try {
-        users = nk.usersGetId(batch) || [];
-      } catch (_err) {
-        users = [];
-      }
-      for (var i = 0; i < users.length; i++) {
-        var row = users[i] || {};
-        var userId = String(row.id || row.userId || "").trim();
-        if (!userId) continue;
-        usernameIndex[userId] = String(row.username || row.displayName || row.display_name || userId).trim() || userId;
-      }
-    }
-  }
+  var usernameIndex = resolveUsernameIndexByIds(nk, ids);
   var out = [];
   for (var j = 0; j < ids.length; j++) {
     var userId = String(ids[j] || "").trim();
@@ -4332,8 +6648,9 @@ function consumeTimeRiftForLocalTarget(nk, playerId, itemId, quantity) {
   };
 }
 
-function rpcEconomyGetState(ctx, _logger, nk, _payload) {
+function rpcEconomyGetState(ctx, logger, nk, _payload) {
   var userId = requireUserId(ctx);
+  runMapWorldMaintenance(nk, logger, MAP_WORLD_MAINTENANCE_OWNER_LIMIT);
   var tx = withStateTransaction(nk, userId, function(s) { return s; });
   return JSON.stringify({ ok: true, state: tx.state });
 }
@@ -4647,6 +6964,7 @@ function rpcCreateAlliance(ctx, logger, nk, payload) {
       var baseAlliance = defaultAllianceState(allianceId, userId, username, {
         name: parsed.name,
         tag: parsed.tag,
+        motto: parsed.motto,
         description: parsed.description,
         logo: parsed.logoUrl
       }, ts);
@@ -4870,6 +7188,18 @@ function rpcGetMyAlliance(ctx, _logger, nk) {
   }
 
   var dto = buildAllianceDto(alliance, members);
+  var overview = buildAllianceLiveOverview(nk, alliance, members);
+  var quests = buildAllianceQuestBoard(alliance, overview);
+  var leaderboardOwnerId = resolveAllianceLeaderboardOwnerId(alliance, userId);
+  var leaderboardRow = safeLeaderboardRecordsList(nk, null, LEADERBOARD_ALLIANCE_TOTAL, 1, leaderboardOwnerId);
+  var ownerRecord = leaderboardRow && Array.isArray(leaderboardRow.ownerRecords) && leaderboardRow.ownerRecords.length > 0
+    ? leaderboardRow.ownerRecords[0]
+    : null;
+  dto.rank = sanitizePositiveInt((ownerRecord && ownerRecord.rank) || 0);
+  dto.overview = overview;
+  dto.quests = quests;
+  dto.bastionBonuses = overview.unlockedBastionBonuses;
+  dto.techEffects = overview.techEffects;
   if (myRole !== "LEADER" && myRole !== "OFFICER") {
     dto.applications = [];
     dto.invites = [];
@@ -4913,10 +7243,17 @@ function rpcSearchAlliances(_ctx, _logger, nk, payload) {
       id: String(value.id || objects[i].key || ""),
       name: name,
       tag: tag,
+      motto: String(value.motto || ""),
+      description: String(value.description || ""),
       memberCount: sanitizePositiveInt(value.memberCount || (Array.isArray(value.members) ? value.members.length : 0)),
+      memberCap: sanitizePositiveInt(value.memberCap || DEFAULT_ALLIANCE_MEMBER_CAP) || DEFAULT_ALLIANCE_MEMBER_CAP,
       bastionLevel: sanitizePositiveInt(value.bastionLevel || 1),
       isRecruiting: value.isRecruiting !== false,
-      logoUrl: String(value.logoUrl || value.logo || "")
+      logoUrl: String(value.logoUrl || value.logo || ""),
+      publicStats: value.publicStats && typeof value.publicStats === "object" ? value.publicStats : {},
+      operationsActive: sanitizePositiveInt(value.operationsActive || 0),
+      techLevels: sanitizePositiveInt(value.techLevels || 0),
+      updatedAt: sanitizePositiveInt(value.updatedAt || nowTs())
     });
   }
 
@@ -4950,16 +7287,19 @@ function rpcUpdateMyAlliance(ctx, _logger, nk, payload) {
     var userId = requireUserId(ctx);
     var username = ctx.username || userId;
     var body = parsePayload(payload);
+    var hasMotto = Object.prototype.hasOwnProperty.call(body, "motto");
     var hasDescription = Object.prototype.hasOwnProperty.call(body, "description");
     var hasLogo = Object.prototype.hasOwnProperty.call(body, "logoUrl");
     var hasRecruiting = Object.prototype.hasOwnProperty.call(body, "isRecruiting");
-    if (!hasDescription && !hasLogo && !hasRecruiting) {
+    if (!hasMotto && !hasDescription && !hasLogo && !hasRecruiting) {
       throw new Error("No update fields provided.");
     }
 
+    var nextMotto = hasMotto ? String(body.motto || "").trim() : null;
     var nextDescription = hasDescription ? String(body.description || "").trim() : null;
     var nextLogoUrl = hasLogo ? String(body.logoUrl || "").trim() : null;
     var nextRecruiting = hasRecruiting ? Boolean(body.isRecruiting) : null;
+    if (nextMotto !== null && nextMotto.length > 96) throw new Error("Alliance motto max length is 96.");
     if (nextDescription !== null && nextDescription.length > 500) throw new Error("Alliance description max length is 500.");
     if (nextLogoUrl !== null && nextLogoUrl.length > 512) throw new Error("Alliance logo URL max length is 512.");
 
@@ -4984,6 +7324,7 @@ function rpcUpdateMyAlliance(ctx, _logger, nk, payload) {
       var actorRole = members[actorIndex].role;
       if (actorRole !== "LEADER") throw new Error("Leader role required.");
 
+      if (nextMotto !== null) alliance.motto = nextMotto;
       if (nextDescription !== null) alliance.description = nextDescription;
       if (nextLogoUrl !== null) {
         alliance.logoUrl = nextLogoUrl;
@@ -5542,8 +7883,11 @@ function rpcAllianceInvitePlayer(ctx, _logger, nk, payload) {
     var userId = requireUserId(ctx);
     var username = ctx.username || userId;
     var body = parsePayload(payload);
-    var targetUserId = String(body.targetUserId || "").trim();
-    if (!targetUserId) throw new Error("Missing targetUserId.");
+    var targetRaw = String(body.targetUserId || body.username || body.target || "").trim();
+    if (!targetRaw) throw new Error("Missing targetUserId.");
+    var targetResolved = resolveInboxRecipient(nk, targetRaw);
+    var targetUserId = String(targetResolved.userId || "").trim();
+    var targetUsernameResolved = String(targetResolved.username || targetUserId);
     if (targetUserId === userId) throw new Error("Cannot invite yourself.");
 
     for (var attempt = 0; attempt < ALLIANCE_WRITE_RETRIES; attempt++) {
@@ -5586,6 +7930,7 @@ function rpcAllianceInvitePlayer(ctx, _logger, nk, payload) {
           alliance.invites[i].createdAt = ts;
           alliance.invites[i].byUserId = userId;
           alliance.invites[i].byUsername = username;
+          alliance.invites[i].targetUsername = targetUsernameResolved;
           break;
         }
       }
@@ -5602,7 +7947,7 @@ function rpcAllianceInvitePlayer(ctx, _logger, nk, payload) {
       if (!existsInvite) {
         alliance.invites.unshift({
           targetUserId: targetUserId,
-          targetUsername: targetUserId,
+          targetUsername: targetUsernameResolved,
           byUserId: userId,
           byUsername: username,
           createdAt: ts,
@@ -5913,9 +8258,11 @@ function rpcAllianceInvest(ctx, logger, nk, payload) {
   for (var attempt = 0; attempt < ALLIANCE_WRITE_RETRIES; attempt++) {
     var economyRead = readEconomyState(nk, userId);
     var economy = applyOfflineProduction(economyRead.state, now);
-    var allianceRead = readAllianceState(nk, profile.allianceId);
-    var alliance = allianceRead.state;
+    var composite = readAllianceCompositeState(nk, profile.allianceId);
+    var alliance = composite.alliance;
     if (!alliance) throw new Error("Alliance not found.");
+    var members = rebuildAllianceLeadership(alliance, composite.members, now);
+    ensureAllianceStrategicState(alliance, now);
 
     var totalContribution = 0;
     var costByResource = {};
@@ -5939,39 +8286,27 @@ function rpcAllianceInvest(ctx, logger, nk, payload) {
     }
     alliance.contributionPoints = alliance.contributionPoints || {};
     alliance.contributionPoints[userId] = sanitizePositiveInt(alliance.contributionPoints[userId] || 0) + totalContribution;
-    alliance.bastionProgress = Number(alliance.bastionProgress || 0) + totalContribution / 500000;
-    while (alliance.bastionProgress >= 1) {
-      alliance.bastionLevel = sanitizePositiveInt(alliance.bastionLevel || 1) + 1;
-      alliance.bastionProgress -= 1;
-    }
+    normalizeAllianceProgress(alliance);
+    recomputeAlliancePublicStats(alliance);
     appendAllianceLog(alliance, "invest", username + " invested in bastion.", username, now);
     alliance.updatedAt = now;
     economy.version = (economy.version || 0) + 1;
     economy.lastUpdateTs = now;
+    var membersState = {
+      allianceId: alliance.id,
+      members: members,
+      updatedAt: now
+    };
 
     try {
       nk.storageWrite([
-        {
-          collection: ECONOMY_COLLECTION,
-          key: ECONOMY_KEY,
-          userId: userId,
-          permissionRead: 0,
-          permissionWrite: 0,
-          value: economy,
-          version: economyRead.version || undefined
-        },
-        {
-          collection: ALLIANCE_COLLECTION,
-          key: alliance.id,
-          userId: "",
-          permissionRead: 2,
-          permissionWrite: 0,
-          value: alliance,
-          version: allianceRead.version || undefined
-        }
+        makeStorageWriteReq(ECONOMY_COLLECTION, ECONOMY_KEY, userId, economy, economyRead.version || "", 0, 0),
+        makeStorageWriteReq(ALLIANCE_COLLECTION, alliance.id, "", alliance, composite.privateVersion || "", 0, 0),
+        makeStorageWriteReq(ALLIANCES_PUBLIC_COLLECTION, alliance.id, "", buildAlliancePublicState(alliance, members), composite.publicVersion || "", 2, 0),
+        makeStorageWriteReq(ALLIANCE_MEMBERS_COLLECTION, alliance.id, "", membersState, composite.membersVersion || "", 0, 0)
       ]);
       var points = syncPlayerPoints(nk, logger, userId, username, economy);
-      return JSON.stringify({ ok: true, alliance: alliance, points: points, invested: costByResource });
+      return JSON.stringify({ ok: true, alliance: buildAllianceDto(alliance, members), points: points, invested: costByResource });
     } catch (errWrite) {
       if (attempt === ALLIANCE_WRITE_RETRIES - 1) throw errWrite;
     }
@@ -6063,6 +8398,281 @@ function rpcAllianceCastVote(ctx, _logger, nk, payload) {
     }
   }
   throw new Error("Vote cast failed.");
+}
+
+function rpcAllianceContributeTech(ctx, logger, nk, payload) {
+  var userId = requireUserId(ctx);
+  var username = ctx.username || userId;
+  var body = parsePayload(payload);
+  var branchId = String(body.branchId || "").trim().toLowerCase();
+  var resources = body.resources && typeof body.resources === "object" ? body.resources : {};
+  if (ALLIANCE_TECH_BRANCH_IDS.indexOf(branchId) === -1) throw new Error("Unknown alliance tech branch.");
+
+  var profileRead = readAllianceProfile(nk, userId);
+  var profile = profileRead.state || defaultAllianceProfile();
+  if (!profile.allianceId) throw new Error("Join an alliance first.");
+
+  for (var attempt = 0; attempt < ALLIANCE_WRITE_RETRIES; attempt++) {
+    var ts = nowTs();
+    var economyRead = readEconomyState(nk, userId);
+    var economy = applyOfflineProduction(economyRead.state, ts);
+    var composite = readAllianceCompositeState(nk, profile.allianceId);
+    var alliance = composite.alliance;
+    if (!alliance) throw new Error("Alliance not found.");
+    var members = rebuildAllianceLeadership(alliance, composite.members, ts);
+    ensureAllianceStrategicState(alliance, ts);
+    var memberRole = userAllianceRole(alliance, userId);
+    if (!memberRole) throw new Error("You are not a member of this alliance.");
+
+    var totalContribution = 0;
+    var costByResource = {};
+    for (var i = 0; i < RESOURCE_IDS.length; i++) {
+      var rid = RESOURCE_IDS[i];
+      var amount = sanitizePositiveInt(Number(resources[rid] || 0));
+      if (amount <= 0) continue;
+      if (economy.resources[rid].amount < amount) throw new Error("Insufficient " + rid + ".");
+      costByResource[rid] = amount;
+      totalContribution += amount * (RESOURCE_POINT_WEIGHTS[rid] || 0);
+    }
+    if (totalContribution <= 0) throw new Error("No resources provided.");
+
+    for (var ridPay in costByResource) {
+      economy.resources[ridPay].amount -= costByResource[ridPay];
+    }
+
+    var branch = alliance.techTree[branchId] || defaultAllianceTechBranchState(branchId);
+    var branchDef = ALLIANCE_TECH_BRANCH_DEFS[branchId];
+    if (branch.level >= branchDef.maxLevel) throw new Error("Alliance technology already maxed.");
+
+    branch.investedResources = sanitizeAllianceResourceMap(branch.investedResources);
+    for (var ridInv in costByResource) {
+      branch.investedResources[ridInv] = sanitizePositiveInt(branch.investedResources[ridInv] || 0) + costByResource[ridInv];
+    }
+    branch.progressWeighted = sanitizePositiveInt(branch.progressWeighted || 0) + totalContribution;
+    while (branch.level < branchDef.maxLevel) {
+      var target = getAllianceTechTargetWeightedCost(branchId, branch.level);
+      if (branch.progressWeighted < target) break;
+      branch.progressWeighted -= target;
+      branch.level += 1;
+    }
+    alliance.techTree[branchId] = branch;
+    recomputeAlliancePublicStats(alliance);
+    alliance.updatedAt = ts;
+    appendAllianceLog(alliance, "tech_fund", username + " funded alliance tech " + branchId + ".", username, ts);
+
+    var membersState = {
+      allianceId: alliance.id,
+      members: members,
+      updatedAt: ts
+    };
+
+    try {
+      nk.storageWrite([
+        makeStorageWriteReq(ECONOMY_COLLECTION, ECONOMY_KEY, userId, economy, economyRead.version || "", 0, 0),
+        makeStorageWriteReq(ALLIANCE_COLLECTION, alliance.id, "", alliance, composite.privateVersion || "*", 0, 0),
+        makeStorageWriteReq(ALLIANCES_PUBLIC_COLLECTION, alliance.id, "", buildAlliancePublicState(alliance, members), composite.publicVersion || "*", 2, 0),
+        makeStorageWriteReq(ALLIANCE_MEMBERS_COLLECTION, alliance.id, "", membersState, composite.membersVersion || "*", 0, 0)
+      ]);
+      var points = syncPlayerPoints(nk, logger, userId, username, economy);
+      return JSON.stringify({
+        ok: true,
+        branchId: branchId,
+        invested: costByResource,
+        alliance: buildAllianceDto(alliance, members),
+        points: points
+      });
+    } catch (errWrite) {
+      if (attempt === ALLIANCE_WRITE_RETRIES - 1 || !isVersionConflictError(errWrite)) throw errWrite;
+    }
+  }
+
+  throw new Error("Alliance technology funding failed.");
+}
+
+function rpcAllianceClaimQuest(ctx, _logger, nk, payload) {
+  var userId = requireUserId(ctx);
+  var username = ctx.username || userId;
+  var body = parsePayload(payload);
+  var questId = String(body.questId || "").trim();
+  if (ALLIANCE_QUEST_IDS.indexOf(questId) === -1) throw new Error("Unknown alliance quest.");
+
+  var profileRead = readAllianceProfile(nk, userId);
+  var profile = profileRead.state || defaultAllianceProfile();
+  if (!profile.allianceId) throw new Error("Join an alliance first.");
+
+  for (var attempt = 0; attempt < ALLIANCE_WRITE_RETRIES; attempt++) {
+    var ts = nowTs();
+    var composite = readAllianceCompositeState(nk, profile.allianceId);
+    var alliance = composite.alliance;
+    if (!alliance) throw new Error("Alliance not found.");
+    var members = rebuildAllianceLeadership(alliance, composite.members, ts);
+    ensureAllianceStrategicState(alliance, ts);
+    var role = userAllianceRole(alliance, userId);
+    if (role !== "chef" && role !== "co_lead" && role !== "LEADER" && role !== "OFFICER") {
+      throw new Error("Leader or officer role required.");
+    }
+
+    var overview = buildAllianceLiveOverview(nk, alliance, members);
+    var quests = buildAllianceQuestBoard(alliance, overview);
+    var quest = null;
+    for (var i = 0; i < quests.length; i++) {
+      if (quests[i].id === questId) {
+        quest = quests[i];
+        break;
+      }
+    }
+    if (!quest) throw new Error("Quest not found.");
+    if (!quest.completed) throw new Error("Quest is not completed yet.");
+    if (sanitizePositiveInt((alliance.questClaims && alliance.questClaims[questId]) || 0) >= sanitizePositiveInt(quest.tier || 0)) {
+      throw new Error("Quest reward already claimed.");
+    }
+
+    var reward = quest.reward || buildAllianceQuestReward(questId, quest.tier);
+    var delivered = 0;
+    var failed = 0;
+    for (var j = 0; j < members.length; j++) {
+      try {
+        createRewardMessage(
+          nk,
+          members[j].userId,
+          reward.attachments,
+          reward.title,
+          reward.body
+        );
+        delivered += 1;
+      } catch (_deliverErr) {
+        failed += 1;
+      }
+    }
+
+    alliance.questClaims = normalizeAllianceQuestClaims(alliance.questClaims);
+    alliance.questClaims[questId] = sanitizePositiveInt(quest.tier || 1);
+    appendAllianceLog(alliance, "quest_claim", username + " claimed alliance quest " + questId + ".", username, ts);
+    alliance.updatedAt = ts;
+
+    var membersState = {
+      allianceId: alliance.id,
+      members: members,
+      updatedAt: ts
+    };
+
+    try {
+      nk.storageWrite([
+        makeStorageWriteReq(ALLIANCE_COLLECTION, alliance.id, "", alliance, composite.privateVersion || "*", 0, 0),
+        makeStorageWriteReq(ALLIANCES_PUBLIC_COLLECTION, alliance.id, "", buildAlliancePublicState(alliance, members), composite.publicVersion || "*", 2, 0),
+        makeStorageWriteReq(ALLIANCE_MEMBERS_COLLECTION, alliance.id, "", membersState, composite.membersVersion || "*", 0, 0)
+      ]);
+      return JSON.stringify({
+        ok: true,
+        questId: questId,
+        delivered: delivered,
+        failed: failed,
+        alliance: buildAllianceDto(alliance, members)
+      });
+    } catch (errWrite) {
+      if (attempt === ALLIANCE_WRITE_RETRIES - 1 || !isVersionConflictError(errWrite)) throw errWrite;
+    }
+  }
+
+  throw new Error("Alliance quest claim failed.");
+}
+
+function rpcAllianceManageOperation(ctx, _logger, nk, payload) {
+  var userId = requireUserId(ctx);
+  var username = ctx.username || userId;
+  var body = parsePayload(payload);
+  var action = String(body.action || "").trim().toLowerCase();
+  if (!action) throw new Error("Missing action.");
+
+  var profileRead = readAllianceProfile(nk, userId);
+  var profile = profileRead.state || defaultAllianceProfile();
+  if (!profile.allianceId) throw new Error("Join an alliance first.");
+
+  for (var attempt = 0; attempt < ALLIANCE_WRITE_RETRIES; attempt++) {
+    var ts = nowTs();
+    var composite = readAllianceCompositeState(nk, profile.allianceId);
+    var alliance = composite.alliance;
+    if (!alliance) throw new Error("Alliance not found.");
+    var members = rebuildAllianceLeadership(alliance, composite.members, ts);
+    ensureAllianceStrategicState(alliance, ts);
+    var memberRole = userAllianceRole(alliance, userId);
+    if (!memberRole) throw new Error("You are not a member of this alliance.");
+
+    var operations = normalizeAllianceOperations(alliance.operations, ts);
+    var operationId = String(body.operationId || "").trim();
+    var index = -1;
+    for (var i = 0; i < operations.length; i++) {
+      if (operations[i].id === operationId) {
+        index = i;
+        break;
+      }
+    }
+
+    if (action === "create") {
+      var title = String(body.title || "").trim().slice(0, 96);
+      if (!title) throw new Error("Missing operation title.");
+      var kind = String(body.kind || "attack").trim().toLowerCase();
+      if (ALLIANCE_OPERATION_KINDS.indexOf(kind) === -1) kind = "attack";
+      operations.unshift({
+        id: "op_" + ts + "_" + Math.floor(Math.random() * 100000).toString(36),
+        kind: kind,
+        status: "active",
+        title: title,
+        target: String(body.target || "").trim().slice(0, 96),
+        note: String(body.note || "").trim().slice(0, 320),
+        scheduledAt: sanitizePositiveInt(body.scheduledAt || 0),
+        ownerUserId: userId,
+        ownerUsername: username,
+        createdAt: ts,
+        updatedAt: ts
+      });
+      if (operations.length > ALLIANCE_OPERATION_LIMIT) operations = operations.slice(0, ALLIANCE_OPERATION_LIMIT);
+      appendAllianceLog(alliance, "operation_create", username + " created an alliance operation.", username, ts);
+    } else {
+      if (index < 0) throw new Error("Operation not found.");
+      var current = operations[index];
+      var canManage = current.ownerUserId === userId || memberRole === "chef" || memberRole === "co_lead" || memberRole === "LEADER" || memberRole === "OFFICER";
+      if (!canManage) throw new Error("You cannot modify this operation.");
+      if (action === "toggle_status") {
+        current.status = String(current.status || "active") === "completed" ? "active" : "completed";
+        current.updatedAt = ts;
+        appendAllianceLog(alliance, "operation_update", username + " updated an alliance operation.", username, ts);
+      } else if (action === "cancel") {
+        current.status = "cancelled";
+        current.updatedAt = ts;
+        appendAllianceLog(alliance, "operation_cancel", username + " cancelled an alliance operation.", username, ts);
+      } else if (action === "delete") {
+        operations.splice(index, 1);
+        appendAllianceLog(alliance, "operation_delete", username + " removed an alliance operation.", username, ts);
+      } else {
+        throw new Error("Unknown operation action.");
+      }
+    }
+
+    alliance.operations = operations;
+    alliance.updatedAt = ts;
+    var membersState = {
+      allianceId: alliance.id,
+      members: members,
+      updatedAt: ts
+    };
+
+    try {
+      nk.storageWrite([
+        makeStorageWriteReq(ALLIANCE_COLLECTION, alliance.id, "", alliance, composite.privateVersion || "*", 0, 0),
+        makeStorageWriteReq(ALLIANCES_PUBLIC_COLLECTION, alliance.id, "", buildAlliancePublicState(alliance, members), composite.publicVersion || "*", 2, 0),
+        makeStorageWriteReq(ALLIANCE_MEMBERS_COLLECTION, alliance.id, "", membersState, composite.membersVersion || "*", 0, 0)
+      ]);
+      return JSON.stringify({
+        ok: true,
+        alliance: buildAllianceDto(alliance, members)
+      });
+    } catch (errWrite) {
+      if (attempt === ALLIANCE_WRITE_RETRIES - 1 || !isVersionConflictError(errWrite)) throw errWrite;
+    }
+  }
+
+  throw new Error("Alliance operation update failed.");
 }
 
 var INBOX_COLLECTION = "hsg_inbox_v1";
@@ -6633,19 +9243,29 @@ function createCombatReportMessage(nk, userId, reportData) {
   var data = reportData && typeof reportData === "object" ? reportData : {};
   var title = String(data.title || "Rapport de combat").slice(0, 140);
   var body = String(data.summary || data.body || "").slice(0, 8000);
+  var combatReport = {
+    battleType: String(data.battleType || "generic"),
+    fieldId: String(data.fieldId || ""),
+    location: data.location && typeof data.location === "object" ? data.location : null,
+    attacker: data.attacker || null,
+    defender: data.defender || null,
+    result: data.result || "unknown",
+    loot: data.loot || {},
+    protectedCargo: data.protectedCargo || {},
+    losses: data.losses || {},
+    rounds: Array.isArray(data.rounds) ? data.rounds : [],
+    attackerSurvivors: Array.isArray(data.attackerSurvivors) ? data.attackerSurvivors : [],
+    defenderSurvivors: Array.isArray(data.defenderSurvivors) ? data.defenderSurvivors : [],
+    attackerSummary: data.attackerSummary || null,
+    defenderSummary: data.defenderSummary || null,
+    battleAt: Math.max(0, Math.floor(Number(data.battleAt || nowTs())))
+  };
   return createInboxMessageForUser(nk, userId, {
     type: "COMBAT_REPORT",
     title: title,
     body: body,
     attachments: normalizeInboxAttachments(data.attachments || {}),
-    combatReport: {
-      attacker: data.attacker || null,
-      defender: data.defender || null,
-      result: data.result || "unknown",
-      loot: data.loot || {},
-      losses: data.losses || {},
-      battleAt: Math.max(0, Math.floor(Number(data.battleAt || nowTs())))
-    },
+    combatReport: combatReport,
     expiresAt: nowTs() + 60 * 60 * 24 * 30
   });
 }
@@ -7027,6 +9647,25 @@ function rpcAdminMapMaintenance(ctx, _logger, nk, payload) {
   });
 }
 
+function rpcRankingSyncProgress(ctx, logger, nk, payload) {
+  var userId = requireUserId(ctx);
+  var username = ctx.username || userId;
+  var body = parsePayload(payload);
+  var snapshot = normalizeRankingProgressSnapshot(body && body.progress && typeof body.progress === "object" ? body.progress : body);
+  var progressRead = readRankingProgressState(nk, userId);
+  var merged = mergeRankingProgressState(progressRead.state, snapshot);
+  merged.version = Math.max(1, sanitizePositiveInt(Number((progressRead.state && progressRead.state.version) || 1))) + 1;
+  merged.updatedAt = nowTs();
+  writeRankingProgressState(nk, userId, merged, progressRead.version || "");
+
+  var economy = readEconomyStateForRanking(nk, userId, null, logger);
+  var points = syncPlayerPoints(nk, logger, userId, username, economy, null);
+  return JSON.stringify({
+    ok: true,
+    points: points
+  });
+}
+
 function ensureDailyNoonRewardMessage(nk, userId) {
   for (var attempt = 0; attempt < ECONOMY_WRITE_RETRIES; attempt++) {
     var schedule = getServerNoonSchedule(nowTs());
@@ -7112,8 +9751,9 @@ function ensureDailyNoonRewardMessage(nk, userId) {
   return null;
 }
 
-function rpcInboxList(ctx, _logger, nk, payload) {
+function rpcInboxList(ctx, logger, nk, payload) {
   var userId = requireUserId(ctx);
+  runMapWorldMaintenance(nk, logger, MAP_WORLD_MAINTENANCE_OWNER_LIMIT);
   ensureDailyNoonRewardMessage(nk, userId);
   var body = parsePayload(payload);
   var typeFilter = parseInboxTypeFilter(body.type);
@@ -7969,6 +10609,37 @@ function serializeHarvestInventory(economy) {
   return rows;
 }
 
+function serializeCombatInventory(economy) {
+  ensureHangarState(economy);
+  var reserved = getReservedHarvestShipsByExpeditions(economy);
+  var rows = [];
+  var keys = Object.keys(economy.hangarInventory || {});
+  for (var i = 0; i < keys.length; i++) {
+    var unitId = keys[i];
+    var def = HANGAR_UNIT_DEFS[unitId];
+    var stats = UNIT_COMBAT_STATS[unitId];
+    if (!def || def.category !== "ship" || !stats) continue;
+    var totalAmount = sanitizePositiveInt(economy.hangarInventory[unitId] || 0);
+    var reservedAmount = sanitizePositiveInt(reserved[unitId] || 0);
+    var available = Math.max(0, totalAmount - reservedAmount);
+    if (available <= 0) continue;
+    rows.push({
+      unitId: unitId,
+      quantity: available,
+      force: sanitizePositiveInt(stats.force || 0),
+      endurance: sanitizePositiveInt(stats.endurance || 0),
+      speed: sanitizePositiveInt(stats.speed || 0),
+      lootCapacity: sanitizePositiveInt(stats.lootCapacity || 0)
+    });
+  }
+  rows.sort(function(a, b) {
+    if (b.force !== a.force) return b.force - a.force;
+    if (b.endurance !== a.endurance) return b.endurance - a.endurance;
+    return String(a.unitId).localeCompare(String(b.unitId));
+  });
+  return rows;
+}
+
 function readMapStateSnapshotNoWrite(nk, userId, username, commandementEscadreLevel) {
   var ts = nowTs();
   var read = nk.storageRead([
@@ -8013,6 +10684,7 @@ function readMapStateSnapshotNoWrite(nk, userId, username, commandementEscadreLe
   for (var fi = 0; fi < mapState.fields.length; fi++) {
     fields.push(serializeMapFieldForViewer(mapState.fields[fi], userId, allowedResources));
   }
+  var publicExpeditions = listPublicMapExpeditionsForViewer(nk, mapState, userId, ts);
 
   return {
     ok: true,
@@ -8021,7 +10693,9 @@ function readMapStateSnapshotNoWrite(nk, userId, username, commandementEscadreLe
     expedition: serializedExpeditions.length > 0 ? serializedExpeditions[0] : null,
     expeditions: serializedExpeditions,
     reports: Array.isArray(economy.resourceReports) ? economy.resourceReports.slice(0, 8) : [],
+    publicExpeditions: publicExpeditions,
     harvestInventory: serializeHarvestInventory(economy),
+    combatInventory: serializeCombatInventory(economy),
     maxActiveExpeditions: calculateMapActiveFleetSlotsForLevel(economy.commandementEscadreLevel || 0),
     syncReport: null,
     state: {
@@ -8037,6 +10711,7 @@ function rpcMapFieldsState(ctx, logger, nk, payload) {
   var username = ctx.username || userId;
   var body = parsePayload(payload);
   var commandementEscadreLevel = sanitizePositiveInt(Number(body.commandementEscadreLevel || body.commandement_escadre_level || 0));
+  runMapWorldMaintenance(nk, logger, MAP_WORLD_MAINTENANCE_OWNER_LIMIT);
 
   try {
     var tx = withMapTransaction(nk, userId, username, function(economy, inventory, mapState, ts, syncResult) {
@@ -8053,13 +10728,16 @@ function rpcMapFieldsState(ctx, logger, nk, payload) {
       for (var i = 0; i < mapState.fields.length; i++) {
         fields.push(serializeMapFieldForViewer(mapState.fields[i], userId, allowedResources));
       }
+      var publicExpeditions = listPublicMapExpeditionsForViewer(nk, mapState, userId, ts);
       return {
         serverNowTs: ts,
         fields: fields,
         expedition: serializedExpeditions.length > 0 ? serializedExpeditions[0] : null,
         expeditions: serializedExpeditions,
         reports: Array.isArray(economy.resourceReports) ? economy.resourceReports.slice(0, 8) : [],
+        publicExpeditions: publicExpeditions,
         harvestInventory: serializeHarvestInventory(economy),
+        combatInventory: serializeCombatInventory(economy),
         maxActiveExpeditions: calculateMapActiveFleetSlotsForLevel(economy.commandementEscadreLevel || 0),
         syncReport: syncResult && syncResult.report ? syncResult.report : null,
         state: {
@@ -8076,7 +10754,9 @@ function rpcMapFieldsState(ctx, logger, nk, payload) {
       expedition: tx.result.expedition,
       expeditions: tx.result.expeditions,
       reports: tx.result.reports,
+      publicExpeditions: tx.result.publicExpeditions,
       harvestInventory: tx.result.harvestInventory,
+      combatInventory: tx.result.combatInventory,
       maxActiveExpeditions: tx.result.maxActiveExpeditions,
       syncReport: tx.result.syncReport,
       state: tx.result.state
@@ -8128,6 +10808,7 @@ function rpcMapFieldsStart(ctx, _logger, nk, payload) {
       selectedField: selectedField ? serializeMapFieldForViewer(selectedField, userId, allowedResources) : null,
       fields: fields,
       harvestInventory: serializeHarvestInventory(economy),
+      combatInventory: serializeCombatInventory(economy),
       maxActiveExpeditions: maxActiveSlots,
       syncReport: syncResult && syncResult.report ? syncResult.report : null,
       state: {
@@ -8146,6 +10827,7 @@ function rpcMapFieldsStart(ctx, _logger, nk, payload) {
     selectedField: tx.result.selectedField,
     fields: tx.result.fields,
     harvestInventory: tx.result.harvestInventory,
+    combatInventory: tx.result.combatInventory,
     maxActiveExpeditions: tx.result.maxActiveExpeditions,
     syncReport: tx.result.syncReport,
     state: tx.result.state
@@ -8178,6 +10860,7 @@ function rpcMapFieldsRecall(ctx, _logger, nk, payload) {
       fields: fields,
       reports: Array.isArray(economy.resourceReports) ? economy.resourceReports.slice(0, 8) : [],
       harvestInventory: serializeHarvestInventory(economy),
+      combatInventory: serializeCombatInventory(economy),
       maxActiveExpeditions: calculateMapActiveFleetSlotsForLevel(economy.commandementEscadreLevel || 0),
       syncReport: syncResult && syncResult.report ? syncResult.report : null,
       state: {
@@ -8196,17 +10879,77 @@ function rpcMapFieldsRecall(ctx, _logger, nk, payload) {
     fields: tx.result.fields,
     reports: tx.result.reports,
     harvestInventory: tx.result.harvestInventory,
+    combatInventory: tx.result.combatInventory,
     maxActiveExpeditions: tx.result.maxActiveExpeditions,
     syncReport: tx.result.syncReport,
     state: tx.result.state
   });
 }
 
-function rpcMapPlayers(ctx, _logger, nk, payload) {
+function rpcMapFieldsAttack(ctx, logger, nk, payload) {
+  var attackerUserId = requireUserId(ctx);
+  var attackerUsername = ctx.username || attackerUserId;
+  var body = parsePayload(payload);
+  var fieldId = String(body.fieldId || "").trim();
+  var fleet = Array.isArray(body.fleet) ? body.fleet : [];
+  var commandementEscadreLevel = sanitizePositiveInt(Number(body.commandementEscadreLevel || body.commandement_escadre_level || 0));
+  if (!fieldId) throw new Error("Missing fieldId.");
+  if (!Array.isArray(fleet) || fleet.length <= 0) throw new Error("Missing attack fleet payload.");
+  runMapWorldMaintenance(nk, logger, MAP_WORLD_MAINTENANCE_OWNER_LIMIT);
+
+  var tx = withMapTransaction(nk, attackerUserId, attackerUsername, function(attackerEconomy, attackerInventory, liveMapState, ts, attackerSync) {
+    var maxActiveSlots = resolveMapActiveFleetSlots(attackerEconomy, commandementEscadreLevel);
+    var allowedResources = getAvailableResourcesForPlayer(attackerEconomy);
+    var expedition = startMapAttackExpedition(attackerEconomy, liveMapState, attackerUserId, attackerUsername, fieldId, fleet, ts, maxActiveSlots);
+    var expeditionList = getResourceExpeditionList(attackerEconomy);
+    var serializedExpeditions = [];
+    for (var ei = 0; ei < expeditionList.length; ei++) {
+      serializedExpeditions.push(serializeMapExpedition(expeditionList[ei], ts));
+    }
+    var fields = [];
+    for (var i = 0; i < liveMapState.fields.length; i++) {
+      fields.push(serializeMapFieldForViewer(liveMapState.fields[i], attackerUserId, allowedResources));
+    }
+    return {
+      __dirty: true,
+      serverNowTs: ts,
+      expeditions: serializedExpeditions,
+      expedition: serializedExpeditions.length > 0 ? serializedExpeditions[0] : serializeMapExpedition(expedition, ts),
+      fields: fields,
+      reports: Array.isArray(attackerEconomy.resourceReports) ? attackerEconomy.resourceReports.slice(0, 8) : [],
+      harvestInventory: serializeHarvestInventory(attackerEconomy),
+      combatInventory: serializeCombatInventory(attackerEconomy),
+      maxActiveExpeditions: maxActiveSlots,
+      syncReport: attackerSync && attackerSync.report ? attackerSync.report : null,
+      state: {
+        resources: serializeResourceAmounts(attackerEconomy),
+        credits: Math.max(0, Math.floor(Number(attackerEconomy.premiumCredits || 0))),
+        mapDropNotifications: sanitizePositiveInt(attackerInventory && attackerInventory.mapDropNotifications || 0)
+      }
+    };
+  });
+
+  return JSON.stringify({
+    ok: true,
+    serverNowTs: tx.result.serverNowTs,
+    expedition: tx.result.expedition,
+    expeditions: tx.result.expeditions,
+    fields: tx.result.fields,
+    reports: tx.result.reports,
+    harvestInventory: tx.result.harvestInventory,
+    combatInventory: tx.result.combatInventory,
+    maxActiveExpeditions: tx.result.maxActiveExpeditions,
+    syncReport: tx.result.syncReport,
+    state: tx.result.state
+  });
+}
+
+function rpcMapPlayers(ctx, logger, nk, payload) {
   var requesterUserId = requireUserId(ctx);
   var requesterUsername = String(ctx.username || requesterUserId).trim();
   var body = parsePayload(payload);
   var limit = Math.max(1, Math.min(5000, sanitizePositiveInt(body.limit || 2000)));
+  runMapWorldMaintenance(nk, logger, MAP_WORLD_MAINTENANCE_OWNER_LIMIT);
   var out = listMapPlayers(nk, limit);
   if (requesterUserId && isMapVisibleUsername(requesterUsername || requesterUserId)) {
     var already = false;
@@ -8427,11 +11170,10 @@ function rpcRankingGetState(ctx, logger, nk, payload) {
   var username = ctx.username || userId;
   var body = parsePayload(payload);
   var limit = Math.max(5, Math.min(100, sanitizePositiveInt(body.limit || 50)));
+  runMapWorldMaintenance(nk, logger, MAP_WORLD_MAINTENANCE_OWNER_LIMIT);
 
-  // Use hydrated state so finished queues/offline progression are reflected in points.
-  // If client progress snapshot is provided, merge it once (monotonic levels only) before scoring.
   var economy = readEconomyStateForRanking(nk, userId, body, logger);
-  var playerPoints = syncPlayerPoints(nk, logger, userId, username, economy);
+  var playerPoints = syncPlayerPoints(nk, logger, userId, username, economy, null);
   var totalRows = safeLeaderboardRecordsList(nk, logger, LEADERBOARD_PLAYER_TOTAL, limit, userId);
   var allianceRows = safeLeaderboardRecordsList(nk, logger, LEADERBOARD_ALLIANCE_TOTAL, limit, null);
   if (!allianceRows.records || allianceRows.records.length === 0) {
@@ -8492,6 +11234,7 @@ function InitModule(_ctx, logger, _nk, initializer) {
   initializer.registerRpc("getInventoryMeta", rpcInventoryMeta);
   initializer.registerRpc("useItem", rpcInventoryUseItem);
   initializer.registerRpc("ranking_get_state", rpcRankingGetState);
+  initializer.registerRpc("ranking_sync_progress", rpcRankingSyncProgress);
   initializer.registerRpc("rpc_create_alliance", rpcCreateAlliance);
   initializer.registerRpc("rpc_get_my_alliance", rpcGetMyAlliance);
   initializer.registerRpc("rpc_search_alliances", rpcSearchAlliances);
@@ -8503,6 +11246,12 @@ function InitModule(_ctx, logger, _nk, initializer) {
   initializer.registerRpc("rpc_alliance_review_application", rpcAllianceReviewApplication);
   initializer.registerRpc("rpc_alliance_invite_player", rpcAllianceInvitePlayer);
   initializer.registerRpc("rpc_alliance_respond_invite", rpcAllianceRespondInvite);
+  initializer.registerRpc("rpc_alliance_invest", rpcAllianceInvest);
+  initializer.registerRpc("rpc_alliance_launch_vote", rpcAllianceLaunchVote);
+  initializer.registerRpc("rpc_alliance_cast_vote", rpcAllianceCastVote);
+  initializer.registerRpc("rpc_alliance_contribute_tech", rpcAllianceContributeTech);
+  initializer.registerRpc("rpc_alliance_claim_quest", rpcAllianceClaimQuest);
+  initializer.registerRpc("rpc_alliance_manage_operation", rpcAllianceManageOperation);
   initializer.registerRpc("rpc_inbox_list", rpcInboxList);
   initializer.registerRpc("rpc_inbox_read", rpcInboxRead);
   initializer.registerRpc("rpc_inbox_delete", rpcInboxDelete);
@@ -8527,6 +11276,7 @@ function InitModule(_ctx, logger, _nk, initializer) {
   initializer.registerRpc("rpc_map_fields_state", rpcMapFieldsState);
   initializer.registerRpc("rpc_map_fields_start", rpcMapFieldsStart);
   initializer.registerRpc("rpc_map_fields_recall", rpcMapFieldsRecall);
+  initializer.registerRpc("rpc_map_fields_attack", rpcMapFieldsAttack);
   logger.info("Loaded hyperstructure economy runtime module (JS).");
 }
 
@@ -8562,3 +11312,4 @@ if (typeof module !== "undefined" && module.exports) {
     }
   };
 }
+
