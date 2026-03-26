@@ -10,7 +10,6 @@ import {
   Orbit,
   Rocket,
   Shield,
-  Sparkles,
   Sword,
   Wrench,
   Zap
@@ -387,41 +386,12 @@ export default function TechnologyCommandScreen({
               );
             })}
           </div>
-          <div className="tech-v4-doctrine-banner">
-            <Sparkles size={16} />
-            <div>
-              <strong>{l("Lecture strategique", "Strategic reading")}</strong>
-              <span>{selectedCategory?.tactical}</span>
-            </div>
-          </div>
-        </div>
-        <div className="tech-v4-hero-stats">
-          <article className="tech-v4-kpi">
-            <small>{l("Niveaux cumules", "Total levels")}</small>
-            <strong>{totalLevels.toLocaleString()}</strong>
-            <span>{l("Progression scientifique globale", "Global scientific progression")}</span>
-          </article>
-          <article className="tech-v4-kpi">
-            <small>{l("Technos actives", "Researched techs")}</small>
-            <strong>{unlockedTechnologies.toLocaleString()}</strong>
-            <span>{l("Branches deja amorcees", "Branches already started")}</span>
-          </article>
-          <article className="tech-v4-kpi">
-            <small>{l("Palier max", "Maxed techs")}</small>
-            <strong>{maxedTechnologies.toLocaleString()}</strong>
-            <span>{l("Modules deja finalises", "Technologies already capped")}</span>
-          </article>
-          <article className="tech-v4-kpi">
-            <small>{l("Facteur labo", "Lab factor")}</small>
-            <strong>{researchTimeFactor.toFixed(2)}x</strong>
-            <span>{l("Temps reconfigure par bonus locaux", "Research time after local bonuses")}</span>
-          </article>
         </div>
       </section>
 
       <div className="tech-v4-layout">
         <aside className="tech-v4-sidebar">
-          <section className="tech-v4-panel">
+          <section className={`tech-v4-panel ${researchJob && activeTech ? "tech-v4-panel-active" : ""}`}>
             <div className="tech-v4-panel-head">
               <strong>{l("Recherche active", "Active research")}</strong>
               <span>{researchJob ? l("En file", "Queued") : l("Idle", "Idle")}</span>
@@ -482,28 +452,64 @@ export default function TechnologyCommandScreen({
             )}
           </section>
 
-          <section className="tech-v4-panel">
-            <div className="tech-v4-panel-head">
-              <strong>{l("Diagnostic de branche", "Branch diagnostics")}</strong>
-              <span>{selectedCategory?.title}</span>
+          <section className="tech-v4-panel tech-v4-summary-panel">
+            <div className="tech-v4-panel-head compact">
+              <strong>{l("Vue scientifique", "Science overview")}</strong>
+              <span>{selectedCategory?.title ?? l("Etat global", "Global state")}</span>
+            </div>
+            <div className="tech-v4-summary-grid">
+              <article className="tech-v4-kpi">
+                <small>{l("Niveaux cumules", "Total levels")}</small>
+                <div className="tech-v4-kpi-inline">
+                  <strong>{totalLevels.toLocaleString()}</strong>
+                  <span>{l("Progression scientifique globale", "Global scientific progression")}</span>
+                </div>
+              </article>
+              <article className="tech-v4-kpi">
+                <small>{l("Technos actives", "Researched techs")}</small>
+                <div className="tech-v4-kpi-inline">
+                  <strong>{unlockedTechnologies.toLocaleString()}</strong>
+                  <span>{l("Branches deja amorcees", "Branches already started")}</span>
+                </div>
+              </article>
+              <article className="tech-v4-kpi">
+                <small>{l("Palier max", "Maxed techs")}</small>
+                <div className="tech-v4-kpi-inline">
+                  <strong>{maxedTechnologies.toLocaleString()}</strong>
+                  <span>{l("Modules deja finalises", "Technologies already capped")}</span>
+                </div>
+              </article>
+              <article className="tech-v4-kpi">
+                <small>{l("Facteur labo", "Lab factor")}</small>
+                <div className="tech-v4-kpi-inline">
+                  <strong>{researchTimeFactor.toFixed(2)}x</strong>
+                  <span>{l("Temps reconfigure par bonus locaux", "Research time after local bonuses")}</span>
+                </div>
+              </article>
             </div>
             {selectedCategory ? (
-              <div className="tech-v4-branch-metrics">
-                <div>
-                  <small>{l("Modeles", "Tech nodes")}</small>
-                  <b>{selectedCategory.defs.length.toLocaleString()}</b>
+              <div className="tech-v4-branch-summary">
+                <div className="tech-v4-panel-head compact tech-v4-panel-subhead">
+                  <strong>{l("Diagnostic de branche", "Branch diagnostics")}</strong>
+                  <span>{selectedCategory.eyebrow}</span>
                 </div>
-                <div>
-                  <small>{l("Niveaux cumules", "Total levels")}</small>
-                  <b>{selectedCategory.totalLevels.toLocaleString()}</b>
-                </div>
-                <div>
-                  <small>{l("Technos ouvertes", "Opened techs")}</small>
-                  <b>{selectedCategory.completed.toLocaleString()}</b>
-                </div>
-                <div>
-                  <small>{l("Priorite", "Priority")}</small>
-                  <b>{selectedCategory.eyebrow}</b>
+                <div className="tech-v4-branch-metrics">
+                  <div>
+                    <small>{l("Modeles", "Tech nodes")}</small>
+                    <b>{selectedCategory.defs.length.toLocaleString()}</b>
+                  </div>
+                  <div>
+                    <small>{l("Niveaux branche", "Branch levels")}</small>
+                    <b>{selectedCategory.totalLevels.toLocaleString()}</b>
+                  </div>
+                  <div>
+                    <small>{l("Technos ouvertes", "Opened techs")}</small>
+                    <b>{selectedCategory.completed.toLocaleString()}</b>
+                  </div>
+                  <div>
+                    <small>{l("Priorite", "Priority")}</small>
+                    <b>{selectedCategory.title}</b>
+                  </div>
                 </div>
               </div>
             ) : null}
@@ -514,36 +520,22 @@ export default function TechnologyCommandScreen({
               <strong>{l("Cadre doctrinal", "Doctrine frame")}</strong>
               <span>{l("Conseil", "Advice")}</span>
             </div>
-            <div className="tech-v4-note-stack">
-              <p>{selectedCategory?.tactical}</p>
-              <p>
-                {l(
-                  "Ne lance pas une techno juste parce qu'elle est disponible. Priorise celles qui debloquent du score, du rythme ou un avantage tactique immediat.",
-                  "Do not launch a technology just because it is available. Prioritize the ones that unlock score, tempo, or immediate tactical value."
-                )}
-              </p>
-            </div>
+            <details className="tech-v4-note-spoiler">
+              <summary>{l("Afficher le conseil de branche", "Show branch advice")}</summary>
+              <div className="tech-v4-note-stack">
+                <p>{selectedCategory?.tactical}</p>
+                <p>
+                  {l(
+                    "Ne lance pas une techno juste parce qu'elle est disponible. Priorise celles qui debloquent du score, du rythme ou un avantage tactique immediat.",
+                    "Do not launch a technology just because it is available. Prioritize the ones that unlock score, tempo, or immediate tactical value."
+                  )}
+                </p>
+              </div>
+            </details>
           </section>
         </aside>
 
         <section className="tech-v4-catalog">
-          <div className="tech-v4-catalog-head">
-            <div>
-              <span className="tech-v4-eyebrow">{selectedCategory?.eyebrow}</span>
-              <h3>{selectedCategory?.title}</h3>
-              <p>
-                {l(
-                  "Cartes compactes, hover d'intel rapide et spoiler de doctrine pour garder la page lisible meme avec beaucoup de technologies.",
-                  "Compact cards, quick intel hover, and doctrine spoilers keep the page readable even with a large tech roster."
-                )}
-              </p>
-            </div>
-            <div className="tech-v4-head-summary">
-              <span>{selectedCategory?.defs.length.toLocaleString()} {l("technos", "techs")}</span>
-              <span>{selectedCategory?.totalLevels.toLocaleString()} {l("niveaux", "levels")}</span>
-            </div>
-          </div>
-
           <div className="tech-v4-grid">
             {(selectedCategory?.defs ?? []).map((def) => {
               const currentLevel = Math.max(0, Math.floor(Number(technologyLevels[def.id] ?? 0)));
@@ -554,6 +546,8 @@ export default function TechnologyCommandScreen({
               const nextTime = Math.max(1, Math.floor(getTechnologyTimeForLevel(def, targetLevel) * researchTimeFactor));
               const canPay = canAffordCost(resourceAmounts, nextCost);
               const isCurrent = researchJob?.technologyId === def.id;
+              const quickGuidance = guidanceForTech(def.id, def.category, language);
+              const effectLabel = getTechnologyEffect(def.id, def.effectPerLevel) ?? l("Progression systemique", "Systemic progression");
               const statusLabel = isCurrent
                 ? l("En recherche", "Researching")
                 : atMax
@@ -575,20 +569,24 @@ export default function TechnologyCommandScreen({
                   <div className="tech-v4-card-main">
                     <div className="tech-v4-card-headline">
                       <strong>{getTechnologyName(def.id, def.name)}</strong>
-                      <small>{getTechnologyDescription(def.id, def.description)}</small>
+                      <small>{effectLabel}</small>
                     </div>
                     <div className="tech-v4-card-kpis">
                       <span>
-                        <small>{l("Effet", "Effect")}</small>
-                        <b>{getTechnologyEffect(def.id, def.effectPerLevel) ?? l("Progression systemique", "Systemic progression")}</b>
+                        <small>{l("Actuel", "Current")}</small>
+                        <b>{l("Niv.", "Lv.")} {currentLevel}</b>
                       </span>
                       <span>
-                        <small>{l("Temps suivant", "Next time")}</small>
+                        <small>{l("Cible", "Target")}</small>
+                        <b>{atMax ? l("Max", "Max") : `${l("Niv.", "Lv.")} ${targetLevel}`}</b>
+                      </span>
+                      <span>
+                        <small>{l("Temps", "Time")}</small>
                         <b>{atMax ? "-" : formatDuration(nextTime)}</b>
                       </span>
                     </div>
                     {!atMax ? (
-                      <div className="tech-v4-costs">
+                      <div className="tech-v4-costs tech-v4-costs-inline">
                         {(Object.keys(nextCost) as ResourceId[]).map((resourceId) => {
                           const amount = nextCost[resourceId] ?? 0;
                           return (
@@ -621,26 +619,22 @@ export default function TechnologyCommandScreen({
                                 ? l("File occupee", "Research slot busy")
                                 : l("Lancer la recherche", "Start research")}
                     </button>
-                  </div>
-
-                  <div className="tech-v4-hover-intel">
-                    <div className="tech-v4-hover-head">
-                      <strong>{l("Intel rapide", "Quick intel")}</strong>
-                      <span>{selectedCategory?.title}</span>
-                    </div>
-                    <p>{guidanceForTech(def.id, def.category, language)}</p>
                     {!reqMet && def.requires?.length ? (
-                      <ul>
-                        <li>{getRequirementsLabel(def)}</li>
-                      </ul>
+                      <div className="tech-v4-prereq-inline">
+                        <Lock size={13} />
+                        <span>{getRequirementsLabel(def)}</span>
+                      </div>
                     ) : null}
                   </div>
 
                   <details className="tech-v4-details">
                     <summary>
-                      {l("Doctrine & detail", "Doctrine & details")}
+                      {l("Voir details", "Show details")}
                       <ChevronRight size={14} />
                     </summary>
+                    <div className="tech-v4-details-intro">
+                      <p>{getTechnologyDescription(def.id, def.description)}</p>
+                    </div>
                     <div className="tech-v4-details-grid">
                       <div>
                         <small>{l("Branche", "Branch")}</small>
@@ -649,6 +643,10 @@ export default function TechnologyCommandScreen({
                       <div>
                         <small>{l("Cible", "Target")}</small>
                         <b>{l("Niveau", "Level")} {targetLevel}</b>
+                      </div>
+                      <div>
+                        <small>{l("Effet", "Effect")}</small>
+                        <b>{effectLabel}</b>
                       </div>
                       <div>
                         <small>{l("Prerequis", "Requirements")}</small>
@@ -660,7 +658,13 @@ export default function TechnologyCommandScreen({
                       </div>
                     </div>
                     <div className="tech-v4-doctrine-copy">
-                      <p>{guidanceForTech(def.id, def.category, language)}</p>
+                      <p>{quickGuidance}</p>
+                      {!reqMet && def.requires?.length ? (
+                        <p className="tech-v4-locked-copy">
+                          <Lock size={13} />
+                          <span>{getRequirementsLabel(def)}</span>
+                        </p>
+                      ) : null}
                       <p>
                         {l(
                           "Le cout et le temps montent avec chaque palier. Lance cette recherche quand son impact immediat justifie l'immobilisation de la file scientifique.",

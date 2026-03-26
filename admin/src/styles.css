@@ -180,6 +180,12 @@ select:focus {
   color: #cffff0;
 }
 
+.inline-note {
+  margin: 14px 0 0;
+  color: #8fb3cf;
+  font-size: 0.92rem;
+}
+
 .shell {
   display: grid;
   grid-template-columns: 280px 1fr;

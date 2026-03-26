@@ -97,6 +97,80 @@ var ALLIANCE_NAME_REGEX = /^[A-Za-z0-9 _-]+$/;
 var ALLIANCE_TAG_REGEX = /^[A-Za-z0-9]+$/;
 var ALLIANCE_BLOCKED_WORDS = ["admin", "mod", "nakama", "staff", "officiel"];
 var ALLIANCE_INVITE_TTL_SEC = 72 * 60 * 60;
+var MARKET_COLLECTION = "hyperstructure_market";
+var MARKET_BOOK_PREFIX = "book_v1::";
+var MARKET_PROFILE_KEY = "profile_v1";
+var MARKET_ALERTS_KEY = "alerts_v1";
+var MARKET_PRIVATE_INDEX_KEY = "private_contracts_v1";
+var MARKET_PRIVATE_PREFIX = "contract_v1::";
+var MARKET_WRITE_RETRIES = 6;
+var MARKET_HISTORY_BUCKET_SEC = 60 * 60;
+var MARKET_HISTORY_BUCKET_KEEP = 72;
+var MARKET_RECENT_TRADES_KEEP = 60;
+var MARKET_RECENT_ORDERS_KEEP = 80;
+var MARKET_CREDIT_SCALE = 1000;
+var MARKET_TYPE_PUBLIC = "public";
+var MARKET_TYPE_ALLIANCE = "alliance";
+var MARKET_TYPE_PRIVATE = "private";
+var MARKET_ORDER_SIDE_BUY = "buy";
+var MARKET_ORDER_SIDE_SELL = "sell";
+var MARKET_ORDER_STATUS_OPEN = "open";
+var MARKET_ORDER_STATUS_PARTIAL = "partially_filled";
+var MARKET_ORDER_STATUS_FILLED = "filled";
+var MARKET_ORDER_STATUS_CANCELLED = "cancelled";
+var MARKET_ORDER_STATUS_EXPIRED = "expired";
+var MARKET_ORDER_STATUS_DECLINED = "declined";
+var MARKET_DELIVERY_MODE_INSTANT = "instant";
+var MARKET_TOP_TIER_RESOURCES = {
+  aetherium: true,
+  isotope7: true,
+  singulite: true
+};
+var MARKET_PRICE_BUNDLE_SIZE = {
+  carbone: 1000,
+  titane: 1000,
+  osmium: 100,
+  adamantium: 100,
+  magmatite: 100,
+  neodyme: 100,
+  chronium: 100,
+  aetherium: 10,
+  isotope7: 10,
+  singulite: 10
+};
+var MARKET_ORDER_LIMITS = {
+  carbone: { min: 10, max: 3000000 },
+  titane: { min: 3000, max: 2000000 },
+  osmium: { min: 500, max: 600000 },
+  adamantium: { min: 200, max: 300000 },
+  magmatite: { min: 150, max: 180000 },
+  neodyme: { min: 120, max: 160000 },
+  chronium: { min: 80, max: 120000 },
+  aetherium: { min: 25, max: 40000 },
+  isotope7: { min: 15, max: 25000 },
+  singulite: { min: 5, max: 12000 }
+};
+var MARKET_FEE_CONFIG = {
+  public: { taxBps: 600, listingFeeBps: 100, cancelFeeBps: 50 },
+  private: { taxBps: 200, listingFeeBps: 0, cancelFeeBps: 0 },
+  alliance: { taxBps: 100, listingFeeBps: 0, cancelFeeBps: 0 }
+};
+var MARKET_BUILDING_LEVEL_ORDER_CAPS = [
+  { minLevel: 10, cap: 30 },
+  { minLevel: 8, cap: 20 },
+  { minLevel: 5, cap: 10 },
+  { minLevel: 1, cap: 5 }
+];
+var MARKET_ALERT_MAX_PER_PLAYER = 12;
+var MARKET_DEFAULT_ORDER_EXPIRY_SEC = 72 * 60 * 60;
+var MARKET_PRIVATE_EXPIRY_MIN_SEC = 60 * 60;
+var MARKET_PRIVATE_EXPIRY_MAX_SEC = 7 * 24 * 60 * 60;
+var MARKET_NEW_ACCOUNT_STRICT_DAYS = 7;
+var MARKET_NEW_ACCOUNT_TOP_TIER_DAYS = 14;
+var MARKET_NEW_ACCOUNT_VOLUME_REDUCTION_BPS = 8000;
+var MARKET_PRICE_ALERT_ABOVE = "above";
+var MARKET_PRICE_ALERT_BELOW = "below";
+var MARKET_INBOX_META_KIND = "MARKET_EVENT";
 
 var LEADERBOARD_PLAYER_TOTAL = "hsg_player_total";
 var LEADERBOARD_PLAYER_MILITARY = "hsg_player_military";
@@ -270,7 +344,8 @@ var BUILDING_DEFS = {
   aetherium: { baseProductionPerSec: 0.09, baseBuildSeconds: 2700 },
   isotope7: { baseProductionPerSec: 0.06, baseBuildSeconds: 3600 },
   singulite: { baseProductionPerSec: 0.045, baseBuildSeconds: 5400 },
-  entrepot: { baseBuildSeconds: 120 }
+  entrepot: { baseBuildSeconds: 120 },
+  bourse_orbitale: { baseBuildSeconds: 1500 }
 };
 
 var BASE_BUILDING_RESOURCE_COSTS = {
@@ -290,7 +365,8 @@ var BASE_BUILDING_RESOURCE_COSTS = {
   parc_orbital: { carbone: 3200, titane: 1300, osmium: 200 },
   academie_technique: { carbone: 6200, titane: 2400, osmium: 600 },
   universite_orbitale: { carbone: 9000, titane: 3200, osmium: 1200, adamantium: 100 },
-  entrepot: { carbone: 1000, titane: 500 }
+  entrepot: { carbone: 1000, titane: 500 },
+  bourse_orbitale: { carbone: 18000, titane: 9000, osmium: 2200, adamantium: 250 }
 };
 
 var HANGAR_UNIT_DEFS = {
@@ -525,7 +601,7 @@ function defaultEconomyState() {
   for (var i = 0; i < RESOURCE_IDS.length; i++) resources[RESOURCE_IDS[i]] = { amount: 0 };
 
   var buildings = {};
-  var keys = RESOURCE_IDS.concat(["entrepot"]);
+  var keys = RESOURCE_IDS.concat(["entrepot", "bourse_orbitale"]);
   for (var j = 0; j < keys.length; j++) buildings[keys[j]] = { level: 0 };
   buildings.carbone.level = 1;
   buildings.titane.level = 1;
@@ -537,6 +613,10 @@ function defaultEconomyState() {
     resources: resources,
     buildings: buildings,
     premiumCredits: 0,
+    orbitalCredits: 0,
+    marketCreditSubunits: 0,
+    marketReservedCredits: 0,
+    marketReservedResources: {},
     creditGrantClaims: [],
     building_upgrade_slot: null,
     building_construct_slot: null,
@@ -564,7 +644,7 @@ function ensureEconomyState(raw) {
   }
 
   if (!state.buildings || typeof state.buildings !== "object") state.buildings = {};
-  var buildingIds = RESOURCE_IDS.concat(["entrepot"]);
+  var buildingIds = RESOURCE_IDS.concat(["entrepot", "bourse_orbitale"]);
   for (var j = 0; j < buildingIds.length; j++) {
     var buildingId = buildingIds[j];
     var buildingRow = state.buildings[buildingId];
@@ -576,6 +656,18 @@ function ensureEconomyState(raw) {
   }
 
   state.premiumCredits = Math.max(0, Math.floor(Number(state.premiumCredits || 0)));
+  state.orbitalCredits = Math.max(0, Math.floor(Number(state.orbitalCredits || 0)));
+  if (state.orbitalCredits > 0) {
+    state.premiumCredits += state.orbitalCredits;
+    state.orbitalCredits = 0;
+  }
+  state.marketCreditSubunits = Math.max(0, Math.floor(Number(state.marketCreditSubunits || 0)));
+  if (state.marketCreditSubunits >= MARKET_CREDIT_SCALE) {
+    state.premiumCredits += Math.floor(state.marketCreditSubunits / MARKET_CREDIT_SCALE);
+    state.marketCreditSubunits = state.marketCreditSubunits % MARKET_CREDIT_SCALE;
+  }
+  state.marketReservedCredits = Math.max(0, Math.floor(Number(state.marketReservedCredits || 0)));
+  state.marketReservedResources = sanitizeResourceCostMap(state.marketReservedResources);
   state.creditGrantClaims = Array.isArray(state.creditGrantClaims) ? state.creditGrantClaims : [];
   state.building_upgrade_slot = state.building_upgrade_slot || null;
   state.building_construct_slot = state.building_construct_slot || null;
@@ -1020,6 +1112,31 @@ function isMapVisibleUsername(username) {
   return true;
 }
 
+function queryDisabledUserIdSet(nk, userIds) {
+  var out = {};
+  if (!nk || typeof nk.sqlQuery !== "function") return out;
+  var source = Array.isArray(userIds) ? userIds : [];
+  var safeIds = [];
+  var seen = {};
+  for (var i = 0; i < source.length; i++) {
+    var userId = String(source[i] || "").trim();
+    if (!userId || seen[userId]) continue;
+    seen[userId] = true;
+    safeIds.push("'" + escapeSqlLiteral(userId) + "'");
+  }
+  if (safeIds.length <= 0) return out;
+  var sql =
+    "SELECT id FROM users WHERE disable_time > to_timestamp(0) " +
+    "AND id IN (" + safeIds.join(",") + ")";
+  var rows = nk.sqlQuery(sql) || [];
+  for (var j = 0; j < rows.length; j++) {
+    var disabledId = String((rows[j] && rows[j].id) || "").trim();
+    if (!disabledId) continue;
+    out[disabledId] = true;
+  }
+  return out;
+}
+
 function listMapPlayers(nk, limit) {
   var safeLimit = Math.max(1, Math.min(5000, sanitizePositiveInt(limit || 2000)));
   if (!nk || typeof nk.leaderboardRecordsList !== "function") return [];
@@ -1030,7 +1147,7 @@ function listMapPlayers(nk, limit) {
   } catch (_e) {
     rows = [];
   }
-  var out = [];
+  var candidates = [];
   var seen = {};
   for (var i = 0; i < rows.length; i++) {
     var row = rows[i] || {};
@@ -1040,7 +1157,19 @@ function listMapPlayers(nk, limit) {
     if (!username) username = "player-" + userId.slice(0, 8);
     if (!isMapVisibleUsername(username)) continue;
     seen[userId] = true;
-    out.push({ userId: userId, username: username });
+    candidates.push({ userId: userId, username: username });
+  }
+  var disabledUserIds = queryDisabledUserIdSet(
+    nk,
+    candidates.map(function(row) {
+      return row.userId;
+    })
+  );
+  var out = [];
+  for (var j = 0; j < candidates.length; j++) {
+    var candidate = candidates[j];
+    if (!candidate || disabledUserIds[candidate.userId]) continue;
+    out.push(candidate);
   }
   return out;
 }
@@ -2061,6 +2190,183 @@ function formatResourceMapShort(resourceMap) {
   return parts.length > 0 ? parts.join(", ") : "Aucun";
 }
 
+function formatCreditGainShort(amount) {
+  var safe = sanitizePositiveInt(amount || 0);
+  if (safe <= 0) return "Aucun";
+  return safe + " Credits";
+}
+
+function sumRawResources(costs) {
+  var total = 0;
+  var source = costs && typeof costs === "object" ? costs : {};
+  for (var rid in source) {
+    if (!Object.prototype.hasOwnProperty.call(source, rid)) continue;
+    var amount = sanitizePositiveInt(source[rid] || 0);
+    if (amount <= 0) continue;
+    total += amount;
+  }
+  return total;
+}
+
+function mergeFleetRows(rowsA, rowsB) {
+  var out = {};
+  var pushRows = function(rows) {
+    var source = Array.isArray(rows) ? rows : [];
+    for (var i = 0; i < source.length; i++) {
+      var row = source[i] || {};
+      var unitId = String(row.unitId || "").trim();
+      var quantity = sanitizePositiveInt(row.quantity || 0);
+      if (!unitId || quantity <= 0) continue;
+      out[unitId] = sanitizePositiveInt(out[unitId] || 0) + quantity;
+    }
+  };
+  pushRows(rowsA);
+  pushRows(rowsB);
+  var merged = [];
+  var keys = Object.keys(out);
+  for (var j = 0; j < keys.length; j++) {
+    var unitId = keys[j];
+    var quantity = sanitizePositiveInt(out[unitId] || 0);
+    if (quantity <= 0) continue;
+    merged.push({ unitId: unitId, quantity: quantity });
+  }
+  return merged;
+}
+
+function mergeLossMaps(mapA, mapB) {
+  var merged = {};
+  var mergeOne = function(source) {
+    var safe = source && typeof source === "object" ? source : {};
+    var keys = Object.keys(safe);
+    for (var i = 0; i < keys.length; i++) {
+      var unitId = keys[i];
+      var quantity = sanitizePositiveInt(safe[unitId] || 0);
+      if (quantity <= 0) continue;
+      merged[unitId] = sanitizePositiveInt(merged[unitId] || 0) + quantity;
+    }
+  };
+  mergeOne(mapA);
+  mergeOne(mapB);
+  return merged;
+}
+
+function applyLossMapToFleetRows(originalRows, lossMap) {
+  var source = Array.isArray(originalRows) ? originalRows : [];
+  var safeLosses = lossMap && typeof lossMap === "object" ? lossMap : {};
+  var out = [];
+  for (var i = 0; i < source.length; i++) {
+    var row = source[i] || {};
+    var unitId = String(row.unitId || "").trim();
+    var quantity = sanitizePositiveInt(row.quantity || 0);
+    if (!unitId || quantity <= 0) continue;
+    var lost = sanitizePositiveInt(safeLosses[unitId] || 0);
+    var remaining = Math.max(0, quantity - lost);
+    if (remaining <= 0) continue;
+    out.push({ unitId: unitId, quantity: remaining });
+  }
+  return out;
+}
+
+function softenLossMap(originalRows, rawLossMap, ratio) {
+  var source = Array.isArray(originalRows) ? originalRows : [];
+  var safeRaw = rawLossMap && typeof rawLossMap === "object" ? rawLossMap : {};
+  var safeRatio = clampNumber(Number(ratio || 0), 0, 1);
+  var out = {};
+  for (var i = 0; i < source.length; i++) {
+    var row = source[i] || {};
+    var unitId = String(row.unitId || "").trim();
+    var quantity = sanitizePositiveInt(row.quantity || 0);
+    if (!unitId || quantity <= 0) continue;
+    var rawLoss = Math.max(0, Math.min(quantity, sanitizePositiveInt(safeRaw[unitId] || 0)));
+    if (rawLoss <= 0) continue;
+    var scaledLoss = Math.max(1, Math.floor(rawLoss * safeRatio));
+    if (scaledLoss >= quantity) scaledLoss = Math.max(0, quantity - 1);
+    if (scaledLoss <= 0) continue;
+    out[unitId] = scaledLoss;
+  }
+  return out;
+}
+
+function summarizeCombatRows(rows) {
+  var source = Array.isArray(rows) ? rows : [];
+  var totalUnits = 0;
+  var totalForce = 0;
+  var totalEndurance = 0;
+  for (var i = 0; i < source.length; i++) {
+    var row = source[i] || {};
+    var unitId = String(row.unitId || "").trim();
+    var quantity = sanitizePositiveInt(row.quantity || 0);
+    var stats = UNIT_COMBAT_STATS[unitId];
+    if (!unitId || quantity <= 0 || !stats) continue;
+    totalUnits += quantity;
+    totalForce += sanitizePositiveInt(stats.force || 0) * quantity;
+    totalEndurance += Math.max(1, sanitizePositiveInt(stats.endurance || 1)) * quantity;
+  }
+  return {
+    totalUnits: totalUnits,
+    totalForce: totalForce,
+    totalEndurance: totalEndurance
+  };
+}
+
+function serializeDefenseCombatInventory(economy) {
+  ensureHangarState(economy);
+  var rows = [];
+  var keys = Object.keys(economy.hangarInventory || {});
+  for (var i = 0; i < keys.length; i++) {
+    var unitId = keys[i];
+    var def = HANGAR_UNIT_DEFS[unitId];
+    var stats = UNIT_COMBAT_STATS[unitId];
+    if (!def || def.category !== "defense" || !stats) continue;
+    var totalAmount = sanitizePositiveInt(economy.hangarInventory[unitId] || 0);
+    if (totalAmount <= 0) continue;
+    rows.push({
+      unitId: unitId,
+      quantity: totalAmount,
+      force: sanitizePositiveInt(stats.force || 0),
+      endurance: sanitizePositiveInt(stats.endurance || 0),
+      speed: sanitizePositiveInt(stats.speed || 0),
+      lootCapacity: sanitizePositiveInt(stats.lootCapacity || 0)
+    });
+  }
+  rows.sort(function(a, b) {
+    if (b.force !== a.force) return b.force - a.force;
+    if (b.endurance !== a.endurance) return b.endurance - a.endurance;
+    return String(a.unitId).localeCompare(String(b.unitId));
+  });
+  return rows;
+}
+
+function computeFleetLossCreditSalvage(lossMap) {
+  var safeLosses = lossMap && typeof lossMap === "object" ? lossMap : {};
+  var totalCredits = 0;
+  var keys = Object.keys(safeLosses);
+  for (var i = 0; i < keys.length; i++) {
+    var unitId = keys[i];
+    var quantity = sanitizePositiveInt(safeLosses[unitId] || 0);
+    var def = HANGAR_UNIT_DEFS[unitId];
+    if (!def || quantity <= 0) continue;
+    totalCredits += Math.floor((sumRawResources(def.cost || {}) * quantity) / 500);
+  }
+  return Math.max(0, totalCredits);
+}
+
+function computePlanetRaidLootResources(defenderEconomy, ratio) {
+  var safeRatio = clampNumber(Number(ratio || 0), 0, 1);
+  var loot = {};
+  if (!defenderEconomy || !defenderEconomy.resources || typeof defenderEconomy.resources !== "object") return loot;
+  for (var i = 0; i < RESOURCE_IDS.length; i++) {
+    var rid = RESOURCE_IDS[i];
+    var current = sanitizePositiveInt(defenderEconomy.resources[rid] && defenderEconomy.resources[rid].amount || 0);
+    if (current <= 0) continue;
+    var stolen = Math.max(0, Math.floor(current * safeRatio));
+    if (stolen <= 0) continue;
+    defenderEconomy.resources[rid].amount = Math.max(0, current - stolen);
+    loot[rid] = stolen;
+  }
+  return loot;
+}
+
 function calculateMapTravelSeconds(userId, fieldX, fieldY, mapSpeed) {
   var origin = mapPlayerToPlanetCoordinates(userId);
   var distance = distance2D(origin.x, origin.y, fieldX, fieldY);
@@ -2491,6 +2797,11 @@ function getMapExpeditionMissionKind(expedition) {
   return raw === "attack" ? "attack" : "harvest";
 }
 
+function getMapAttackTargetKind(expedition) {
+  var raw = String(expedition && expedition.targetKind || "field").trim().toLowerCase();
+  return raw === "planet" ? "planet" : "field";
+}
+
 function settleReturningExpedition(economy, inventory, expedition, serverNowTs) {
   var gains = expedition.collectedResources && typeof expedition.collectedResources === "object"
     ? expedition.collectedResources
@@ -2504,6 +2815,11 @@ function settleReturningExpedition(economy, inventory, expedition, serverNowTs) 
     if (!economy.resources[rid]) economy.resources[rid] = { amount: 0 };
     economy.resources[rid].amount += amount;
     addedResources[rid] = amount;
+  }
+
+  var addedCredits = sanitizePositiveInt(expedition && expedition.collectedCredits || 0);
+  if (addedCredits > 0) {
+    economy.premiumCredits = sanitizePositiveInt(economy.premiumCredits || 0) + addedCredits;
   }
 
   var addedItems = [];
@@ -2588,7 +2904,7 @@ function mapHarvestReportBody(report) {
       if (!itemId || qty <= 0) continue;
       var itemDef = ITEM_DEFINITIONS[itemId];
       var itemName = itemDef && itemDef.name ? itemDef.name : itemId;
-      lines.push("  â€¢ " + itemName + " x" + qty);
+      lines.push("  - " + itemName + " x" + qty);
     }
   }
   if (lines.length <= 0) lines.push("- Aucun gain");
@@ -2608,13 +2924,23 @@ function createMapHarvestRewardMessage(nk, userId, report) {
   var fieldSuffix = String(report.fieldId || "").slice(-4).toUpperCase();
   var title = "Rapport d'exploitation " + (fieldSuffix ? ("#" + fieldSuffix) : "");
   var body = "Votre flotte de collecte est revenue.\n\n" + mapHarvestReportBody(report);
+  var previewRewards = normalizeInboxAttachments({
+    resources: report && report.resources && typeof report.resources === "object" ? report.resources : {},
+    items: Array.isArray(report && report.items) ? report.items : []
+  });
   createInboxMessageForUser(nk, userId, {
     id: messageId,
     type: "REWARD",
     title: title,
     body: body,
     attachments: {},
-    meta: { kind: "MAP_HARVEST_REPORT", reportId: reportId },
+    meta: {
+      kind: INBOX_MAP_HARVEST_META_KIND,
+      reportId: reportId,
+      fieldId: String(report.fieldId || ""),
+      resources: previewRewards.resources,
+      items: previewRewards.items
+    },
     expiresAt: nowTs() + 60 * 60 * 24 * 60
   });
 }
@@ -2676,8 +3002,11 @@ function serializeMapExpedition(expedition, serverNowTs) {
     id: String(expedition.id || ""),
     fieldId: String(expedition.fieldId || ""),
     missionKind: missionKind,
+    targetKind: getMapAttackTargetKind(expedition),
     targetPlayerId: String(expedition.targetPlayerId || ""),
     targetUsername: String(expedition.targetUsername || ""),
+    targetX: sanitizePositiveInt(expedition.targetX || 0),
+    targetY: sanitizePositiveInt(expedition.targetY || 0),
     status: status,
     departureAt: sanitizePositiveInt(expedition.departureAt || 0),
     arrivalAt: sanitizePositiveInt(expedition.arrivalAt || 0),
@@ -2695,6 +3024,7 @@ function serializeMapExpedition(expedition, serverNowTs) {
     fleet: Array.isArray(expedition.fleet) ? expedition.fleet : [],
     snapshotResources: snapshotResources,
     collectedResources: collectedResources,
+    collectedCredits: sanitizePositiveInt(expedition.collectedCredits || 0),
     serverNowTs: serverNowTs
   };
 }
@@ -2708,8 +3038,11 @@ function serializePublicMapExpedition(expedition, playerId, username, serverNowT
     username: String(username || expedition.username || playerId || ""),
     fieldId: String(base.fieldId || ""),
     missionKind: String(base.missionKind || "harvest"),
+    targetKind: String(base.targetKind || "field"),
     targetPlayerId: String(base.targetPlayerId || ""),
     targetUsername: String(base.targetUsername || ""),
+    targetX: sanitizePositiveInt(base.targetX || 0),
+    targetY: sanitizePositiveInt(base.targetY || 0),
     status: String(base.status || "travel_to_field"),
     departureAt: sanitizePositiveInt(base.departureAt || 0),
     arrivalAt: sanitizePositiveInt(base.arrivalAt || 0),
@@ -2750,7 +3083,11 @@ function listPublicMapExpeditionsForViewer(nk, mapState, viewerUserId, serverNow
     var expeditionList = getResourceExpeditionList(ownerEconomy);
     for (var ei = 0; ei < expeditionList.length; ei++) {
       var publicExpedition = serializePublicMapExpedition(expeditionList[ei], ownerUserId, ownerUsername, serverNowTs);
-      if (!publicExpedition || !publicExpedition.id || !publicExpedition.fieldId) continue;
+      if (!publicExpedition || !publicExpedition.id) continue;
+      if (
+        getMapAttackTargetKind(expeditionList[ei]) !== "planet" &&
+        !publicExpedition.fieldId
+      ) continue;
       var publicStatus = String(publicExpedition.status || "").trim().toLowerCase();
       if (publicStatus !== "travel_to_field" && publicStatus !== "returning" && publicStatus !== "extracting") continue;
       out.push(publicExpedition);
@@ -3040,6 +3377,9 @@ function startMapAttackExpedition(economy, mapState, userId, username, fieldId, 
     username: username || userId,
     targetPlayerId: defenderUserId,
     targetUsername: String(field.occupiedByUsername || defenderUserId),
+    targetKind: "field",
+    targetX: sanitizePositiveInt(field.x || 0),
+    targetY: sanitizePositiveInt(field.y || 0),
     fieldId: field.id,
     missionKind: "attack",
     status: "travel_to_field",
@@ -3060,6 +3400,7 @@ function startMapAttackExpedition(economy, mapState, userId, username, fieldId, 
     playerScore: 0,
     scoreBonus: 1,
     collectedResources: {},
+    collectedCredits: 0,
     dropItemId: "",
     dropQuantity: 0,
     fuelCostCredits: fuelCostCredits,
@@ -3067,6 +3408,70 @@ function startMapAttackExpedition(economy, mapState, userId, username, fieldId, 
     updatedAt: serverNowTs
   };
 
+  var nextExpeditions = expeditions.slice();
+  nextExpeditions.push(expedition);
+  economy.resourceExpeditions = nextExpeditions;
+  economy.resourceExpedition = expedition;
+  return expedition;
+}
+
+function startMapPlanetAttackExpedition(economy, userId, username, defenderUserId, defenderUsername, serverNowTs, fleetInput, maxActiveSlots) {
+  ensureResourceExpeditionState(economy);
+  var expeditions = coerceObjectList(getResourceExpeditionList(economy));
+  economy.resourceExpeditions = expeditions;
+  var slotCap = Math.max(1, sanitizePositiveInt(Number(maxActiveSlots || 1)));
+  var blockingExpeditions = countBlockingResourceExpeditions(expeditions, serverNowTs);
+  if (blockingExpeditions >= slotCap) {
+    throw new Error("Active fleet slot limit reached (" + blockingExpeditions + "/" + slotCap + ").");
+  }
+  var targetId = String(defenderUserId || "").trim();
+  if (!targetId) throw new Error("Missing target player.");
+  if (targetId === String(userId || "").trim()) throw new Error("You cannot attack your own hyperstructure.");
+  var targetCoords = mapPlayerToPlanetCoordinates(targetId);
+  var stats = calculateFleetCombatStats(economy, fleetInput);
+  var fuelCostCredits = calculateMapFleetFuelCredits(userId, targetCoords.x, targetCoords.y, stats.fleet, "attack");
+  if (fuelCostCredits > 0) {
+    economy.premiumCredits = Math.max(0, Math.floor(Number(economy.premiumCredits || 0)));
+    if (economy.premiumCredits < fuelCostCredits) throw new Error("Not enough credits for fleet fuel.");
+    economy.premiumCredits -= fuelCostCredits;
+  }
+  var travelSeconds = calculateMapTravelSeconds(userId, targetCoords.x, targetCoords.y, stats.averageSpeed);
+  var expedition = {
+    id: makeServerId("atkpl", serverNowTs),
+    playerId: userId,
+    username: username || userId,
+    targetPlayerId: targetId,
+    targetUsername: String(defenderUsername || targetId).trim() || targetId,
+    targetKind: "planet",
+    targetX: sanitizePositiveInt(targetCoords.x || 0),
+    targetY: sanitizePositiveInt(targetCoords.y || 0),
+    fieldId: "",
+    missionKind: "attack",
+    status: "travel_to_field",
+    fleet: stats.fleet,
+    totalHarvestSpeed: 0,
+    totalTransportCapacity: stats.totalLootCapacity,
+    mapSpeed: Math.floor(stats.averageSpeed),
+    travelSeconds: travelSeconds,
+    extractionSeconds: 0,
+    departureAt: serverNowTs,
+    arrivalAt: serverNowTs + travelSeconds,
+    extractionStartAt: 0,
+    extractionEndAt: 0,
+    returnStartAt: 0,
+    returnEndAt: 0,
+    snapshotResources: {},
+    snapshotVirtual: false,
+    playerScore: 0,
+    scoreBonus: 1,
+    collectedResources: {},
+    collectedCredits: 0,
+    dropItemId: "",
+    dropQuantity: 0,
+    fuelCostCredits: fuelCostCredits,
+    settledAt: 0,
+    updatedAt: serverNowTs
+  };
   var nextExpeditions = expeditions.slice();
   nextExpeditions.push(expedition);
   economy.resourceExpeditions = nextExpeditions;
@@ -3565,6 +3970,240 @@ function resolveAttackExpeditionImpact(attackerEconomy, defenderEconomy, mapStat
   };
 }
 
+function resolvePlanetAttackExpeditionImpact(attackerEconomy, defenderEconomy, attackerUserId, attackerUsername, defenderUserId, defenderUsername, expedition, serverNowTs) {
+  ensureResourceExpeditionState(attackerEconomy);
+  ensureResourceExpeditionState(defenderEconomy);
+  if (!expedition || typeof expedition !== "object") {
+    return { changed: false, attackerReport: null, defenderReport: null };
+  }
+
+  var attackerExpeditions = coerceObjectList(getResourceExpeditionList(attackerEconomy));
+  var attackerIndex = -1;
+  for (var ai = 0; ai < attackerExpeditions.length; ai++) {
+    if (String(attackerExpeditions[ai].id || "") === String(expedition.id || "")) {
+      attackerIndex = ai;
+      expedition = attackerExpeditions[ai];
+      break;
+    }
+  }
+  if (attackerIndex < 0) return { changed: false, attackerReport: null, defenderReport: null };
+
+  var targetPlayerId = String(expedition.targetPlayerId || defenderUserId || "").trim();
+  if (!targetPlayerId || targetPlayerId === String(attackerUserId || "").trim()) {
+    attackerExpeditions.splice(attackerIndex, 1);
+    attackerEconomy.resourceExpeditions = attackerExpeditions;
+    refreshResourceExpeditionLegacyMirror(attackerEconomy);
+    return { changed: true, attackerReport: null, defenderReport: null };
+  }
+
+  var targetCoords = {
+    x: sanitizePositiveInt(expedition.targetX || 0),
+    y: sanitizePositiveInt(expedition.targetY || 0)
+  };
+  if (targetCoords.x <= 0 || targetCoords.y <= 0) {
+    var resolvedTargetCoords = mapPlayerToPlanetCoordinates(targetPlayerId);
+    targetCoords.x = sanitizePositiveInt(resolvedTargetCoords.x || 0);
+    targetCoords.y = sanitizePositiveInt(resolvedTargetCoords.y || 0);
+    expedition.targetX = targetCoords.x;
+    expedition.targetY = targetCoords.y;
+  }
+
+  var attackerFleet = filterPositiveFleetRows(expedition.fleet);
+  if (attackerFleet.length <= 0) {
+    attackerExpeditions.splice(attackerIndex, 1);
+    attackerEconomy.resourceExpeditions = attackerExpeditions;
+    refreshResourceExpeditionLegacyMirror(attackerEconomy);
+    return { changed: true, attackerReport: null, defenderReport: null };
+  }
+
+  var defenderDockedFleet = serializeCombatInventory(defenderEconomy).map(function(row) {
+    return { unitId: String(row.unitId || ""), quantity: sanitizePositiveInt(row.quantity || 0) };
+  }).filter(function(row) { return row.unitId && row.quantity > 0; });
+  var defenderDefenses = serializeDefenseCombatInventory(defenderEconomy).map(function(row) {
+    return { unitId: String(row.unitId || ""), quantity: sanitizePositiveInt(row.quantity || 0) };
+  }).filter(function(row) { return row.unitId && row.quantity > 0; });
+
+  var battle = null;
+  var defenderRawDefenseLosses = {};
+  if (defenderDockedFleet.length > 0 || defenderDefenses.length > 0) {
+    battle = resolveFleetCombat(
+      attackerFleet,
+      defenderDockedFleet,
+      [],
+      defenderDefenses,
+      "planet|" + String(attackerUserId || "") + "|" + String(targetPlayerId || "") + "|" + String(serverNowTs || 0)
+    );
+    defenderRawDefenseLosses = applyLossDiff(defenderDefenses, battle.defenderDefenses);
+  } else {
+    battle = {
+      winner: "attacker",
+      rounds: [],
+      attackerShips: attackerFleet,
+      defenderShips: [],
+      attackerDefenses: [],
+      defenderDefenses: [],
+      attackerLosses: {},
+      defenderLosses: {},
+      attackerSummary: summarizeCombatRows(attackerFleet),
+      defenderSummary: { totalUnits: 0, totalForce: 0, totalEndurance: 0 },
+      attackerCanFight: true,
+      defenderCanFight: false
+    };
+  }
+
+  var softenedAttackerLosses = softenLossMap(attackerFleet, battle.attackerLosses, 0.72);
+  var softenedDefenderShipLosses = softenLossMap(defenderDockedFleet, battle.defenderLosses, 0.7);
+  var softenedDefenderDefenseLosses = softenLossMap(defenderDefenses, defenderRawDefenseLosses, 0.58);
+  var mergedDefenderLosses = mergeLossMaps(softenedDefenderShipLosses, softenedDefenderDefenseLosses);
+
+  applyFleetLossesToHangarInventory(attackerEconomy, softenedAttackerLosses);
+  applyFleetLossesToHangarInventory(defenderEconomy, mergedDefenderLosses);
+
+  var attackerSurvivors = applyLossMapToFleetRows(attackerFleet, softenedAttackerLosses);
+  var defenderShipSurvivors = applyLossMapToFleetRows(defenderDockedFleet, softenedDefenderShipLosses);
+  var defenderDefenseSurvivors = applyLossMapToFleetRows(defenderDefenses, softenedDefenderDefenseLosses);
+  var defenderCombinedFleet = mergeFleetRows(defenderDockedFleet, defenderDefenses);
+  var defenderCombinedSurvivors = mergeFleetRows(defenderShipSurvivors, defenderDefenseSurvivors);
+
+  var outcomeKey = battle.winner === "attacker" ? "attacker" : "defender";
+  var loot = outcomeKey === "attacker" ? computePlanetRaidLootResources(defenderEconomy, 0.6) : {};
+  var salvagedCredits = outcomeKey === "attacker" ? computeFleetLossCreditSalvage(softenedDefenderShipLosses) : 0;
+
+  if (attackerSurvivors.length <= 0) {
+    attackerExpeditions.splice(attackerIndex, 1);
+    attackerEconomy.resourceExpeditions = attackerExpeditions;
+    refreshResourceExpeditionLegacyMirror(attackerEconomy);
+  } else {
+    var attackerRuntime = summarizeCombatFleetRuntime(attackerSurvivors);
+    var attackerReturnTravelSeconds = calculateMapTravelSeconds(
+      attackerUserId,
+      targetCoords.x,
+      targetCoords.y,
+      attackerRuntime.averageSpeed || sanitizePositiveInt(expedition.mapSpeed || 0) || MAP_HARVEST_UNIT_STATS.pegase.mapSpeed
+    );
+    expedition.fleet = attackerSurvivors;
+    expedition.totalHarvestSpeed = 0;
+    expedition.totalTransportCapacity = Math.max(0, sanitizePositiveInt(attackerRuntime.totalLootCapacity || 0));
+    expedition.mapSpeed = Math.floor(attackerRuntime.averageSpeed || expedition.mapSpeed || MAP_HARVEST_UNIT_STATS.pegase.mapSpeed);
+    expedition.collectedResources = outcomeKey === "attacker" ? loot : {};
+    expedition.collectedCredits = outcomeKey === "attacker" ? salvagedCredits : 0;
+    expedition.dropItemId = "";
+    expedition.dropQuantity = 0;
+    expedition.status = "returning";
+    expedition.extractionStartAt = 0;
+    expedition.extractionEndAt = 0;
+    expedition.returnStartAt = serverNowTs;
+    expedition.returnEndAt = serverNowTs + attackerReturnTravelSeconds;
+    expedition.travelSeconds = attackerReturnTravelSeconds;
+    expedition.updatedAt = serverNowTs;
+    attackerExpeditions[attackerIndex] = expedition;
+    attackerEconomy.resourceExpeditions = attackerExpeditions;
+    refreshResourceExpeditionLegacyMirror(attackerEconomy);
+  }
+
+  var location = {
+    fieldId: "",
+    x: sanitizePositiveInt(targetCoords.x || 0),
+    y: sanitizePositiveInt(targetCoords.y || 0),
+    label: "Hyperstructure de " + String(defenderUsername || targetPlayerId) + " [" + sanitizePositiveInt(targetCoords.x || 0) + ", " + sanitizePositiveInt(targetCoords.y || 0) + "]"
+  };
+  var attackerSummaryText = outcomeKey === "attacker"
+    ? "Siege victorieux contre l'hyperstructure de " + String(defenderUsername || targetPlayerId) + "."
+    : "L'assaut contre l'hyperstructure de " + String(defenderUsername || targetPlayerId) + " a ete repousse.";
+  var defenderSummaryText = outcomeKey === "attacker"
+    ? "Votre hyperstructure a cede sous l'assaut de " + String(attackerUsername || attackerUserId) + "."
+    : "Votre hyperstructure a tenu face a l'assaut de " + String(attackerUsername || attackerUserId) + ".";
+
+  return {
+    changed: true,
+    attackerReport: {
+      title: "Rapport de siege #" + String(targetPlayerId || "").slice(0, 8).toUpperCase(),
+      summary:
+        attackerSummaryText +
+        "\nButin securise: " + formatResourceMapShort(loot) +
+        "\nCredits recuperes: " + formatCreditGainShort(salvagedCredits) +
+        "\nPertes attaquant: " + formatFleetLossMap(softenedAttackerLosses) +
+        "\nPertes defenseur: " + formatFleetLossMap(mergedDefenderLosses),
+      battleType: "planet_attack",
+      fieldId: "",
+      location: location,
+      attacker: { userId: attackerUserId, username: attackerUsername || attackerUserId, fleet: attackerFleet },
+      defender: { userId: targetPlayerId, username: defenderUsername || targetPlayerId, fleet: defenderCombinedFleet },
+      result: outcomeKey,
+      loot: loot,
+      lootCredits: salvagedCredits,
+      lootDelivery: "return",
+      protectedCargo: {},
+      losses: {
+        attacker: softenedAttackerLosses,
+        defender: mergedDefenderLosses
+      },
+      rounds: battle.rounds,
+      attackerSurvivors: attackerSurvivors,
+      defenderSurvivors: defenderCombinedSurvivors,
+      attackerSummary: summarizeCombatRows(attackerSurvivors),
+      defenderSummary: summarizeCombatRows(defenderCombinedSurvivors),
+      battleAt: serverNowTs
+    },
+    defenderReport: {
+      title: "Rapport de siege #" + String(targetPlayerId || "").slice(0, 8).toUpperCase(),
+      summary:
+        defenderSummaryText +
+        "\nRessources pillees: " + formatResourceMapShort(outcomeKey === "attacker" ? loot : {}) +
+        "\nCredits pilles: " + formatCreditGainShort(outcomeKey === "attacker" ? salvagedCredits : 0) +
+        "\nPertes defenseur: " + formatFleetLossMap(mergedDefenderLosses) +
+        "\nPertes attaquant: " + formatFleetLossMap(softenedAttackerLosses),
+      battleType: "planet_attack",
+      fieldId: "",
+      location: location,
+      attacker: { userId: attackerUserId, username: attackerUsername || attackerUserId, fleet: attackerFleet },
+      defender: { userId: targetPlayerId, username: defenderUsername || targetPlayerId, fleet: defenderCombinedFleet },
+      result: outcomeKey,
+      loot: outcomeKey === "attacker" ? loot : {},
+      lootCredits: outcomeKey === "attacker" ? salvagedCredits : 0,
+      lootDelivery: "return",
+      protectedCargo: {},
+      losses: {
+        attacker: softenedAttackerLosses,
+        defender: mergedDefenderLosses
+      },
+      rounds: battle.rounds,
+      attackerSurvivors: attackerSurvivors,
+      defenderSurvivors: defenderCombinedSurvivors,
+      attackerSummary: summarizeCombatRows(attackerSurvivors),
+      defenderSummary: summarizeCombatRows(defenderCombinedSurvivors),
+      battleAt: serverNowTs
+    }
+  };
+}
+
+function loadMapOwnerStateForMaintenance(nk, ownerStateById, ownerId, usernameHint, ts) {
+  var userId = String(ownerId || "").trim();
+  if (!userId) return null;
+  if (ownerStateById[userId]) return ownerStateById[userId];
+  var read = nk.storageRead([
+    { collection: ECONOMY_COLLECTION, key: ECONOMY_KEY, userId: userId },
+    { collection: INVENTORY_COLLECTION, key: INVENTORY_KEY, userId: userId }
+  ]) || [];
+  var economyRead = read[0] || {};
+  var inventoryRead = read[1] || {};
+  var ownerEconomy = ensureEconomyState(economyRead.value || defaultEconomyState());
+  var ownerInventory = normalizeInventory(inventoryRead.value || defaultInventoryState(userId), userId);
+  ensureHangarState(ownerEconomy);
+  ensureResourceExpeditionState(ownerEconomy);
+  var state = {
+    userId: userId,
+    username: String(usernameHint || ownerEconomy.username || userId).trim() || userId,
+    economy: applyOfflineProduction(ownerEconomy, ts),
+    inventory: cloneInventory(ownerInventory),
+    economyVersion: String(economyRead.version || ""),
+    inventoryVersion: String(inventoryRead.version || ""),
+    dirty: false
+  };
+  ownerStateById[userId] = state;
+  return state;
+}
+
 function withMapTransaction(nk, userId, username, update, logger, traceTag) {
   var lastError = "failed";
   for (var attempt = 0; attempt < MAP_WRITE_RETRIES; attempt++) {
@@ -4005,24 +4644,46 @@ function runMapWorldMaintenance(nk, logger, maxOwners) {
           if (String(attackExpedition.status || "").trim().toLowerCase() !== "travel_to_field") continue;
           if (ts < sanitizePositiveInt(Number(attackExpedition.arrivalAt || 0))) continue;
 
-          var liveField = findMapField(mapState, String(attackExpedition.fieldId || ""));
+          var targetKind = getMapAttackTargetKind(attackExpedition);
+          var liveField = targetKind === "field" ? findMapField(mapState, String(attackExpedition.fieldId || "")) : null;
           var defenderOwnerId = String(
-            (liveField && liveField.occupiedByPlayerId) ||
-            attackExpedition.targetPlayerId ||
-            ""
+            targetKind === "planet"
+              ? (attackExpedition.targetPlayerId || "")
+              : ((liveField && liveField.occupiedByPlayerId) || attackExpedition.targetPlayerId || "")
           ).trim();
           var defenderOwnerState = defenderOwnerId ? ownerStateById[defenderOwnerId] : null;
-          var impactResult = resolveAttackExpeditionImpact(
-            attackOwnerState.economy,
-            defenderOwnerState ? defenderOwnerState.economy : defaultEconomyState(),
-            mapState,
-            attackOwnerId,
-            attackOwnerState.username,
-            defenderOwnerId,
-            defenderOwnerState ? defenderOwnerState.username : defenderOwnerId,
-            attackExpedition,
-            ts
-          );
+          if (!defenderOwnerState && defenderOwnerId) {
+            defenderOwnerState = loadMapOwnerStateForMaintenance(
+              nk,
+              ownerStateById,
+              defenderOwnerId,
+              String(attackExpedition.targetUsername || defenderOwnerId),
+              ts
+            );
+            if (defenderOwnerState && ownerIds.indexOf(defenderOwnerId) < 0) ownerIds.push(defenderOwnerId);
+          }
+          var impactResult = targetKind === "planet"
+            ? resolvePlanetAttackExpeditionImpact(
+                attackOwnerState.economy,
+                defenderOwnerState ? defenderOwnerState.economy : defaultEconomyState(),
+                attackOwnerId,
+                attackOwnerState.username,
+                defenderOwnerId,
+                defenderOwnerState ? defenderOwnerState.username : defenderOwnerId,
+                attackExpedition,
+                ts
+              )
+            : resolveAttackExpeditionImpact(
+                attackOwnerState.economy,
+                defenderOwnerState ? defenderOwnerState.economy : defaultEconomyState(),
+                mapState,
+                attackOwnerId,
+                attackOwnerState.username,
+                defenderOwnerId,
+                defenderOwnerState ? defenderOwnerState.username : defenderOwnerId,
+                attackExpedition,
+                ts
+              );
           if (!impactResult || !impactResult.changed) continue;
           attackOwnerState.dirty = true;
           if (defenderOwnerState) defenderOwnerState.dirty = true;
@@ -4131,7 +4792,10 @@ function ensureHangarState(state) {
     })
     .map(function(entry) {
       var def = HANGAR_UNIT_DEFS[entry.unitId];
-      var safeQty = Math.max(1, sanitizePositiveInt(entry.quantity));
+      var safeTotalQty = Math.max(1, sanitizePositiveInt(entry.totalQuantity || entry.quantity));
+      var safeCompletedQty = Math.max(0, Math.min(safeTotalQty, sanitizePositiveInt(entry.completedQuantity || 0)));
+      var fallbackRemaining = Math.max(0, safeTotalQty - safeCompletedQty);
+      var safeQty = Math.max(0, Math.min(fallbackRemaining, sanitizePositiveInt(entry.quantity || fallbackRemaining)));
       var safeStart = Math.floor(entry.startAt);
       var duration = Math.max(1, Math.floor((entry.endAt || (safeStart + def.buildSeconds)) - safeStart));
       var batchCost = {};
@@ -4147,6 +4811,8 @@ function ensureHangarState(state) {
         unitId: entry.unitId,
         category: def.category,
         quantity: safeQty,
+        totalQuantity: safeTotalQty,
+        completedQuantity: safeCompletedQty,
         startAt: safeStart,
         endAt: safeStart + duration,
         batchCost: batchCost
@@ -4268,17 +4934,66 @@ function scaleResourceCost(base, quantity) {
 }
 
 function completeHangarQueue(state, serverNowTs) {
-  ensureHangarState(state);
-  while (state.hangarQueue.length > 0 && state.hangarQueue[0].endAt <= serverNowTs) {
-    var completed = state.hangarQueue.shift();
-    state.hangarInventory[completed.unitId] = (state.hangarInventory[completed.unitId] || 0) + completed.quantity;
-  }
+  settleHangarQueueProgress(state, serverNowTs);
   return state;
+}
+
+function settleHangarQueueProgress(state, serverNowTs) {
+  ensureHangarState(state);
+  var producedUnits = {};
+  var changed = false;
+  var queue = Array.isArray(state.hangarQueue) ? state.hangarQueue : [];
+
+  for (var i = 0; i < queue.length; i++) {
+    var entry = queue[i];
+    var def = HANGAR_UNIT_DEFS[entry.unitId];
+    if (!def) continue;
+    var totalQuantity = Math.max(1, sanitizePositiveInt(entry.totalQuantity || entry.quantity || 1));
+    var completedQuantity = Math.max(0, Math.min(totalQuantity, sanitizePositiveInt(entry.completedQuantity || 0)));
+    var producedByNow = 0;
+    if (serverNowTs >= entry.endAt) {
+      producedByNow = totalQuantity;
+    } else if (serverNowTs > entry.startAt) {
+      producedByNow = Math.min(totalQuantity, Math.floor((serverNowTs - entry.startAt) / Math.max(1, sanitizePositiveInt(def.buildSeconds || 1))));
+    }
+
+    var delta = Math.max(0, producedByNow - completedQuantity);
+    if (delta > 0) {
+      state.hangarInventory[entry.unitId] = sanitizePositiveInt(state.hangarInventory[entry.unitId] || 0) + delta;
+      producedUnits[entry.unitId] = sanitizePositiveInt(producedUnits[entry.unitId] || 0) + delta;
+      completedQuantity += delta;
+      changed = true;
+    }
+
+    var remainingQuantity = Math.max(0, totalQuantity - completedQuantity);
+    if (
+      entry.totalQuantity !== totalQuantity ||
+      entry.completedQuantity !== completedQuantity ||
+      entry.quantity !== remainingQuantity
+    ) {
+      entry.totalQuantity = totalQuantity;
+      entry.completedQuantity = completedQuantity;
+      entry.quantity = remainingQuantity;
+      changed = true;
+    }
+  }
+
+  var nextQueue = [];
+  for (var j = 0; j < queue.length; j++) {
+    var current = queue[j];
+    if (sanitizePositiveInt(current.quantity || 0) > 0) nextQueue.push(current);
+    else changed = true;
+  }
+  state.hangarQueue = nextQueue;
+  return {
+    changed: changed,
+    producedUnits: producedUnits
+  };
 }
 
 function startHangarProduction(state, unitId, quantity, serverNowTs) {
   ensureHangarState(state);
-  completeHangarQueue(state, serverNowTs);
+  settleHangarQueueProgress(state, serverNowTs);
   if (state.hangarQueue.length >= HANGAR_QUEUE_MAX) throw new Error("Hangar queue limit reached (" + HANGAR_QUEUE_MAX + ").");
 
   var def = HANGAR_UNIT_DEFS[unitId];
@@ -4306,6 +5021,8 @@ function startHangarProduction(state, unitId, quantity, serverNowTs) {
     unitId: unitId,
     category: def.category,
     quantity: safeQuantity,
+    totalQuantity: safeQuantity,
+    completedQuantity: 0,
     startAt: startAt,
     endAt: startAt + duration,
     batchCost: batchCost
@@ -4315,7 +5032,7 @@ function startHangarProduction(state, unitId, quantity, serverNowTs) {
 
 function cancelHangarProduction(state, queueId, serverNowTs) {
   ensureHangarState(state);
-  completeHangarQueue(state, serverNowTs);
+  settleHangarQueueProgress(state, serverNowTs);
   if (state.hangarQueue.length === 0) throw new Error("No active hangar production.");
 
   var idx = 0;
@@ -4325,10 +5042,14 @@ function cancelHangarProduction(state, queueId, serverNowTs) {
   if (idx < 0) throw new Error("Hangar queue item not found.");
 
   var canceled = state.hangarQueue[idx];
-  var keys = Object.keys(canceled.batchCost || {});
+  var canceledDef = HANGAR_UNIT_DEFS[canceled.unitId];
+  var refundCost = canceledDef
+    ? scaleResourceCost(canceledDef.cost, sanitizePositiveInt(canceled.quantity || 0))
+    : Object.assign({}, canceled.batchCost || {});
+  var keys = Object.keys(refundCost || {});
   for (var i = 0; i < keys.length; i++) {
     var rid = keys[i];
-    state.resources[rid].amount += canceled.batchCost[rid] || 0;
+    state.resources[rid].amount += refundCost[rid] || 0;
   }
   state.hangarQueue.splice(idx, 1);
 
@@ -4373,6 +5094,8 @@ function serializeHangarState(state, serverNowTs) {
       unitId: entry.unitId,
       category: entry.category,
       quantity: entry.quantity,
+      totalQuantity: entry.totalQuantity || entry.quantity,
+      completedQuantity: entry.completedQuantity || 0,
       startAt: entry.startAt,
       endAt: entry.endAt,
       batchCost: Object.assign({}, entry.batchCost)
@@ -5418,7 +6141,7 @@ function readAllianceCompositeState(nk, allianceId) {
   if (alliance) {
     var ts = nowTs();
     cleanAllianceInvites(alliance, ts);
-    cleanAllianceApplications(alliance, ts);
+    hydrateAllianceApplicationsFromProfiles(nk, alliance, ts);
     alliance.logs = Array.isArray(alliance.logs) ? alliance.logs : [];
     ensureAllianceStrategicState(alliance, ts);
   }
@@ -5443,6 +6166,2004 @@ function makeStorageWriteReq(collection, key, userId, value, expectedVersion, pe
   if (expectedVersion) req.version = expectedVersion;
   return req;
 }
+
+function marketBookKey(marketType, resourceType, allianceId) {
+  var type = String(marketType || MARKET_TYPE_PUBLIC).trim().toLowerCase();
+  var resourceId = String(resourceType || "").trim().toLowerCase();
+  var alliancePart = type === MARKET_TYPE_ALLIANCE ? String(allianceId || "").trim().toLowerCase() : "global";
+  return MARKET_BOOK_PREFIX + type + "::" + alliancePart + "::" + resourceId;
+}
+
+function marketScaledToCredits(value) {
+  return Math.max(0, Math.floor(Number(value || 0))) / MARKET_CREDIT_SCALE;
+}
+
+function marketCreditsToScaled(value) {
+  return Math.max(0, Math.round(Number(value || 0) * MARKET_CREDIT_SCALE));
+}
+
+function marketBundleSize(resourceId) {
+  return Math.max(1, sanitizePositiveInt(MARKET_PRICE_BUNDLE_SIZE[String(resourceId || "").trim()] || 1));
+}
+
+function marketReferencePriceCredits(resourceId) {
+  var rarity = Math.max(1, sanitizePositiveInt(RESOURCE_RARITY[String(resourceId || "").trim()] || 10));
+  return Math.max(1, Math.round((rarity * rarity) / 8));
+}
+
+function marketReferenceUnitPrice(resourceId) {
+  var bundleSize = marketBundleSize(resourceId);
+  return Math.max(1, Math.round((marketReferencePriceCredits(resourceId) * MARKET_CREDIT_SCALE) / bundleSize));
+}
+
+function marketOrderLimitConfig(resourceId) {
+  return MARKET_ORDER_LIMITS[String(resourceId || "").trim()] || { min: 1, max: 1000000 };
+}
+
+function marketFeeConfig(marketType) {
+  return MARKET_FEE_CONFIG[String(marketType || MARKET_TYPE_PUBLIC).trim().toLowerCase()] || MARKET_FEE_CONFIG.public;
+}
+
+function marketComputeBpsAmount(baseValue, bps) {
+  var base = Math.max(0, Math.floor(Number(baseValue || 0)));
+  var points = Math.max(0, Math.floor(Number(bps || 0)));
+  if (base <= 0 || points <= 0) return 0;
+  return Math.max(0, Math.floor((base * points) / 10000));
+}
+
+function marketSupportsType(bourseLevel, marketType) {
+  var level = Math.max(0, sanitizePositiveInt(Number(bourseLevel || 0)));
+  var type = String(marketType || MARKET_TYPE_PUBLIC).trim().toLowerCase();
+  if (type === MARKET_TYPE_PUBLIC) return level >= 1;
+  if (type === MARKET_TYPE_PRIVATE) return level >= 3;
+  if (type === MARKET_TYPE_ALLIANCE) return level >= 8;
+  return false;
+}
+
+function marketOrderCapForBourseLevel(level) {
+  var safe = Math.max(0, sanitizePositiveInt(Number(level || 0)));
+  for (var i = 0; i < MARKET_BUILDING_LEVEL_ORDER_CAPS.length; i++) {
+    var row = MARKET_BUILDING_LEVEL_ORDER_CAPS[i];
+    if (safe >= row.minLevel) return row.cap;
+  }
+  return 0;
+}
+
+function marketHistoryEnabled(bourseLevel) {
+  return Math.max(0, sanitizePositiveInt(Number(bourseLevel || 0))) >= 10;
+}
+
+function marketAlertsEnabled(bourseLevel) {
+  return Math.max(0, sanitizePositiveInt(Number(bourseLevel || 0))) >= 10;
+}
+
+function createEmptyReservedResourceMap() {
+  var out = {};
+  for (var i = 0; i < RESOURCE_IDS.length; i++) out[RESOURCE_IDS[i]] = 0;
+  return out;
+}
+
+function normalizeMarketReservedResourceMap(raw) {
+  var source = raw && typeof raw === "object" ? raw : {};
+  var out = {};
+  for (var i = 0; i < RESOURCE_IDS.length; i++) {
+    var rid = RESOURCE_IDS[i];
+    out[rid] = Math.max(0, Math.floor(Number(source[rid] || 0)));
+  }
+  return out;
+}
+
+function defaultMarketProfileState(userId) {
+  return {
+    userId: String(userId || ""),
+    activeOrders: [],
+    recentOrders: [],
+    recentTrades: [],
+    totalBoughtScaled: 0,
+    totalSoldScaled: 0,
+    totalFeesPaidScaled: 0,
+    totalTradeVolumeScaled: 0,
+    totalBoughtUnits: {},
+    totalSoldUnits: {},
+    updatedAt: nowTs()
+  };
+}
+
+function normalizeMarketOrderSummary(raw) {
+  if (!raw || typeof raw !== "object") return null;
+  var orderId = String(raw.id || raw.orderId || "").trim();
+  if (!orderId) return null;
+  var resourceType = String(raw.resourceType || "").trim();
+  var marketType = String(raw.marketType || MARKET_TYPE_PUBLIC).trim().toLowerCase();
+  var side = String(raw.orderType || raw.side || MARKET_ORDER_SIDE_BUY).trim().toLowerCase();
+  return {
+    id: orderId,
+    orderType: side === MARKET_ORDER_SIDE_SELL ? MARKET_ORDER_SIDE_SELL : MARKET_ORDER_SIDE_BUY,
+    marketType: marketType,
+    status: String(raw.status || MARKET_ORDER_STATUS_OPEN).trim().toLowerCase(),
+    resourceType: resourceType,
+    allianceId: String(raw.allianceId || "").trim(),
+    targetPlayerId: String(raw.targetPlayerId || "").trim(),
+    targetUsername: String(raw.targetUsername || "").trim(),
+    unitPrice: Math.max(0, Math.floor(Number(raw.unitPrice || 0))),
+    totalQuantity: Math.max(0, Math.floor(Number(raw.totalQuantity || 0))),
+    remainingQuantity: Math.max(0, Math.floor(Number(raw.remainingQuantity || 0))),
+    createdAt: Math.max(0, Math.floor(Number(raw.createdAt || 0))),
+    updatedAt: Math.max(0, Math.floor(Number(raw.updatedAt || 0))),
+    expiresAt: Math.max(0, Math.floor(Number(raw.expiresAt || 0)))
+  };
+}
+
+function normalizeMarketTradeSummary(raw) {
+  if (!raw || typeof raw !== "object") return null;
+  var tradeId = String(raw.id || "").trim();
+  if (!tradeId) return null;
+  return {
+    id: tradeId,
+    marketType: String(raw.marketType || MARKET_TYPE_PUBLIC).trim().toLowerCase(),
+    allianceId: String(raw.allianceId || "").trim(),
+    resourceType: String(raw.resourceType || "").trim(),
+    quantity: Math.max(0, Math.floor(Number(raw.quantity || 0))),
+    unitPrice: Math.max(0, Math.floor(Number(raw.unitPrice || 0))),
+    totalPrice: Math.max(0, Math.floor(Number(raw.totalPrice || 0))),
+    taxAmount: Math.max(0, Math.floor(Number(raw.taxAmount || 0))),
+    createdAt: Math.max(0, Math.floor(Number(raw.createdAt || 0))),
+    buyerPlayerId: String(raw.buyerPlayerId || "").trim(),
+    buyerUsername: String(raw.buyerUsername || "").trim(),
+    sellerPlayerId: String(raw.sellerPlayerId || "").trim(),
+    sellerUsername: String(raw.sellerUsername || "").trim()
+  };
+}
+
+function normalizeMarketProfileState(raw, userId) {
+  var source = raw && typeof raw === "object" ? raw : {};
+  var next = defaultMarketProfileState(userId);
+  next.activeOrders = Array.isArray(source.activeOrders) ? source.activeOrders.map(normalizeMarketOrderSummary).filter(Boolean) : [];
+  next.recentOrders = Array.isArray(source.recentOrders) ? source.recentOrders.map(normalizeMarketOrderSummary).filter(Boolean).slice(0, MARKET_RECENT_ORDERS_KEEP) : [];
+  next.recentTrades = Array.isArray(source.recentTrades) ? source.recentTrades.map(normalizeMarketTradeSummary).filter(Boolean).slice(0, MARKET_RECENT_TRADES_KEEP) : [];
+  next.totalBoughtScaled = Math.max(0, Math.floor(Number(source.totalBoughtScaled || 0)));
+  next.totalSoldScaled = Math.max(0, Math.floor(Number(source.totalSoldScaled || 0)));
+  next.totalFeesPaidScaled = Math.max(0, Math.floor(Number(source.totalFeesPaidScaled || 0)));
+  next.totalTradeVolumeScaled = Math.max(0, Math.floor(Number(source.totalTradeVolumeScaled || 0)));
+  next.totalBoughtUnits = sanitizeResourceCostMap(source.totalBoughtUnits);
+  next.totalSoldUnits = sanitizeResourceCostMap(source.totalSoldUnits);
+  next.updatedAt = Math.max(0, Math.floor(Number(source.updatedAt || nowTs())));
+  return next;
+}
+
+function readMarketProfile(nk, userId) {
+  var read = nk.storageRead([{ collection: MARKET_COLLECTION, key: MARKET_PROFILE_KEY, userId: userId }]);
+  if (!read || read.length === 0) return { state: defaultMarketProfileState(userId), version: "" };
+  return { state: normalizeMarketProfileState(read[0].value, userId), version: read[0].version || "" };
+}
+
+function defaultMarketAlertsState(userId) {
+  return { userId: String(userId || ""), alerts: [], updatedAt: nowTs() };
+}
+
+function normalizeMarketAlert(raw) {
+  if (!raw || typeof raw !== "object") return null;
+  var resourceType = String(raw.resourceType || "").trim();
+  if (RESOURCE_IDS.indexOf(resourceType) === -1) return null;
+  var conditionType = String(raw.conditionType || "").trim().toLowerCase();
+  if (conditionType !== MARKET_PRICE_ALERT_ABOVE && conditionType !== MARKET_PRICE_ALERT_BELOW) return null;
+  var alertId = String(raw.id || "").trim();
+  if (!alertId) return null;
+  return {
+    id: alertId,
+    resourceType: resourceType,
+    conditionType: conditionType,
+    targetPrice: Math.max(1, Math.floor(Number(raw.targetPrice || 0))),
+    isActive: raw.isActive !== false,
+    createdAt: Math.max(0, Math.floor(Number(raw.createdAt || nowTs())))
+  };
+}
+
+function normalizeMarketAlertsState(raw, userId) {
+  var source = raw && typeof raw === "object" ? raw : {};
+  var next = defaultMarketAlertsState(userId);
+  next.alerts = Array.isArray(source.alerts) ? source.alerts.map(normalizeMarketAlert).filter(Boolean).slice(0, MARKET_ALERT_MAX_PER_PLAYER) : [];
+  next.updatedAt = Math.max(0, Math.floor(Number(source.updatedAt || nowTs())));
+  return next;
+}
+
+function readMarketAlertsState(nk, userId) {
+  var read = nk.storageRead([{ collection: MARKET_COLLECTION, key: MARKET_ALERTS_KEY, userId: userId }]);
+  if (!read || read.length === 0) return { state: defaultMarketAlertsState(userId), version: "" };
+  return { state: normalizeMarketAlertsState(read[0].value, userId), version: read[0].version || "" };
+}
+
+function defaultMarketPrivateIndexState(userId) {
+  return { userId: String(userId || ""), contracts: [], updatedAt: nowTs() };
+}
+
+function normalizeMarketPrivateContractPreview(raw) {
+  if (!raw || typeof raw !== "object") return null;
+  var contractId = String(raw.id || "").trim();
+  if (!contractId) return null;
+  return {
+    id: contractId,
+    status: String(raw.status || MARKET_ORDER_STATUS_OPEN).trim().toLowerCase(),
+    orderType: String(raw.orderType || MARKET_ORDER_SIDE_SELL).trim().toLowerCase(),
+    resourceType: String(raw.resourceType || "").trim(),
+    quantity: Math.max(0, Math.floor(Number(raw.quantity || raw.totalQuantity || 0))),
+    remainingQuantity: Math.max(0, Math.floor(Number(raw.remainingQuantity || raw.quantity || 0))),
+    unitPrice: Math.max(0, Math.floor(Number(raw.unitPrice || 0))),
+    actorPlayerId: String(raw.actorPlayerId || "").trim(),
+    actorUsername: String(raw.actorUsername || "").trim(),
+    targetPlayerId: String(raw.targetPlayerId || "").trim(),
+    targetUsername: String(raw.targetUsername || "").trim(),
+    expiresAt: Math.max(0, Math.floor(Number(raw.expiresAt || 0))),
+    createdAt: Math.max(0, Math.floor(Number(raw.createdAt || 0))),
+    updatedAt: Math.max(0, Math.floor(Number(raw.updatedAt || 0)))
+  };
+}
+
+function normalizeMarketPrivateIndexState(raw, userId) {
+  var source = raw && typeof raw === "object" ? raw : {};
+  var next = defaultMarketPrivateIndexState(userId);
+  next.contracts = Array.isArray(source.contracts) ? source.contracts.map(normalizeMarketPrivateContractPreview).filter(Boolean).slice(0, 120) : [];
+  next.updatedAt = Math.max(0, Math.floor(Number(source.updatedAt || nowTs())));
+  return next;
+}
+
+function readMarketPrivateIndexState(nk, userId) {
+  var read = nk.storageRead([{ collection: MARKET_COLLECTION, key: MARKET_PRIVATE_INDEX_KEY, userId: userId }]);
+  if (!read || read.length === 0) return { state: defaultMarketPrivateIndexState(userId), version: "" };
+  return { state: normalizeMarketPrivateIndexState(read[0].value, userId), version: read[0].version || "" };
+}
+
+function defaultMarketBookState(marketType, resourceType, allianceId) {
+  return {
+    marketKey: marketBookKey(marketType, resourceType, allianceId),
+    marketType: String(marketType || MARKET_TYPE_PUBLIC).trim().toLowerCase(),
+    allianceId: String(allianceId || "").trim(),
+    resourceType: String(resourceType || "").trim(),
+    buyOrders: [],
+    sellOrders: [],
+    recentTrades: [],
+    snapshots: [],
+    updatedAt: nowTs(),
+    version: 1
+  };
+}
+
+function normalizeMarketOrder(raw) {
+  if (!raw || typeof raw !== "object") return null;
+  var id = String(raw.id || "").trim();
+  if (!id) return null;
+  var orderType = String(raw.orderType || raw.side || MARKET_ORDER_SIDE_BUY).trim().toLowerCase();
+  var marketType = String(raw.marketType || MARKET_TYPE_PUBLIC).trim().toLowerCase();
+  var resourceType = String(raw.resourceType || "").trim();
+  if (RESOURCE_IDS.indexOf(resourceType) === -1) return null;
+  var status = String(raw.status || MARKET_ORDER_STATUS_OPEN).trim().toLowerCase();
+  return {
+    id: id,
+    orderType: orderType === MARKET_ORDER_SIDE_SELL ? MARKET_ORDER_SIDE_SELL : MARKET_ORDER_SIDE_BUY,
+    marketType: marketType,
+    status: status,
+    sellerPlayerId: String(raw.sellerPlayerId || "").trim(),
+    sellerUsername: String(raw.sellerUsername || "").trim(),
+    buyerPlayerId: String(raw.buyerPlayerId || "").trim(),
+    buyerUsername: String(raw.buyerUsername || "").trim(),
+    targetPlayerId: String(raw.targetPlayerId || "").trim(),
+    targetUsername: String(raw.targetUsername || "").trim(),
+    allianceId: String(raw.allianceId || "").trim(),
+    resourceType: resourceType,
+    unitPrice: Math.max(1, Math.floor(Number(raw.unitPrice || 0))),
+    totalQuantity: Math.max(1, Math.floor(Number(raw.totalQuantity || 0))),
+    remainingQuantity: Math.max(0, Math.floor(Number(raw.remainingQuantity || raw.totalQuantity || 0))),
+    reservedCredits: Math.max(0, Math.floor(Number(raw.reservedCredits || 0))),
+    reservedResources: Math.max(0, Math.floor(Number(raw.reservedResources || 0))),
+    listingFeePaid: Math.max(0, Math.floor(Number(raw.listingFeePaid || 0))),
+    listingFeeRemaining: Math.max(0, Math.floor(Number(raw.listingFeeRemaining || 0))),
+    taxRateBps: Math.max(0, Math.floor(Number(raw.taxRateBps || marketFeeConfig(marketType).taxBps || 0))),
+    cancelFeeBps: Math.max(0, Math.floor(Number(raw.cancelFeeBps || marketFeeConfig(marketType).cancelFeeBps || 0))),
+    createdAt: Math.max(0, Math.floor(Number(raw.createdAt || 0))),
+    updatedAt: Math.max(0, Math.floor(Number(raw.updatedAt || 0))),
+    openedAt: Math.max(0, Math.floor(Number(raw.openedAt || raw.createdAt || 0))),
+    expiresAt: Math.max(0, Math.floor(Number(raw.expiresAt || 0))),
+    filledAt: Math.max(0, Math.floor(Number(raw.filledAt || 0))),
+    cancelledAt: Math.max(0, Math.floor(Number(raw.cancelledAt || 0))),
+    sourceBuildingLevel: Math.max(0, Math.floor(Number(raw.sourceBuildingLevel || 0))),
+    deliveryMode: String(raw.deliveryMode || MARKET_DELIVERY_MODE_INSTANT).trim().toLowerCase(),
+    metadata: raw.metadata && typeof raw.metadata === "object" ? raw.metadata : {},
+    riskScore: Math.max(0, Math.floor(Number(raw.riskScore || 0)))
+  };
+}
+
+function normalizeMarketTrade(raw) {
+  var summary = normalizeMarketTradeSummary(raw);
+  if (!summary) return null;
+  summary.buyOrderId = String(raw.buyOrderId || "").trim();
+  summary.sellOrderId = String(raw.sellOrderId || "").trim();
+  summary.metadata = raw.metadata && typeof raw.metadata === "object" ? raw.metadata : {};
+  return summary;
+}
+
+function sortMarketOrders(list, side) {
+  list.sort(function(a, b) {
+    var priceA = Math.max(0, Math.floor(Number(a.unitPrice || 0)));
+    var priceB = Math.max(0, Math.floor(Number(b.unitPrice || 0)));
+    if (side === MARKET_ORDER_SIDE_BUY) {
+      if (priceB !== priceA) return priceB - priceA;
+    } else {
+      if (priceA !== priceB) return priceA - priceB;
+    }
+    var timeA = Math.max(0, Math.floor(Number(a.createdAt || 0)));
+    var timeB = Math.max(0, Math.floor(Number(b.createdAt || 0)));
+    if (timeA !== timeB) return timeA - timeB;
+    return String(a.id || "").localeCompare(String(b.id || ""));
+  });
+  return list;
+}
+
+function normalizeMarketBookState(raw, marketType, resourceType, allianceId) {
+  var source = raw && typeof raw === "object" ? raw : {};
+  var next = defaultMarketBookState(marketType, resourceType, allianceId);
+  next.buyOrders = Array.isArray(source.buyOrders) ? source.buyOrders.map(normalizeMarketOrder).filter(Boolean) : [];
+  next.sellOrders = Array.isArray(source.sellOrders) ? source.sellOrders.map(normalizeMarketOrder).filter(Boolean) : [];
+  sortMarketOrders(next.buyOrders, MARKET_ORDER_SIDE_BUY);
+  sortMarketOrders(next.sellOrders, MARKET_ORDER_SIDE_SELL);
+  next.recentTrades = Array.isArray(source.recentTrades) ? source.recentTrades.map(normalizeMarketTrade).filter(Boolean).slice(0, MARKET_RECENT_TRADES_KEEP) : [];
+  next.snapshots = Array.isArray(source.snapshots)
+    ? source.snapshots
+        .map(function(row) {
+          if (!row || typeof row !== "object") return null;
+          return {
+            bucketStartAt: Math.max(0, Math.floor(Number(row.bucketStartAt || 0))),
+            openPrice: Math.max(0, Math.floor(Number(row.openPrice || 0))),
+            highPrice: Math.max(0, Math.floor(Number(row.highPrice || 0))),
+            lowPrice: Math.max(0, Math.floor(Number(row.lowPrice || 0))),
+            closePrice: Math.max(0, Math.floor(Number(row.closePrice || 0))),
+            tradedVolume: Math.max(0, Math.floor(Number(row.tradedVolume || 0))),
+            tradeCount: Math.max(0, Math.floor(Number(row.tradeCount || 0)))
+          };
+        })
+        .filter(Boolean)
+        .slice(0, MARKET_HISTORY_BUCKET_KEEP)
+    : [];
+  next.updatedAt = Math.max(0, Math.floor(Number(source.updatedAt || nowTs())));
+  next.version = Math.max(1, Math.floor(Number(source.version || 1)));
+  return next;
+}
+
+function readMarketBook(nk, marketType, resourceType, allianceId) {
+  var key = marketBookKey(marketType, resourceType, allianceId);
+  var read = readStorageObject(nk, MARKET_COLLECTION, key, "");
+  return {
+    state: normalizeMarketBookState(read.state, marketType, resourceType, allianceId),
+    version: read.version || "",
+    key: key
+  };
+}
+
+function readMarketContractState(nk, contractId) {
+  var key = MARKET_PRIVATE_PREFIX + String(contractId || "").trim();
+  var read = readStorageObject(nk, MARKET_COLLECTION, key, "");
+  return { state: normalizeMarketOrder(read.state), version: read.version || "", key: key };
+}
+
+function marketOwnerUserId(order) {
+  if (!order) return "";
+  return order.orderType === MARKET_ORDER_SIDE_BUY ? String(order.buyerPlayerId || "") : String(order.sellerPlayerId || "");
+}
+
+function marketOwnerUsername(order) {
+  if (!order) return "";
+  return order.orderType === MARKET_ORDER_SIDE_BUY ? String(order.buyerUsername || "") : String(order.sellerUsername || "");
+}
+
+function marketResourceUnlockedForPlayer(economy, rankingProgress, resourceId) {
+  var rid = String(resourceId || "").trim();
+  if (rid === "carbone" || rid === "titane") return true;
+  var ecoLevel = Math.max(0, sanitizePositiveInt(((economy && economy.buildings && economy.buildings[rid]) || {}).level || 0));
+  if (ecoLevel > 0) return true;
+  var progressLevel = Math.max(0, sanitizePositiveInt(((rankingProgress && rankingProgress.roomLevels) || {})[rid] || 0));
+  if (progressLevel > 0) return true;
+  var amount = Math.max(0, Math.floor(Number(((economy && economy.resources && economy.resources[rid]) || {}).amount || 0)));
+  return amount > 0;
+}
+
+function marketBourseLevelForPlayer(economy, rankingProgress) {
+  var ecoLevel = Math.max(0, sanitizePositiveInt(((economy && economy.buildings && economy.buildings.bourse_orbitale) || {}).level || 0));
+  var progressLevel = Math.max(0, sanitizePositiveInt(((rankingProgress && rankingProgress.roomLevels) || {}).bourse_orbitale || 0));
+  return Math.max(ecoLevel, progressLevel);
+}
+
+function marketCurrentMedianUnitPrice(book, resourceId) {
+  var trades = Array.isArray(book && book.recentTrades) ? book.recentTrades : [];
+  var points = [];
+  for (var i = 0; i < trades.length; i++) {
+    var trade = trades[i];
+    if (!trade || trade.resourceType !== resourceId) continue;
+    if (trade.unitPrice > 0) points.push(trade.unitPrice);
+  }
+  if (points.length <= 0) {
+    var snapshots = Array.isArray(book && book.snapshots) ? book.snapshots : [];
+    for (var j = 0; j < snapshots.length; j++) {
+      var closePrice = Math.max(0, Math.floor(Number(snapshots[j] && snapshots[j].closePrice || 0)));
+      if (closePrice > 0) points.push(closePrice);
+    }
+  }
+  if (points.length <= 0) return marketReferenceUnitPrice(resourceId);
+  points.sort(function(a, b) { return a - b; });
+  return points[Math.floor(points.length / 2)] || marketReferenceUnitPrice(resourceId);
+}
+
+function marketCreateSnapshotBucket(trade, bucketStartAt) {
+  return {
+    bucketStartAt: bucketStartAt,
+    openPrice: trade.unitPrice,
+    highPrice: trade.unitPrice,
+    lowPrice: trade.unitPrice,
+    closePrice: trade.unitPrice,
+    tradedVolume: trade.quantity,
+    tradeCount: 1
+  };
+}
+
+function marketApplyTradeToSnapshots(book, trade) {
+  if (!trade) return;
+  if (!Array.isArray(book.snapshots)) book.snapshots = [];
+  var bucketStartAt = Math.floor(Math.max(0, trade.createdAt || nowTs()) / MARKET_HISTORY_BUCKET_SEC) * MARKET_HISTORY_BUCKET_SEC;
+  var bucket = null;
+  for (var i = 0; i < book.snapshots.length; i++) {
+    if (Number(book.snapshots[i].bucketStartAt || 0) === bucketStartAt) {
+      bucket = book.snapshots[i];
+      break;
+    }
+  }
+  if (!bucket) {
+    bucket = marketCreateSnapshotBucket(trade, bucketStartAt);
+    book.snapshots.push(bucket);
+  } else {
+    bucket.highPrice = Math.max(bucket.highPrice, trade.unitPrice);
+    bucket.lowPrice = bucket.lowPrice > 0 ? Math.min(bucket.lowPrice, trade.unitPrice) : trade.unitPrice;
+    bucket.closePrice = trade.unitPrice;
+    bucket.tradedVolume = Math.max(0, Math.floor(Number(bucket.tradedVolume || 0))) + trade.quantity;
+    bucket.tradeCount = Math.max(0, Math.floor(Number(bucket.tradeCount || 0))) + 1;
+  }
+  book.snapshots.sort(function(a, b) { return Number(a.bucketStartAt || 0) - Number(b.bucketStartAt || 0); });
+  if (book.snapshots.length > MARKET_HISTORY_BUCKET_KEEP) {
+    book.snapshots = book.snapshots.slice(book.snapshots.length - MARKET_HISTORY_BUCKET_KEEP);
+  }
+}
+
+function marketPushRecentTrade(book, trade) {
+  if (!trade) return;
+  if (!Array.isArray(book.recentTrades)) book.recentTrades = [];
+  book.recentTrades.unshift(trade);
+  if (book.recentTrades.length > MARKET_RECENT_TRADES_KEEP) book.recentTrades = book.recentTrades.slice(0, MARKET_RECENT_TRADES_KEEP);
+  marketApplyTradeToSnapshots(book, trade);
+}
+
+function marketPushOrderProfile(profile, order, isClosed) {
+  if (!profile || !order) return;
+  var summary = normalizeMarketOrderSummary(order);
+  if (!summary) return;
+  var targetList = isClosed ? "recentOrders" : "activeOrders";
+  profile.activeOrders = (profile.activeOrders || []).filter(function(row) { return String(row.id || "") !== summary.id; });
+  if (isClosed) {
+    profile.recentOrders = [summary].concat((profile.recentOrders || []).filter(function(row) { return String(row.id || "") !== summary.id; }));
+    if (profile.recentOrders.length > MARKET_RECENT_ORDERS_KEEP) profile.recentOrders = profile.recentOrders.slice(0, MARKET_RECENT_ORDERS_KEEP);
+  } else {
+    profile[targetList] = [summary].concat((profile[targetList] || []).filter(function(row) { return String(row.id || "") !== summary.id; }));
+  }
+  profile.updatedAt = nowTs();
+}
+
+function marketPushTradeProfile(profile, trade, asBuyer) {
+  if (!profile || !trade) return;
+  var summary = normalizeMarketTradeSummary(trade);
+  if (!summary) return;
+  profile.recentTrades = [summary].concat((profile.recentTrades || []).filter(function(row) { return String(row.id || "") !== summary.id; }));
+  if (profile.recentTrades.length > MARKET_RECENT_TRADES_KEEP) profile.recentTrades = profile.recentTrades.slice(0, MARKET_RECENT_TRADES_KEEP);
+  profile.totalTradeVolumeScaled = Math.max(0, Math.floor(Number(profile.totalTradeVolumeScaled || 0))) + summary.totalPrice;
+  profile.totalFeesPaidScaled = Math.max(0, Math.floor(Number(profile.totalFeesPaidScaled || 0))) + summary.taxAmount;
+  if (asBuyer) {
+    profile.totalBoughtScaled = Math.max(0, Math.floor(Number(profile.totalBoughtScaled || 0))) + summary.totalPrice;
+    profile.totalBoughtUnits = sanitizeResourceCostMap(profile.totalBoughtUnits);
+    profile.totalBoughtUnits[summary.resourceType] = Math.max(0, Math.floor(Number(profile.totalBoughtUnits[summary.resourceType] || 0))) + summary.quantity;
+  } else {
+    profile.totalSoldScaled = Math.max(0, Math.floor(Number(profile.totalSoldScaled || 0))) + Math.max(0, summary.totalPrice - summary.taxAmount);
+    profile.totalSoldUnits = sanitizeResourceCostMap(profile.totalSoldUnits);
+    profile.totalSoldUnits[summary.resourceType] = Math.max(0, Math.floor(Number(profile.totalSoldUnits[summary.resourceType] || 0))) + summary.quantity;
+  }
+  profile.updatedAt = nowTs();
+}
+
+function marketGetUserCreatedAt(nk, userId) {
+  if (!nk || typeof nk.sqlQuery !== "function") return 0;
+  var safeUserId = escapeSqlLiteral(String(userId || "").trim());
+  if (!safeUserId) return 0;
+  var rows = nk.sqlQuery(
+    "SELECT FLOOR(EXTRACT(EPOCH FROM create_time))::bigint AS created_at FROM users WHERE id = '" + safeUserId + "' LIMIT 1"
+  ) || [];
+  if (!Array.isArray(rows) || rows.length <= 0) return 0;
+  return Math.max(0, Math.floor(Number((rows[0] && rows[0].created_at) || 0)));
+}
+
+function marketComputeAccountAgeDays(createdAt, serverNowTs) {
+  var created = Math.max(0, Math.floor(Number(createdAt || 0)));
+  if (created <= 0) return 9999;
+  return Math.max(0, Math.floor((Math.max(created, serverNowTs) - created) / 86400));
+}
+
+function marketReadUserContext(nk, userId, username) {
+  var economyRead = readEconomyState(nk, userId);
+  var profileRead = readMarketProfile(nk, userId);
+  var rankingRead = readRankingProgressState(nk, userId);
+  var allianceProfileRead = readPlayerProfile(nk, userId);
+  var privateIndexRead = readMarketPrivateIndexState(nk, userId);
+  var createdAt = marketGetUserCreatedAt(nk, userId);
+  var now = nowTs();
+  return {
+    userId: userId,
+    username: String(username || userId),
+    createdAt: createdAt,
+    ageDays: marketComputeAccountAgeDays(createdAt, now),
+    economy: economyRead.state,
+    economyVersion: economyRead.version || "",
+    marketProfile: profileRead.state,
+    marketProfileVersion: profileRead.version || "",
+    rankingProgress: rankingRead.state,
+    rankingVersion: rankingRead.version || "",
+    playerProfile: allianceProfileRead.state,
+    playerProfileVersion: allianceProfileRead.version || "",
+    privateIndex: privateIndexRead.state,
+    privateIndexVersion: privateIndexRead.version || ""
+  };
+}
+
+function marketGetOpenOrderCount(profile) {
+  return Array.isArray(profile && profile.activeOrders) ? profile.activeOrders.length : 0;
+}
+
+function marketMarketLabel(marketType) {
+  var type = String(marketType || MARKET_TYPE_PUBLIC).trim().toLowerCase();
+  if (type === MARKET_TYPE_PRIVATE) return "Contrat prive";
+  if (type === MARKET_TYPE_ALLIANCE) return "Marche d'alliance";
+  return "Marche public";
+}
+
+function marketFormatResourceLabel(resourceId) {
+  var labels = {
+    carbone: "Carbone",
+    titane: "Titane",
+    osmium: "Osmium",
+    adamantium: "Adamantium",
+    magmatite: "Magmatite",
+    neodyme: "Neodyme",
+    chronium: "Chronium",
+    aetherium: "Aetherium",
+    isotope7: "Isotope-7",
+    singulite: "Singulite"
+  };
+  return labels[String(resourceId || "").trim()] || String(resourceId || "");
+}
+
+function marketFormatScaledCredits(value) {
+  var credits = marketScaledToCredits(value);
+  if (Math.abs(credits - Math.round(credits)) < 0.0001) return String(Math.round(credits));
+  return credits.toFixed(3).replace(/\.?0+$/, "");
+}
+
+function marketCreateInboxMessage(nk, userId, title, body, meta) {
+  return createInboxMessageForUser(nk, userId, {
+    type: "MARKET",
+    title: String(title || "Marche").slice(0, 140),
+    body: String(body || "").slice(0, 8000),
+    attachments: {},
+    meta: meta && typeof meta === "object" ? meta : {},
+    expiresAt: nowTs() + 60 * 60 * 24 * 45
+  });
+}
+
+function marketCreateOrderNotification(nk, userId, order, eventKey, details) {
+  if (!userId || !order) return;
+  var resourceLabel = marketFormatResourceLabel(order.resourceType);
+  var title = "Marche: " + resourceLabel;
+  var body = String(details || "").trim();
+  if (!body) return;
+  try {
+    marketCreateInboxMessage(nk, userId, title, body, {
+      kind: MARKET_INBOX_META_KIND,
+      eventKey: String(eventKey || ""),
+      orderId: String(order.id || ""),
+      marketType: String(order.marketType || ""),
+      resourceType: String(order.resourceType || ""),
+      unitPrice: Math.max(0, Math.floor(Number(order.unitPrice || 0))),
+      remainingQuantity: Math.max(0, Math.floor(Number(order.remainingQuantity || 0)))
+    });
+  } catch (_err) {
+    // noop
+  }
+}
+
+function marketNormalizeOrderForClient(order) {
+  var safe = normalizeMarketOrder(order);
+  if (!safe) return null;
+  return {
+    id: safe.id,
+    orderType: safe.orderType,
+    marketType: safe.marketType,
+    status: safe.status,
+    sellerPlayerId: safe.sellerPlayerId,
+    sellerUsername: safe.sellerUsername,
+    buyerPlayerId: safe.buyerPlayerId,
+    buyerUsername: safe.buyerUsername,
+    targetPlayerId: safe.targetPlayerId,
+    targetUsername: safe.targetUsername,
+    allianceId: safe.allianceId,
+    resourceType: safe.resourceType,
+    unitPrice: safe.unitPrice,
+    totalQuantity: safe.totalQuantity,
+    remainingQuantity: safe.remainingQuantity,
+    reservedCredits: safe.reservedCredits,
+    reservedResources: safe.reservedResources,
+    listingFeePaid: safe.listingFeePaid,
+    listingFeeRemaining: safe.listingFeeRemaining,
+    taxRateBps: safe.taxRateBps,
+    cancelFeeBps: safe.cancelFeeBps,
+    createdAt: safe.createdAt,
+    updatedAt: safe.updatedAt,
+    expiresAt: safe.expiresAt,
+    filledAt: safe.filledAt,
+    cancelledAt: safe.cancelledAt,
+    sourceBuildingLevel: safe.sourceBuildingLevel,
+    deliveryMode: safe.deliveryMode,
+    riskScore: safe.riskScore,
+    displayBundleSize: marketBundleSize(safe.resourceType),
+    displayBundlePrice: Math.max(0, Math.round((safe.unitPrice * marketBundleSize(safe.resourceType)) / MARKET_CREDIT_SCALE * 1000) / 1000)
+  };
+}
+
+function marketNormalizeTradeForClient(trade) {
+  var safe = normalizeMarketTrade(trade);
+  if (!safe) return null;
+  return {
+    id: safe.id,
+    marketType: safe.marketType,
+    allianceId: safe.allianceId,
+    resourceType: safe.resourceType,
+    quantity: safe.quantity,
+    unitPrice: safe.unitPrice,
+    totalPrice: safe.totalPrice,
+    taxAmount: safe.taxAmount,
+    createdAt: safe.createdAt,
+    buyerPlayerId: safe.buyerPlayerId,
+    buyerUsername: safe.buyerUsername,
+    sellerPlayerId: safe.sellerPlayerId,
+    sellerUsername: safe.sellerUsername,
+    displayBundleSize: marketBundleSize(safe.resourceType),
+    displayBundlePrice: Math.max(0, Math.round((safe.unitPrice * marketBundleSize(safe.resourceType)) / MARKET_CREDIT_SCALE * 1000) / 1000)
+  };
+}
+
+function marketClone(value) {
+  return JSON.parse(JSON.stringify(value || {}));
+}
+
+function marketRemoveOrderFromProfile(profile, orderId) {
+  if (!profile) return;
+  profile.activeOrders = (profile.activeOrders || []).filter(function(row) { return String(row.id || "") !== String(orderId || ""); });
+}
+
+function marketPushPrivateContractIndex(indexState, contractPreview) {
+  if (!indexState || !contractPreview) return;
+  var normalized = normalizeMarketPrivateContractPreview(contractPreview);
+  if (!normalized) return;
+  indexState.contracts = [normalized].concat((indexState.contracts || []).filter(function(row) { return String(row.id || "") !== normalized.id; }));
+  indexState.updatedAt = nowTs();
+}
+
+function marketUpdatePrivateContractIndex(indexState, contractPreview) {
+  if (!indexState || !contractPreview) return;
+  var normalized = normalizeMarketPrivateContractPreview(contractPreview);
+  if (!normalized) {
+    indexState.contracts = (indexState.contracts || []).filter(function(row) { return String(row.id || "") !== String(contractPreview.id || ""); });
+    indexState.updatedAt = nowTs();
+    return;
+  }
+  indexState.contracts = [normalized].concat((indexState.contracts || []).filter(function(row) { return String(row.id || "") !== normalized.id; }));
+  indexState.updatedAt = nowTs();
+}
+
+function marketNormalizeSystemWrite(write) {
+  if (!write || typeof write !== "object") return null;
+  var key = String(write.key || "").trim();
+  if (!key) return null;
+  return {
+    collection: String(write.collection || MARKET_COLLECTION),
+    key: key,
+    userId: String(write.userId || ""),
+    permissionRead: typeof write.permissionRead === "number" ? write.permissionRead : 0,
+    permissionWrite: typeof write.permissionWrite === "number" ? write.permissionWrite : 0,
+    value: write.value,
+    version: String(write.version || "")
+  };
+}
+
+function marketReadAllUserStates(nk, userSpecs) {
+  var map = {};
+  for (var i = 0; i < userSpecs.length; i++) {
+    var spec = userSpecs[i] || {};
+    var userId = String(spec.userId || "").trim();
+    if (!userId || map[userId]) continue;
+    var username = String(spec.username || userId).trim() || userId;
+    var context = marketReadUserContext(nk, userId, username);
+    map[userId] = {
+      userId: userId,
+      username: username,
+      createdAt: context.createdAt,
+      ageDays: context.ageDays,
+      economy: marketClone(applyOfflineProduction(context.economy, nowTs())),
+      economyBase: marketClone(context.economy),
+      economyVersion: context.economyVersion || "",
+      marketProfile: marketClone(context.marketProfile),
+      marketProfileBase: marketClone(context.marketProfile),
+      marketProfileVersion: context.marketProfileVersion || "",
+      rankingProgress: marketClone(context.rankingProgress),
+      playerProfile: marketClone(context.playerProfile),
+      privateIndex: marketClone(context.privateIndex),
+      privateIndexBase: marketClone(context.privateIndex),
+      privateIndexVersion: context.privateIndexVersion || ""
+    };
+  }
+  return map;
+}
+
+function marketBuildUserWrites(userStateMap, serverNowTs) {
+  var writes = [];
+  var userIds = Object.keys(userStateMap || {});
+  for (var i = 0; i < userIds.length; i++) {
+    var userId = userIds[i];
+    var row = userStateMap[userId];
+    if (!row) continue;
+    row.economy.version = sanitizePositiveInt(row.economy.version || 0) + 1;
+    row.economy.lastUpdateTs = serverNowTs;
+    row.marketProfile.updatedAt = serverNowTs;
+    row.privateIndex.updatedAt = serverNowTs;
+    var nextEconomy = JSON.stringify(row.economy);
+    var prevEconomy = JSON.stringify(row.economyBase || {});
+    if (nextEconomy !== prevEconomy) {
+      writes.push(makeStorageWriteReq(ECONOMY_COLLECTION, ECONOMY_KEY, userId, row.economy, row.economyVersion || "", 0, 0));
+    }
+    var nextProfile = JSON.stringify(row.marketProfile);
+    var prevProfile = JSON.stringify(row.marketProfileBase || {});
+    if (nextProfile !== prevProfile) {
+      writes.push(makeStorageWriteReq(MARKET_COLLECTION, MARKET_PROFILE_KEY, userId, row.marketProfile, row.marketProfileVersion || "", 0, 0));
+    }
+    var nextPrivateIndex = JSON.stringify(row.privateIndex);
+    var prevPrivateIndex = JSON.stringify(row.privateIndexBase || {});
+    if (nextPrivateIndex !== prevPrivateIndex) {
+      writes.push(makeStorageWriteReq(MARKET_COLLECTION, MARKET_PRIVATE_INDEX_KEY, userId, row.privateIndex, row.privateIndexVersion || "", 0, 0));
+    }
+  }
+  return writes;
+}
+
+function withMarketBookTransaction(nk, userSpecs, marketType, resourceType, allianceId, update) {
+  var lastError = "failed";
+  for (var attempt = 0; attempt < MARKET_WRITE_RETRIES; attempt++) {
+    var ts = nowTs();
+    var bookRead = readMarketBook(nk, marketType, resourceType, allianceId);
+    var book = marketClone(bookRead.state);
+    var participantSpecs = [];
+    for (var s = 0; s < userSpecs.length; s++) participantSpecs.push(userSpecs[s]);
+    var activeOrders = (book.buyOrders || []).concat(book.sellOrders || []);
+    for (var i = 0; i < activeOrders.length; i++) {
+      var order = activeOrders[i];
+      var ownerUserId = marketOwnerUserId(order);
+      if (!ownerUserId) continue;
+      participantSpecs.push({ userId: ownerUserId, username: marketOwnerUsername(order) || ownerUserId });
+    }
+    var userStateMap = marketReadAllUserStates(nk, participantSpecs);
+    var result = update({ book: book, users: userStateMap, marketType: marketType, resourceType: resourceType, allianceId: allianceId }, ts);
+    book.updatedAt = ts;
+    book.version = sanitizePositiveInt(book.version || 0) + 1;
+    var writes = marketBuildUserWrites(userStateMap, ts);
+    var bookChanged = JSON.stringify(book) !== JSON.stringify(bookRead.state || {});
+    if (bookChanged) {
+      writes.push(makeStorageWriteReq(MARKET_COLLECTION, bookRead.key, "", book, bookRead.version || "", 2, 0));
+    }
+    var extraWrites = Array.isArray(result && result.extraWrites) ? result.extraWrites.map(marketNormalizeSystemWrite).filter(Boolean) : [];
+    for (var ew = 0; ew < extraWrites.length; ew++) {
+      var row = extraWrites[ew];
+      writes.push(makeStorageWriteReq(row.collection, row.key, row.userId, row.value, row.version || "", row.permissionRead, row.permissionWrite));
+    }
+    if (writes.length <= 0) return { book: book, users: userStateMap, result: result };
+    try {
+      nk.storageWrite(writes);
+      return { book: book, users: userStateMap, result: result };
+    } catch (err) {
+      lastError = String(err || "failed");
+    }
+  }
+  throw new Error("Market book transaction failed after retries: " + lastError);
+}
+
+function marketReserveSellResources(economy, resourceType, quantity) {
+  var rid = String(resourceType || "").trim();
+  var qty = Math.max(0, Math.floor(Number(quantity || 0)));
+  if (RESOURCE_IDS.indexOf(rid) === -1) throw new Error("Invalid resourceType.");
+  if (qty <= 0) throw new Error("Invalid quantity.");
+  var available = Math.max(0, Math.floor(Number(((economy.resources || {})[rid] || {}).amount || 0)));
+  if (available < qty) throw new Error("Not enough resource stock.");
+  economy.resources[rid].amount = available - qty;
+  economy.marketReservedResources = normalizeMarketReservedResourceMap(economy.marketReservedResources);
+  economy.marketReservedResources[rid] = Math.max(0, Math.floor(Number(economy.marketReservedResources[rid] || 0))) + qty;
+}
+
+function marketReleaseSellResources(economy, resourceType, quantity) {
+  var rid = String(resourceType || "").trim();
+  var qty = Math.max(0, Math.floor(Number(quantity || 0)));
+  if (qty <= 0 || RESOURCE_IDS.indexOf(rid) === -1) return;
+  economy.marketReservedResources = normalizeMarketReservedResourceMap(economy.marketReservedResources);
+  var reserved = Math.max(0, Math.floor(Number(economy.marketReservedResources[rid] || 0)));
+  var released = Math.min(reserved, qty);
+  economy.marketReservedResources[rid] = reserved - released;
+  economy.resources[rid].amount = Math.max(0, Math.floor(Number(economy.resources[rid].amount || 0))) + released;
+}
+
+function marketAvailableCreditsScaled(economy) {
+  return marketCreditsToScaled(Math.max(0, Math.floor(Number(economy.premiumCredits || 0)))) +
+    Math.max(0, Math.floor(Number(economy.marketCreditSubunits || 0)));
+}
+
+function marketSetAvailableCreditsScaled(economy, scaledAmount) {
+  var total = Math.max(0, Math.floor(Number(scaledAmount || 0)));
+  economy.premiumCredits = Math.floor(total / MARKET_CREDIT_SCALE);
+  economy.marketCreditSubunits = total % MARKET_CREDIT_SCALE;
+}
+
+function marketSpendInstantCredits(economy, scaledAmount, errorMessage) {
+  var amount = Math.max(0, Math.floor(Number(scaledAmount || 0)));
+  if (amount <= 0) return;
+  var total = marketAvailableCreditsScaled(economy);
+  if (total < amount) throw new Error(errorMessage || "Not enough credits.");
+  marketSetAvailableCreditsScaled(economy, total - amount);
+}
+
+function marketAddInstantCredits(economy, scaledAmount) {
+  var amount = Math.max(0, Math.floor(Number(scaledAmount || 0)));
+  if (amount <= 0) return;
+  marketSetAvailableCreditsScaled(economy, marketAvailableCreditsScaled(economy) + amount);
+}
+
+function marketReserveBuyCredits(economy, scaledAmount) {
+  var amount = Math.max(0, Math.floor(Number(scaledAmount || 0)));
+  if (amount <= 0) throw new Error("Invalid reserved credits.");
+  marketSpendInstantCredits(economy, amount, "Not enough credits.");
+  economy.marketReservedCredits = Math.max(0, Math.floor(Number(economy.marketReservedCredits || 0))) + amount;
+}
+
+function marketReleaseBuyCredits(economy, scaledAmount) {
+  var amount = Math.max(0, Math.floor(Number(scaledAmount || 0)));
+  if (amount <= 0) return;
+  var reserved = Math.max(0, Math.floor(Number(economy.marketReservedCredits || 0)));
+  var released = Math.min(reserved, amount);
+  economy.marketReservedCredits = reserved - released;
+  marketAddInstantCredits(economy, released);
+}
+
+function marketMarkOrderClosed(order, status, serverNowTs) {
+  order.status = status;
+  order.updatedAt = serverNowTs;
+  if (status === MARKET_ORDER_STATUS_FILLED) order.filledAt = serverNowTs;
+  if (status === MARKET_ORDER_STATUS_CANCELLED || status === MARKET_ORDER_STATUS_EXPIRED || status === MARKET_ORDER_STATUS_DECLINED) {
+    order.cancelledAt = serverNowTs;
+  }
+}
+
+function marketCleanupClosedOrders(book) {
+  book.buyOrders = (book.buyOrders || []).filter(function(order) {
+    return order && order.remainingQuantity > 0 && (order.status === MARKET_ORDER_STATUS_OPEN || order.status === MARKET_ORDER_STATUS_PARTIAL);
+  });
+  book.sellOrders = (book.sellOrders || []).filter(function(order) {
+    return order && order.remainingQuantity > 0 && (order.status === MARKET_ORDER_STATUS_OPEN || order.status === MARKET_ORDER_STATUS_PARTIAL);
+  });
+}
+
+function marketValidateOrderPayload(body) {
+  var side = String(body.orderType || body.side || "").trim().toLowerCase();
+  var marketType = String(body.marketType || MARKET_TYPE_PUBLIC).trim().toLowerCase();
+  var resourceType = String(body.resourceType || body.assetId || "").trim();
+  var quantity = Math.max(0, Math.floor(Number(body.quantity || 0)));
+  var unitPrice = Math.max(0, Math.floor(Number(body.unitPrice || 0)));
+  if (side !== MARKET_ORDER_SIDE_BUY && side !== MARKET_ORDER_SIDE_SELL) throw new Error("Invalid orderType.");
+  if (RESOURCE_IDS.indexOf(resourceType) === -1) throw new Error("Invalid resourceType.");
+  if (marketType !== MARKET_TYPE_PUBLIC && marketType !== MARKET_TYPE_ALLIANCE && marketType !== MARKET_TYPE_PRIVATE) {
+    throw new Error("Invalid marketType.");
+  }
+  if (quantity <= 0) throw new Error("Invalid quantity.");
+  if (unitPrice <= 0) throw new Error("Invalid unit price.");
+  return {
+    orderType: side,
+    marketType: marketType,
+    resourceType: resourceType,
+    quantity: quantity,
+    unitPrice: unitPrice,
+    targetPlayerId: String(body.targetPlayerId || "").trim(),
+    targetUsername: String(body.targetUsername || "").trim(),
+    expiresAt: Math.max(0, Math.floor(Number(body.expiresAt || 0)))
+  };
+}
+
+function marketValidateAccessRules(actorState, body) {
+  var bourseLevel = marketBourseLevelForPlayer(actorState.economy, actorState.rankingProgress);
+  if (!marketSupportsType(bourseLevel, body.marketType)) {
+    throw new Error("Bourse Orbitale level too low for this market.");
+  }
+  if (body.marketType === MARKET_TYPE_ALLIANCE && !String(actorState.playerProfile && actorState.playerProfile.allianceId || "").trim()) {
+    throw new Error("Join an alliance first.");
+  }
+  if (body.marketType === MARKET_TYPE_PRIVATE && !body.targetPlayerId && !body.targetUsername) {
+    throw new Error("Missing private contract target.");
+  }
+  if (!marketResourceUnlockedForPlayer(actorState.economy, actorState.rankingProgress, body.resourceType)) {
+    throw new Error("Resource not unlocked for this player.");
+  }
+  var limitCfg = marketOrderLimitConfig(body.resourceType);
+  var ageDays = Math.max(0, Math.floor(Number(actorState.ageDays || 0)));
+  var quantityMax = limitCfg.max;
+  if (ageDays < MARKET_NEW_ACCOUNT_STRICT_DAYS) {
+    quantityMax = Math.max(limitCfg.min, Math.floor((quantityMax * (10000 - MARKET_NEW_ACCOUNT_VOLUME_REDUCTION_BPS)) / 10000));
+  }
+  if (body.quantity < limitCfg.min || body.quantity > quantityMax) {
+    throw new Error("Quantity outside allowed market bounds.");
+  }
+  if (ageDays < MARKET_NEW_ACCOUNT_TOP_TIER_DAYS && MARKET_TOP_TIER_RESOURCES[body.resourceType]) {
+    throw new Error("New accounts cannot trade this top-tier resource yet.");
+  }
+  var cap = marketOrderCapForBourseLevel(bourseLevel);
+  if (marketGetOpenOrderCount(actorState.marketProfile) >= cap) {
+    throw new Error("Active order limit reached.");
+  }
+  return bourseLevel;
+}
+
+function marketComputeRiskScore(resourceType, unitPrice, medianPrice, quantity, accountAgeDays) {
+  var risk = 0;
+  var median = Math.max(1, Math.floor(Number(medianPrice || marketReferenceUnitPrice(resourceType) || 1)));
+  var price = Math.max(1, Math.floor(Number(unitPrice || 1)));
+  var quantitySafe = Math.max(1, Math.floor(Number(quantity || 1)));
+  var ratio = price / median;
+  if (ratio >= 3 || ratio <= 0.3) risk += 40;
+  if (ratio >= 2 || ratio <= 0.5) risk += 20;
+  if (MARKET_TOP_TIER_RESOURCES[resourceType]) risk += 10;
+  if (quantitySafe >= Math.floor(marketOrderLimitConfig(resourceType).max * 0.8)) risk += 15;
+  if (Math.max(0, Math.floor(Number(accountAgeDays || 0))) < MARKET_NEW_ACCOUNT_TOP_TIER_DAYS) risk += 25;
+  return Math.min(100, risk);
+}
+
+function marketCreateOrderRecord(actorState, body, bourseLevel, marketType, allianceId, medianPrice, serverNowTs) {
+  var feeCfg = marketFeeConfig(marketType);
+  var totalValue = Math.max(0, Math.floor(Number(body.unitPrice || 0))) * Math.max(0, Math.floor(Number(body.quantity || 0)));
+  var listingFee = marketComputeBpsAmount(totalValue, feeCfg.listingFeeBps);
+  var expiresAt = Math.max(serverNowTs + MARKET_PRIVATE_EXPIRY_MIN_SEC, body.expiresAt || (serverNowTs + MARKET_DEFAULT_ORDER_EXPIRY_SEC));
+  if (marketType === MARKET_TYPE_PRIVATE) {
+    expiresAt = Math.max(serverNowTs + MARKET_PRIVATE_EXPIRY_MIN_SEC, Math.min(serverNowTs + MARKET_PRIVATE_EXPIRY_MAX_SEC, expiresAt));
+  }
+  return {
+    id: makeServerId("mkt", serverNowTs),
+    orderType: body.orderType,
+    marketType: marketType,
+    status: MARKET_ORDER_STATUS_OPEN,
+    sellerPlayerId: body.orderType === MARKET_ORDER_SIDE_SELL ? actorState.userId : "",
+    sellerUsername: body.orderType === MARKET_ORDER_SIDE_SELL ? actorState.username : "",
+    buyerPlayerId: body.orderType === MARKET_ORDER_SIDE_BUY ? actorState.userId : "",
+    buyerUsername: body.orderType === MARKET_ORDER_SIDE_BUY ? actorState.username : "",
+    targetPlayerId: String(body.targetPlayerId || "").trim(),
+    targetUsername: String(body.targetUsername || "").trim(),
+    allianceId: String(allianceId || "").trim(),
+    resourceType: body.resourceType,
+    unitPrice: body.unitPrice,
+    totalQuantity: body.quantity,
+    remainingQuantity: body.quantity,
+    reservedCredits: body.orderType === MARKET_ORDER_SIDE_BUY ? totalValue : 0,
+    reservedResources: body.orderType === MARKET_ORDER_SIDE_SELL ? body.quantity : 0,
+    listingFeePaid: body.orderType === MARKET_ORDER_SIDE_BUY ? listingFee : 0,
+    listingFeeRemaining: body.orderType === MARKET_ORDER_SIDE_SELL ? listingFee : 0,
+    taxRateBps: feeCfg.taxBps,
+    cancelFeeBps: feeCfg.cancelFeeBps,
+    createdAt: serverNowTs,
+    updatedAt: serverNowTs,
+    openedAt: serverNowTs,
+    expiresAt: expiresAt,
+    filledAt: 0,
+    cancelledAt: 0,
+    sourceBuildingLevel: bourseLevel,
+    deliveryMode: MARKET_DELIVERY_MODE_INSTANT,
+    riskScore: marketComputeRiskScore(body.resourceType, body.unitPrice, medianPrice, body.quantity, actorState.ageDays),
+    metadata: {
+      medianUnitPrice: medianPrice,
+      accountAgeDays: actorState.ageDays
+    }
+  };
+}
+
+function marketChargeOrderCreation(actorState, order) {
+  var totalValue = order.unitPrice * order.totalQuantity;
+  if (order.orderType === MARKET_ORDER_SIDE_BUY) {
+    marketReserveBuyCredits(actorState.economy, totalValue);
+    var listingFeePaid = Math.max(0, Math.floor(Number(order.listingFeePaid || 0)));
+    if (listingFeePaid > 0) {
+      marketSpendInstantCredits(actorState.economy, listingFeePaid, "Not enough credits to pay the listing fee.");
+      actorState.marketProfile.totalFeesPaidScaled = Math.max(0, Math.floor(Number(actorState.marketProfile.totalFeesPaidScaled || 0))) + listingFeePaid;
+    }
+  } else {
+    marketReserveSellResources(actorState.economy, order.resourceType, order.totalQuantity);
+  }
+}
+
+function marketExpireBookOrders(book, userStateMap, serverNowTs, notifications) {
+  var changed = false;
+  var process = function(order) {
+    if (!order || !order.expiresAt || order.expiresAt > serverNowTs) return;
+    if (order.status !== MARKET_ORDER_STATUS_OPEN && order.status !== MARKET_ORDER_STATUS_PARTIAL) return;
+    var ownerId = marketOwnerUserId(order);
+    var owner = userStateMap[ownerId];
+    if (!owner) return;
+    if (order.orderType === MARKET_ORDER_SIDE_BUY) {
+      marketReleaseBuyCredits(owner.economy, order.reservedCredits);
+      order.reservedCredits = 0;
+    } else {
+      marketReleaseSellResources(owner.economy, order.resourceType, order.remainingQuantity);
+      order.reservedResources = Math.max(0, Math.floor(Number(order.reservedResources || 0)) - order.remainingQuantity);
+    }
+    order.remainingQuantity = 0;
+    marketMarkOrderClosed(order, MARKET_ORDER_STATUS_EXPIRED, serverNowTs);
+    marketRemoveOrderFromProfile(owner.marketProfile, order.id);
+    marketPushOrderProfile(owner.marketProfile, order, true);
+    notifications.push({
+      userId: ownerId,
+      order: order,
+      eventKey: "expired",
+      body: "Votre ordre " + marketMarketLabel(order.marketType).toLowerCase() + " sur " + marketFormatResourceLabel(order.resourceType) + " a expire."
+    });
+    changed = true;
+  };
+  for (var i = 0; i < (book.buyOrders || []).length; i++) process(book.buyOrders[i]);
+  for (var j = 0; j < (book.sellOrders || []).length; j++) process(book.sellOrders[j]);
+  if (changed) marketCleanupClosedOrders(book);
+  return changed;
+}
+
+function marketExecuteTrade(buyOrder, sellOrder, tradeUnitPrice, quantity, buyerState, sellerState, book, serverNowTs) {
+  var qty = Math.max(0, Math.floor(Number(quantity || 0)));
+  if (qty <= 0) return null;
+  var tradeCost = Math.max(0, Math.floor(Number(tradeUnitPrice || 0))) * qty;
+  var buyerReserveSlice = Math.max(0, Math.floor(Number(buyOrder.unitPrice || 0))) * qty;
+  var refund = Math.max(0, buyerReserveSlice - tradeCost);
+  var taxAmount = marketComputeBpsAmount(tradeCost, sellOrder.taxRateBps || 0);
+  var sellRemainingBefore = Math.max(1, Math.floor(Number(sellOrder.remainingQuantity || 0)));
+  var listingShare = Math.min(
+    Math.max(0, Math.floor(Number(sellOrder.listingFeeRemaining || 0))),
+    Math.floor(Math.max(0, Math.floor(Number(sellOrder.listingFeeRemaining || 0))) * qty / sellRemainingBefore)
+  );
+  var sellerPayout = Math.max(0, tradeCost - taxAmount - listingShare);
+
+  buyerState.economy.marketReservedCredits = Math.max(0, Math.floor(Number(buyerState.economy.marketReservedCredits || 0)) - buyerReserveSlice);
+  marketAddInstantCredits(buyerState.economy, refund);
+  buyerState.economy.resources[buyOrder.resourceType].amount = Math.max(0, Math.floor(Number(buyerState.economy.resources[buyOrder.resourceType].amount || 0))) + qty;
+
+  sellerState.economy.marketReservedResources = normalizeMarketReservedResourceMap(sellerState.economy.marketReservedResources);
+  sellerState.economy.marketReservedResources[sellOrder.resourceType] = Math.max(0, Math.floor(Number(sellerState.economy.marketReservedResources[sellOrder.resourceType] || 0)) - qty);
+  marketAddInstantCredits(sellerState.economy, sellerPayout);
+  sellerState.marketProfile.totalFeesPaidScaled = Math.max(0, Math.floor(Number(sellerState.marketProfile.totalFeesPaidScaled || 0))) + taxAmount + listingShare;
+
+  buyOrder.reservedCredits = Math.max(0, Math.floor(Number(buyOrder.reservedCredits || 0)) - buyerReserveSlice);
+  sellOrder.reservedResources = Math.max(0, Math.floor(Number(sellOrder.reservedResources || 0)) - qty);
+  sellOrder.listingFeeRemaining = Math.max(0, Math.floor(Number(sellOrder.listingFeeRemaining || 0)) - listingShare);
+  buyOrder.remainingQuantity = Math.max(0, Math.floor(Number(buyOrder.remainingQuantity || 0)) - qty);
+  sellOrder.remainingQuantity = Math.max(0, Math.floor(Number(sellOrder.remainingQuantity || 0)) - qty);
+  buyOrder.updatedAt = serverNowTs;
+  sellOrder.updatedAt = serverNowTs;
+  buyOrder.status = buyOrder.remainingQuantity > 0 ? MARKET_ORDER_STATUS_PARTIAL : MARKET_ORDER_STATUS_FILLED;
+  sellOrder.status = sellOrder.remainingQuantity > 0 ? MARKET_ORDER_STATUS_PARTIAL : MARKET_ORDER_STATUS_FILLED;
+  if (buyOrder.remainingQuantity <= 0) buyOrder.filledAt = serverNowTs;
+  if (sellOrder.remainingQuantity <= 0) sellOrder.filledAt = serverNowTs;
+
+  var trade = {
+    id: makeServerId("trade", serverNowTs),
+    buyOrderId: buyOrder.id,
+    sellOrderId: sellOrder.id,
+    buyerPlayerId: buyOrder.buyerPlayerId,
+    buyerUsername: buyOrder.buyerUsername,
+    sellerPlayerId: sellOrder.sellerPlayerId,
+    sellerUsername: sellOrder.sellerUsername,
+    marketType: buyOrder.marketType,
+    allianceId: buyOrder.allianceId || sellOrder.allianceId || "",
+    resourceType: buyOrder.resourceType,
+    quantity: qty,
+    unitPrice: tradeUnitPrice,
+    totalPrice: tradeCost,
+    taxAmount: taxAmount,
+    createdAt: serverNowTs,
+    metadata: {
+      buyerRefund: refund,
+      sellerListingShare: listingShare
+    }
+  };
+
+  marketPushRecentTrade(book, trade);
+  marketPushTradeProfile(buyerState.marketProfile, trade, true);
+  marketPushTradeProfile(sellerState.marketProfile, trade, false);
+  marketPushOrderProfile(buyerState.marketProfile, buyOrder, buyOrder.remainingQuantity <= 0);
+  marketPushOrderProfile(sellerState.marketProfile, sellOrder, sellOrder.remainingQuantity <= 0);
+  if (buyOrder.remainingQuantity <= 0) marketRemoveOrderFromProfile(buyerState.marketProfile, buyOrder.id);
+  if (sellOrder.remainingQuantity <= 0) marketRemoveOrderFromProfile(sellerState.marketProfile, sellOrder.id);
+  return trade;
+}
+
+function marketMatchIncomingOrder(book, incomingOrder, userStateMap, serverNowTs, notifications) {
+  var trades = [];
+  if (!incomingOrder) return trades;
+  var candidateList = incomingOrder.orderType === MARKET_ORDER_SIDE_BUY ? (book.sellOrders || []) : (book.buyOrders || []);
+  for (var i = 0; i < candidateList.length; i++) {
+    var passive = candidateList[i];
+    if (!passive) continue;
+    if (incomingOrder.remainingQuantity <= 0) break;
+    if (passive.remainingQuantity <= 0) continue;
+    if (marketOwnerUserId(passive) === marketOwnerUserId(incomingOrder)) continue;
+    if (incomingOrder.orderType === MARKET_ORDER_SIDE_BUY && incomingOrder.unitPrice < passive.unitPrice) break;
+    if (incomingOrder.orderType === MARKET_ORDER_SIDE_SELL && incomingOrder.unitPrice > passive.unitPrice) break;
+    var buyerOrder = incomingOrder.orderType === MARKET_ORDER_SIDE_BUY ? incomingOrder : passive;
+    var sellerOrder = incomingOrder.orderType === MARKET_ORDER_SIDE_SELL ? incomingOrder : passive;
+    var buyerState = userStateMap[String(buyerOrder.buyerPlayerId || "")];
+    var sellerState = userStateMap[String(sellerOrder.sellerPlayerId || "")];
+    if (!buyerState || !sellerState) continue;
+    var quantity = Math.min(
+      Math.max(0, Math.floor(Number(incomingOrder.remainingQuantity || 0))),
+      Math.max(0, Math.floor(Number(passive.remainingQuantity || 0)))
+    );
+    if (quantity <= 0) continue;
+    var trade = marketExecuteTrade(
+      buyerOrder,
+      sellerOrder,
+      Math.max(1, Math.floor(Number(passive.unitPrice || 0))),
+      quantity,
+      buyerState,
+      sellerState,
+      book,
+      serverNowTs
+    );
+    if (!trade) continue;
+    trades.push(trade);
+    notifications.push({
+      userId: buyerOrder.buyerPlayerId,
+      order: buyerOrder,
+      eventKey: buyerOrder.remainingQuantity > 0 ? "partial_fill" : "filled",
+      body:
+        "Achat execute sur " +
+        marketFormatResourceLabel(trade.resourceType) +
+        ": +" + trade.quantity +
+        " pour " + marketFormatScaledCredits(trade.totalPrice) + " Credits."
+    });
+    notifications.push({
+      userId: sellerOrder.sellerPlayerId,
+      order: sellerOrder,
+      eventKey: sellerOrder.remainingQuantity > 0 ? "partial_fill" : "filled",
+      body:
+        "Vente executee sur " +
+        marketFormatResourceLabel(trade.resourceType) +
+        ": -" + trade.quantity +
+        " pour " + marketFormatScaledCredits(Math.max(0, trade.totalPrice - trade.taxAmount)) + " Credits nets."
+    });
+  }
+  marketCleanupClosedOrders(book);
+  return trades;
+}
+
+function marketCollect24hStats(book, resourceType, serverNowTs) {
+  var fromTs = Math.max(0, serverNowTs - 24 * 60 * 60);
+  var volume = 0;
+  var tradeCount = 0;
+  var high = 0;
+  var low = 0;
+  var open = 0;
+  var close = 0;
+  var snapshots = Array.isArray(book && book.snapshots) ? book.snapshots : [];
+  for (var i = 0; i < snapshots.length; i++) {
+    var row = snapshots[i];
+    if (!row || Number(row.bucketStartAt || 0) < fromTs) continue;
+    volume += Math.max(0, Math.floor(Number(row.tradedVolume || 0)));
+    tradeCount += Math.max(0, Math.floor(Number(row.tradeCount || 0)));
+    var rowHigh = Math.max(0, Math.floor(Number(row.highPrice || 0)));
+    var rowLow = Math.max(0, Math.floor(Number(row.lowPrice || 0)));
+    var rowOpen = Math.max(0, Math.floor(Number(row.openPrice || 0)));
+    var rowClose = Math.max(0, Math.floor(Number(row.closePrice || 0)));
+    if (!open && rowOpen > 0) open = rowOpen;
+    if (rowHigh > 0) high = high > 0 ? Math.max(high, rowHigh) : rowHigh;
+    if (rowLow > 0) low = low > 0 ? Math.min(low, rowLow) : rowLow;
+    if (rowClose > 0) close = rowClose;
+  }
+  var lastPrice = close || marketCurrentMedianUnitPrice(book, resourceType);
+  var changeBps = open > 0 ? Math.round(((lastPrice - open) * 10000) / open) : 0;
+  return {
+    volume: volume,
+    tradeCount: tradeCount,
+    openPrice: open,
+    highPrice: high,
+    lowPrice: low,
+    closePrice: close,
+    lastPrice: lastPrice,
+    changeBps: changeBps,
+    medianPrice: marketCurrentMedianUnitPrice(book, resourceType)
+  };
+}
+
+function marketSerializeBookResponse(book, serverNowTs, limit) {
+  var safeLimit = Math.max(10, Math.min(80, Math.floor(Number(limit || 25))));
+  var stats = marketCollect24hStats(book, book.resourceType, serverNowTs);
+  return {
+    ok: true,
+    marketKey: String(book.marketKey || ""),
+    marketType: String(book.marketType || MARKET_TYPE_PUBLIC),
+    allianceId: String(book.allianceId || ""),
+    resourceType: String(book.resourceType || ""),
+    bestBid: book.buyOrders && book.buyOrders[0] ? book.buyOrders[0].unitPrice : 0,
+    bestAsk: book.sellOrders && book.sellOrders[0] ? book.sellOrders[0].unitPrice : 0,
+    stats24h: stats,
+    buyOrders: (book.buyOrders || []).slice(0, safeLimit).map(marketNormalizeOrderForClient).filter(Boolean),
+    sellOrders: (book.sellOrders || []).slice(0, safeLimit).map(marketNormalizeOrderForClient).filter(Boolean),
+    recentTrades: (book.recentTrades || []).slice(0, Math.max(10, safeLimit)).map(marketNormalizeTradeForClient).filter(Boolean),
+    snapshots: (book.snapshots || []).slice(-Math.max(24, safeLimit)).map(function(row) {
+      return {
+        bucketStartAt: Math.max(0, Math.floor(Number(row.bucketStartAt || 0))),
+        openPrice: Math.max(0, Math.floor(Number(row.openPrice || 0))),
+        highPrice: Math.max(0, Math.floor(Number(row.highPrice || 0))),
+        lowPrice: Math.max(0, Math.floor(Number(row.lowPrice || 0))),
+        closePrice: Math.max(0, Math.floor(Number(row.closePrice || 0))),
+        tradedVolume: Math.max(0, Math.floor(Number(row.tradedVolume || 0))),
+        tradeCount: Math.max(0, Math.floor(Number(row.tradeCount || 0)))
+      };
+    }),
+    serverNowTs: serverNowTs,
+    cursor: ""
+  };
+}
+
+function marketBookHasExpiredOrders(book, serverNowTs) {
+  var lists = [book && book.buyOrders, book && book.sellOrders];
+  for (var i = 0; i < lists.length; i++) {
+    var rows = Array.isArray(lists[i]) ? lists[i] : [];
+    for (var j = 0; j < rows.length; j++) {
+      var order = rows[j] || {};
+      if (!order.expiresAt || order.expiresAt > serverNowTs) continue;
+      var status = String(order.status || "").trim().toUpperCase();
+      if (status === MARKET_ORDER_STATUS_OPEN || status === MARKET_ORDER_STATUS_PARTIAL) return true;
+    }
+  }
+  return false;
+}
+
+function marketSerializeWalletResponse(userState) {
+  var bourseLevel = marketBourseLevelForPlayer(userState.economy, userState.rankingProgress);
+  var availableCredits = Math.max(0, Math.floor(Number(userState.economy.premiumCredits || 0)));
+  return {
+    ok: true,
+    wallet: {
+      credits: availableCredits,
+      creditSubunits: Math.max(0, Math.floor(Number(userState.economy.marketCreditSubunits || 0))),
+      orbitalCredits: availableCredits,
+      reservedCredits: Math.max(0, Math.floor(Number(userState.economy.marketReservedCredits || 0)))
+    },
+    reservedResources: normalizeMarketReservedResourceMap(userState.economy.marketReservedResources),
+    marketAccess: {
+      bourseLevel: bourseLevel,
+      orderCap: marketOrderCapForBourseLevel(bourseLevel),
+      publicUnlocked: marketSupportsType(bourseLevel, MARKET_TYPE_PUBLIC),
+      privateUnlocked: marketSupportsType(bourseLevel, MARKET_TYPE_PRIVATE),
+      allianceUnlocked: marketSupportsType(bourseLevel, MARKET_TYPE_ALLIANCE),
+      alertsUnlocked: marketAlertsEnabled(bourseLevel),
+      advancedHistoryUnlocked: marketHistoryEnabled(bourseLevel)
+    }
+  };
+}
+
+function marketSerializeAccountResponse(userState) {
+  var walletState = marketSerializeWalletResponse(userState);
+  return {
+    wallet: walletState.wallet,
+    reservedResources: walletState.reservedResources,
+    marketAccess: walletState.marketAccess,
+    resources: serializeResourceAmounts(userState.economy)
+  };
+}
+
+function withMarketContractTransaction(nk, userSpecs, contractId, update) {
+  var lastError = "failed";
+  var key = MARKET_PRIVATE_PREFIX + String(contractId || "").trim();
+  for (var attempt = 0; attempt < MARKET_WRITE_RETRIES; attempt++) {
+    var ts = nowTs();
+    var contractRead = readStorageObject(nk, MARKET_COLLECTION, key, "");
+    var contract = normalizeMarketOrder(contractRead.state);
+    var userStateMap = marketReadAllUserStates(nk, userSpecs);
+    var result = update({ contract: contract, users: userStateMap, key: key }, ts);
+    var writes = marketBuildUserWrites(userStateMap, ts);
+    if (result && Object.prototype.hasOwnProperty.call(result, "contract")) contract = result.contract;
+    if (contract) {
+      writes.push(makeStorageWriteReq(MARKET_COLLECTION, key, "", contract, contractRead.version || "", 0, 0));
+    } else if (contractRead.state) {
+      writes.push(makeStorageWriteReq(MARKET_COLLECTION, key, "", {}, contractRead.version || "", 0, 0));
+    }
+    var extraWrites = Array.isArray(result && result.extraWrites) ? result.extraWrites.map(marketNormalizeSystemWrite).filter(Boolean) : [];
+    for (var ew = 0; ew < extraWrites.length; ew++) {
+      var row = extraWrites[ew];
+      writes.push(makeStorageWriteReq(row.collection, row.key, row.userId, row.value, row.version || "", row.permissionRead, row.permissionWrite));
+    }
+    if (writes.length <= 0) return { contract: contract, users: userStateMap, result: result };
+    try {
+      nk.storageWrite(writes);
+      return { contract: contract, users: userStateMap, result: result };
+    } catch (err) {
+      lastError = String(err || "failed");
+    }
+  }
+  throw new Error("Private market contract transaction failed after retries: " + lastError);
+}
+
+function marketDispatchNotifications(nk, notifications) {
+  var rows = Array.isArray(notifications) ? notifications : [];
+  for (var i = 0; i < rows.length; i++) {
+    var row = rows[i] || {};
+    if (!row.userId || !row.order || !row.body) continue;
+    marketCreateOrderNotification(nk, String(row.userId || ""), row.order, String(row.eventKey || ""), String(row.body || ""));
+  }
+}
+
+function marketRefreshRelevantBooks(nk, userId, username, profile) {
+  var seen = {};
+  var rows = (profile && profile.activeOrders) || [];
+  for (var i = 0; i < rows.length; i++) {
+    var row = rows[i] || {};
+    var marketType = String(row.marketType || MARKET_TYPE_PUBLIC).trim().toLowerCase();
+    if (marketType === MARKET_TYPE_PRIVATE) continue;
+    var resourceType = String(row.resourceType || "").trim();
+    if (RESOURCE_IDS.indexOf(resourceType) === -1) continue;
+    var allianceId = String(row.allianceId || "").trim();
+    var dedupe = marketType + "::" + allianceId + "::" + resourceType;
+    if (seen[dedupe]) continue;
+    seen[dedupe] = true;
+    try {
+      var tx = withMarketBookTransaction(
+        nk,
+        [{ userId: userId, username: username }],
+        marketType,
+        resourceType,
+        allianceId,
+        function(context, ts) {
+          var notifications = [];
+          marketExpireBookOrders(context.book, context.users, ts, notifications);
+          return { notifications: notifications };
+        }
+      );
+      marketDispatchNotifications(nk, tx.result && tx.result.notifications);
+    } catch (_err) {
+      // noop
+    }
+  }
+}
+
+function rpcMarketGetWallet(ctx, _logger, nk, _payload) {
+  var userId = requireUserId(ctx);
+  var username = String(ctx.username || userId);
+  var actorState = marketReadUserContext(nk, userId, username);
+  var alerts = readMarketAlertsState(nk, userId).state;
+  var response = marketSerializeWalletResponse({
+    economy: actorState.economy,
+    rankingProgress: actorState.rankingProgress
+  });
+  response.alerts = alerts.alerts || [];
+  response.profile = actorState.marketProfile;
+  response.resources = serializeResourceAmounts(actorState.economy);
+  return JSON.stringify(response);
+}
+
+function rpcMarketGetBook(ctx, _logger, nk, payload) {
+  var userId = requireUserId(ctx);
+  var username = String(ctx.username || userId);
+  var body = parsePayload(payload);
+  var resourceType = String(body.resourceType || "").trim();
+  if (RESOURCE_IDS.indexOf(resourceType) === -1) throw new Error("Invalid resourceType.");
+  var marketType = String(body.marketType || MARKET_TYPE_PUBLIC).trim().toLowerCase();
+  if (marketType !== MARKET_TYPE_PUBLIC && marketType !== MARKET_TYPE_ALLIANCE) throw new Error("Unsupported marketType.");
+  var actorState = marketReadUserContext(nk, userId, username);
+  var allianceId = marketType === MARKET_TYPE_ALLIANCE ? String(actorState.playerProfile && actorState.playerProfile.allianceId || "").trim() : "";
+  if (marketType === MARKET_TYPE_ALLIANCE && !allianceId) throw new Error("Join an alliance first.");
+  var serverNowTs = nowTs();
+  var bookRead = readMarketBook(nk, marketType, resourceType, allianceId);
+  var book = bookRead.state;
+  if (marketBookHasExpiredOrders(book, serverNowTs)) {
+    try {
+      var tx = withMarketBookTransaction(
+        nk,
+        [{ userId: userId, username: username }],
+        marketType,
+        resourceType,
+        allianceId,
+        function(context, ts) {
+          var notifications = [];
+          marketExpireBookOrders(context.book, context.users, ts, notifications);
+          return { notifications: notifications };
+        }
+      );
+      marketDispatchNotifications(nk, tx.result && tx.result.notifications);
+      book = tx.book;
+      serverNowTs = nowTs();
+    } catch (_err) {
+      book = bookRead.state;
+    }
+  }
+  return JSON.stringify(marketSerializeBookResponse(book, serverNowTs, body.limit));
+}
+
+function rpcMarketGetAllianceBook(ctx, logger, nk, payload) {
+  var body = parsePayload(payload);
+  body.marketType = MARKET_TYPE_ALLIANCE;
+  return rpcMarketGetBook(ctx, logger, nk, JSON.stringify(body));
+}
+
+function rpcMarketGetHistory(ctx, logger, nk, payload) {
+  return rpcMarketGetBook(ctx, logger, nk, payload);
+}
+
+function rpcMarketGetMyOrders(ctx, _logger, nk, payload) {
+  var userId = requireUserId(ctx);
+  var username = String(ctx.username || userId);
+  var body = parsePayload(payload);
+  var statusFilter = String(body.status || "").trim().toLowerCase();
+  marketRefreshRelevantBooks(nk, userId, username, readMarketProfile(nk, userId).state);
+  var profile = readMarketProfile(nk, userId).state;
+  var rows = (profile.activeOrders || []).concat(profile.recentOrders || []);
+  if (statusFilter) {
+    rows = rows.filter(function(row) { return String(row.status || "").trim().toLowerCase() === statusFilter; });
+  }
+  rows.sort(function(a, b) { return Math.max(0, Number(b.updatedAt || b.createdAt || 0)) - Math.max(0, Number(a.updatedAt || a.createdAt || 0)); });
+  return JSON.stringify({ ok: true, items: rows, cursor: "" });
+}
+
+function rpcMarketGetMyTrades(ctx, _logger, nk, payload) {
+  var userId = requireUserId(ctx);
+  parsePayload(payload);
+  var profile = readMarketProfile(nk, userId).state;
+  return JSON.stringify({
+    ok: true,
+    items: (profile.recentTrades || []).slice().sort(function(a, b) { return Math.max(0, Number(b.createdAt || 0)) - Math.max(0, Number(a.createdAt || 0)); }),
+    cursor: ""
+  });
+}
+
+function rpcMarketGetPlayerMarketStats(ctx, _logger, nk, _payload) {
+  var userId = requireUserId(ctx);
+  var username = String(ctx.username || userId);
+  var actorState = marketReadUserContext(nk, userId, username);
+  var bourseLevel = marketBourseLevelForPlayer(actorState.economy, actorState.rankingProgress);
+  return JSON.stringify({
+    ok: true,
+    stats: {
+      totalBoughtScaled: Math.max(0, Math.floor(Number(actorState.marketProfile.totalBoughtScaled || 0))),
+      totalSoldScaled: Math.max(0, Math.floor(Number(actorState.marketProfile.totalSoldScaled || 0))),
+      totalFeesPaidScaled: Math.max(0, Math.floor(Number(actorState.marketProfile.totalFeesPaidScaled || 0))),
+      totalTradeVolumeScaled: Math.max(0, Math.floor(Number(actorState.marketProfile.totalTradeVolumeScaled || 0))),
+      totalBoughtUnits: sanitizeResourceCostMap(actorState.marketProfile.totalBoughtUnits),
+      totalSoldUnits: sanitizeResourceCostMap(actorState.marketProfile.totalSoldUnits),
+      activeOrderCount: marketGetOpenOrderCount(actorState.marketProfile),
+      orderCap: marketOrderCapForBourseLevel(bourseLevel)
+    }
+  });
+}
+
+function rpcMarketCreateAlert(ctx, _logger, nk, payload) {
+  var userId = requireUserId(ctx);
+  var username = String(ctx.username || userId);
+  var body = parsePayload(payload);
+  var actorState = marketReadUserContext(nk, userId, username);
+  var bourseLevel = marketBourseLevelForPlayer(actorState.economy, actorState.rankingProgress);
+  if (!marketAlertsEnabled(bourseLevel)) throw new Error("Alerts require Bourse Orbitale level 10.");
+  var alert = normalizeMarketAlert({
+    id: makeServerId("alert", nowTs()),
+    resourceType: String(body.resourceType || "").trim(),
+    conditionType: String(body.conditionType || "").trim().toLowerCase(),
+    targetPrice: Math.max(1, Math.floor(Number(body.targetPrice || 0))),
+    isActive: true,
+    createdAt: nowTs()
+  });
+  if (!alert) throw new Error("Invalid alert payload.");
+  for (var attempt = 0; attempt < MARKET_WRITE_RETRIES; attempt++) {
+    var read = readMarketAlertsState(nk, userId);
+    var state = marketClone(read.state);
+    if ((state.alerts || []).length >= MARKET_ALERT_MAX_PER_PLAYER) throw new Error("Alert limit reached.");
+    state.alerts.unshift(alert);
+    state.updatedAt = nowTs();
+    try {
+      nk.storageWrite([makeStorageWriteReq(MARKET_COLLECTION, MARKET_ALERTS_KEY, userId, state, read.version || "", 0, 0)]);
+      return JSON.stringify({ ok: true, alert: alert, alerts: state.alerts });
+    } catch (err) {
+      if (attempt === MARKET_WRITE_RETRIES - 1) throw err;
+    }
+  }
+  throw new Error("Alert write failed.");
+}
+
+function rpcMarketDeleteAlert(ctx, _logger, nk, payload) {
+  var userId = requireUserId(ctx);
+  var body = parsePayload(payload);
+  var alertId = String(body.alertId || "").trim();
+  if (!alertId) throw new Error("Missing alertId.");
+  for (var attempt = 0; attempt < MARKET_WRITE_RETRIES; attempt++) {
+    var read = readMarketAlertsState(nk, userId);
+    var state = marketClone(read.state);
+    state.alerts = (state.alerts || []).filter(function(row) { return String(row.id || "") !== alertId; });
+    state.updatedAt = nowTs();
+    try {
+      nk.storageWrite([makeStorageWriteReq(MARKET_COLLECTION, MARKET_ALERTS_KEY, userId, state, read.version || "", 0, 0)]);
+      return JSON.stringify({ ok: true, alerts: state.alerts });
+    } catch (err) {
+      if (attempt === MARKET_WRITE_RETRIES - 1) throw err;
+    }
+  }
+  throw new Error("Alert delete failed.");
+}
+
+function rpcMarketCreateOrder(ctx, _logger, nk, payload) {
+  var userId = requireUserId(ctx);
+  var username = String(ctx.username || userId);
+  var body = marketValidateOrderPayload(parsePayload(payload));
+  if (body.marketType === MARKET_TYPE_PRIVATE) throw new Error("Use rpc_market_create_private_contract for private contracts.");
+  var actorState = marketReadUserContext(nk, userId, username);
+  var bourseLevel = marketValidateAccessRules(actorState, body);
+  var allianceId = body.marketType === MARKET_TYPE_ALLIANCE ? String(actorState.playerProfile && actorState.playerProfile.allianceId || "").trim() : "";
+  var tx = withMarketBookTransaction(
+    nk,
+    [{ userId: userId, username: username }],
+    body.marketType,
+    body.resourceType,
+    allianceId,
+    function(context, ts) {
+      var actor = context.users[userId];
+      var notifications = [];
+      marketExpireBookOrders(context.book, context.users, ts, notifications);
+      var median = marketCurrentMedianUnitPrice(context.book, body.resourceType);
+      var order = marketCreateOrderRecord(actor, body, bourseLevel, body.marketType, allianceId, median, ts);
+      marketChargeOrderCreation(actor, order);
+      var trades = marketMatchIncomingOrder(context.book, order, context.users, ts, notifications);
+      if (order.remainingQuantity > 0) {
+        if (order.orderType === MARKET_ORDER_SIDE_BUY) context.book.buyOrders.push(order);
+        else context.book.sellOrders.push(order);
+        sortMarketOrders(order.orderType === MARKET_ORDER_SIDE_BUY ? context.book.buyOrders : context.book.sellOrders, order.orderType);
+        marketPushOrderProfile(actor.marketProfile, order, false);
+      } else {
+        marketPushOrderProfile(actor.marketProfile, order, true);
+      }
+      notifications.push({
+        userId: userId,
+        order: order,
+        eventKey: order.remainingQuantity > 0 ? "opened" : "filled",
+        body:
+          order.remainingQuantity > 0
+            ? "Ordre publie sur " + marketFormatResourceLabel(order.resourceType) + " au prix " + marketFormatScaledCredits(order.unitPrice * marketBundleSize(order.resourceType)) + " / lot."
+            : "Ordre execute immediatement sur " + marketFormatResourceLabel(order.resourceType) + "."
+      });
+      return { order: order, trades: trades, notifications: notifications };
+    }
+  );
+  marketDispatchNotifications(nk, tx.result && tx.result.notifications);
+  return JSON.stringify({
+    ok: true,
+    order: marketNormalizeOrderForClient(tx.result && tx.result.order),
+    trades: Array.isArray(tx.result && tx.result.trades) ? tx.result.trades.map(marketNormalizeTradeForClient).filter(Boolean) : [],
+    account: marketSerializeAccountResponse(tx.users[userId]),
+    wallet: marketSerializeWalletResponse(tx.users[userId]).wallet
+  });
+}
+
+function rpcMarketCancelOrder(ctx, _logger, nk, payload) {
+  var userId = requireUserId(ctx);
+  var username = String(ctx.username || userId);
+  var body = parsePayload(payload);
+  var orderId = String(body.orderId || "").trim();
+  if (!orderId) throw new Error("Missing orderId.");
+  var profile = readMarketProfile(nk, userId).state;
+  var summary = null;
+  var activeRows = profile.activeOrders || [];
+  for (var i = 0; i < activeRows.length; i++) {
+    if (String(activeRows[i].id || "") === orderId) {
+      summary = activeRows[i];
+      break;
+    }
+  }
+  if (!summary) throw new Error("Order not found in active list.");
+  if (String(summary.marketType || "").trim().toLowerCase() === MARKET_TYPE_PRIVATE) {
+    throw new Error("Use private contract RPCs for contracts.");
+  }
+  var tx = withMarketBookTransaction(
+    nk,
+    [{ userId: userId, username: username }],
+    summary.marketType,
+    summary.resourceType,
+    summary.allianceId || "",
+    function(context, ts) {
+      var actor = context.users[userId];
+      var notifications = [];
+      marketExpireBookOrders(context.book, context.users, ts, notifications);
+      var list = String(summary.orderType || "").trim().toLowerCase() === MARKET_ORDER_SIDE_BUY ? context.book.buyOrders : context.book.sellOrders;
+      var order = null;
+      for (var idx = 0; idx < list.length; idx++) {
+        if (String(list[idx].id || "") === orderId) {
+          order = list[idx];
+          break;
+        }
+      }
+      if (!order) throw new Error("Order already closed.");
+      if (marketOwnerUserId(order) !== userId) throw new Error("Cannot cancel another player's order.");
+      var cancelFee = 0;
+      if (order.orderType === MARKET_ORDER_SIDE_BUY) {
+        cancelFee = marketComputeBpsAmount(order.reservedCredits, order.cancelFeeBps || 0);
+        var refundScaled = Math.max(0, Math.floor(Number(order.reservedCredits || 0)) - cancelFee);
+        marketReleaseBuyCredits(actor.economy, refundScaled);
+        actor.economy.marketReservedCredits = Math.max(0, Math.floor(Number(actor.economy.marketReservedCredits || 0)) - Math.max(0, Math.floor(Number(order.reservedCredits || 0))));
+        order.reservedCredits = 0;
+      } else {
+        cancelFee = marketComputeBpsAmount(order.unitPrice * order.remainingQuantity, order.cancelFeeBps || 0);
+        if (cancelFee > 0) {
+          marketSpendInstantCredits(actor.economy, cancelFee, "Not enough credits to pay the cancellation fee.");
+        }
+        marketReleaseSellResources(actor.economy, order.resourceType, order.remainingQuantity);
+        order.reservedResources = Math.max(0, Math.floor(Number(order.reservedResources || 0)) - order.remainingQuantity);
+      }
+      actor.marketProfile.totalFeesPaidScaled = Math.max(0, Math.floor(Number(actor.marketProfile.totalFeesPaidScaled || 0))) + cancelFee;
+      order.remainingQuantity = 0;
+      marketMarkOrderClosed(order, MARKET_ORDER_STATUS_CANCELLED, ts);
+      marketRemoveOrderFromProfile(actor.marketProfile, order.id);
+      marketPushOrderProfile(actor.marketProfile, order, true);
+      marketCleanupClosedOrders(context.book);
+      notifications.push({
+        userId: userId,
+        order: order,
+        eventKey: "cancelled",
+        body: "Ordre annule sur " + marketFormatResourceLabel(order.resourceType) + "."
+      });
+      return { order: order, cancelFee: cancelFee, notifications: notifications };
+    }
+  );
+  marketDispatchNotifications(nk, tx.result && tx.result.notifications);
+  return JSON.stringify({
+    ok: true,
+    order: marketNormalizeOrderForClient(tx.result && tx.result.order),
+    cancelFee: Math.max(0, Math.floor(Number(tx.result && tx.result.cancelFee || 0))),
+    account: marketSerializeAccountResponse(tx.users[userId]),
+    wallet: marketSerializeWalletResponse(tx.users[userId]).wallet
+  });
+}
+
+function rpcMarketCreatePrivateContract(ctx, _logger, nk, payload) {
+  var userId = requireUserId(ctx);
+  var username = String(ctx.username || userId);
+  var body = marketValidateOrderPayload(parsePayload(payload));
+  body.marketType = MARKET_TYPE_PRIVATE;
+  var actorState = marketReadUserContext(nk, userId, username);
+  var bourseLevel = marketValidateAccessRules(actorState, body);
+  var targetRecipient = resolveInboxRecipient(nk, body.targetPlayerId || body.targetUsername);
+  if (String(targetRecipient.userId || "") === userId) throw new Error("Cannot create a contract for yourself.");
+  var targetState = marketReadUserContext(nk, targetRecipient.userId, targetRecipient.username || targetRecipient.userId);
+  if (String(actorState.playerProfile && actorState.playerProfile.allianceId || "").trim() &&
+      String(actorState.playerProfile && actorState.playerProfile.allianceId || "").trim() === String(targetState.playerProfile && targetState.playerProfile.allianceId || "").trim() &&
+      actorState.ageDays < MARKET_NEW_ACCOUNT_TOP_TIER_DAYS) {
+    throw new Error("Private contracts inside the same alliance are temporarily blocked for young accounts.");
+  }
+  var contractId = makeServerId("priv", nowTs());
+  var tx = withMarketContractTransaction(
+    nk,
+    [
+      { userId: userId, username: username },
+      { userId: targetRecipient.userId, username: targetRecipient.username || targetRecipient.userId }
+    ],
+    contractId,
+    function(context, ts) {
+      var actor = context.users[userId];
+      var target = context.users[targetRecipient.userId];
+      var median = marketReferenceUnitPrice(body.resourceType);
+      var contract = marketCreateOrderRecord(actor, body, bourseLevel, MARKET_TYPE_PRIVATE, "", median, ts);
+      contract.id = contractId;
+      contract.targetPlayerId = target.userId;
+      contract.targetUsername = target.username;
+      marketChargeOrderCreation(actor, contract);
+      marketPushPrivateContractIndex(actor.privateIndex, {
+        id: contract.id,
+        status: contract.status,
+        orderType: contract.orderType,
+        resourceType: contract.resourceType,
+        quantity: contract.totalQuantity,
+        remainingQuantity: contract.remainingQuantity,
+        unitPrice: contract.unitPrice,
+        actorPlayerId: actor.userId,
+        actorUsername: actor.username,
+        targetPlayerId: target.userId,
+        targetUsername: target.username,
+        expiresAt: contract.expiresAt,
+        createdAt: contract.createdAt,
+        updatedAt: contract.updatedAt
+      });
+      marketPushPrivateContractIndex(target.privateIndex, {
+        id: contract.id,
+        status: contract.status,
+        orderType: contract.orderType,
+        resourceType: contract.resourceType,
+        quantity: contract.totalQuantity,
+        remainingQuantity: contract.remainingQuantity,
+        unitPrice: contract.unitPrice,
+        actorPlayerId: actor.userId,
+        actorUsername: actor.username,
+        targetPlayerId: target.userId,
+        targetUsername: target.username,
+        expiresAt: contract.expiresAt,
+        createdAt: contract.createdAt,
+        updatedAt: contract.updatedAt
+      });
+      return { contract: contract };
+    }
+  );
+  marketCreateInboxMessage(
+    nk,
+    targetRecipient.userId,
+    "Contrat prive recu",
+    username + " vous propose un contrat prive sur " + marketFormatResourceLabel(body.resourceType) + ".",
+    { kind: MARKET_INBOX_META_KIND, contractId: contractId, resourceType: body.resourceType, marketType: MARKET_TYPE_PRIVATE }
+  );
+  return JSON.stringify({
+    ok: true,
+    contract: marketNormalizeOrderForClient(tx.contract || tx.result && tx.result.contract),
+    account: marketSerializeAccountResponse(tx.users[userId])
+  });
+}
+
+function rpcMarketListPrivateContracts(ctx, _logger, nk, _payload) {
+  var userId = requireUserId(ctx);
+  var username = String(ctx.username || userId);
+  var state = marketReadUserContext(nk, userId, username);
+  var now = nowTs();
+  var rows = (state.privateIndex.contracts || []).filter(function(row) { return !row.expiresAt || row.expiresAt > now || row.status !== MARKET_ORDER_STATUS_OPEN; });
+  rows.sort(function(a, b) { return Math.max(0, Number(b.updatedAt || b.createdAt || 0)) - Math.max(0, Number(a.updatedAt || a.createdAt || 0)); });
+  return JSON.stringify({ ok: true, items: rows, cursor: "" });
+}
+
+function rpcMarketAcceptPrivateContract(ctx, _logger, nk, payload) {
+  var userId = requireUserId(ctx);
+  var username = String(ctx.username || userId);
+  var body = parsePayload(payload);
+  var contractId = String(body.contractId || "").trim();
+  if (!contractId) throw new Error("Missing contractId.");
+  var summaryIndex = readMarketPrivateIndexState(nk, userId).state;
+  var summary = null;
+  for (var i = 0; i < (summaryIndex.contracts || []).length; i++) {
+    if (String(summaryIndex.contracts[i].id || "") === contractId) {
+      summary = summaryIndex.contracts[i];
+      break;
+    }
+  }
+  if (!summary) throw new Error("Contract not found.");
+  var actorUserId = String(summary.actorPlayerId || "").trim();
+  var actorUsername = String(summary.actorUsername || actorUserId);
+  var tx = withMarketContractTransaction(
+    nk,
+    [
+      { userId: actorUserId, username: actorUsername },
+      { userId: userId, username: username }
+    ],
+    contractId,
+    function(context, ts) {
+      var contract = normalizeMarketOrder(context.contract);
+      if (!contract) throw new Error("Contract not found.");
+      if (contract.marketType !== MARKET_TYPE_PRIVATE) throw new Error("Not a private contract.");
+      if (contract.status !== MARKET_ORDER_STATUS_OPEN && contract.status !== MARKET_ORDER_STATUS_PARTIAL) throw new Error("Contract already closed.");
+      if (contract.expiresAt > 0 && contract.expiresAt <= ts) throw new Error("Contract expired.");
+      if (String(contract.targetPlayerId || "") !== userId) throw new Error("You are not the contract target.");
+      var actor = context.users[actorUserId];
+      var target = context.users[userId];
+      if (contract.orderType === MARKET_ORDER_SIDE_SELL) {
+        if (!marketResourceUnlockedForPlayer(target.economy, target.rankingProgress, contract.resourceType)) {
+          throw new Error("Resource not unlocked for the buyer.");
+        }
+        var totalCost = contract.unitPrice * contract.remainingQuantity;
+        marketSpendInstantCredits(target.economy, totalCost, "Not enough credits.");
+        target.economy.resources[contract.resourceType].amount = Math.max(0, Math.floor(Number(target.economy.resources[contract.resourceType].amount || 0))) + contract.remainingQuantity;
+        actor.economy.marketReservedResources = normalizeMarketReservedResourceMap(actor.economy.marketReservedResources);
+        actor.economy.marketReservedResources[contract.resourceType] = Math.max(0, Math.floor(Number(actor.economy.marketReservedResources[contract.resourceType] || 0)) - contract.remainingQuantity);
+        var tax = marketComputeBpsAmount(totalCost, marketFeeConfig(MARKET_TYPE_PRIVATE).taxBps);
+        var payout = Math.max(0, totalCost - tax - Math.max(0, Math.floor(Number(contract.listingFeeRemaining || 0))));
+        marketAddInstantCredits(actor.economy, payout);
+        actor.marketProfile.totalFeesPaidScaled = Math.max(0, Math.floor(Number(actor.marketProfile.totalFeesPaidScaled || 0))) + tax + Math.max(0, Math.floor(Number(contract.listingFeeRemaining || 0)));
+        var trade = {
+          id: makeServerId("trade", ts),
+          buyOrderId: contract.orderType === MARKET_ORDER_SIDE_BUY ? contract.id : contract.id,
+          sellOrderId: contract.orderType === MARKET_ORDER_SIDE_SELL ? contract.id : contract.id,
+          buyerPlayerId: userId,
+          buyerUsername: username,
+          sellerPlayerId: actorUserId,
+          sellerUsername: actorUsername,
+          marketType: MARKET_TYPE_PRIVATE,
+          allianceId: "",
+          resourceType: contract.resourceType,
+          quantity: contract.remainingQuantity,
+          unitPrice: contract.unitPrice,
+          totalPrice: totalCost,
+          taxAmount: tax,
+          createdAt: ts,
+          metadata: { contractId: contract.id }
+        };
+        marketPushTradeProfile(target.marketProfile, trade, true);
+        marketPushTradeProfile(actor.marketProfile, trade, false);
+      } else {
+        if (!marketResourceUnlockedForPlayer(actor.economy, actor.rankingProgress, contract.resourceType)) {
+          throw new Error("Resource not unlocked for the buyer.");
+        }
+        var sellerAvailable = Math.max(0, Math.floor(Number(((target.economy.resources || {})[contract.resourceType] || {}).amount || 0)));
+        if (sellerAvailable < contract.remainingQuantity) {
+          throw new Error("Seller does not have enough resources anymore.");
+        }
+        target.economy.resources[contract.resourceType].amount = sellerAvailable - contract.remainingQuantity;
+        actor.economy.resources[contract.resourceType].amount = Math.max(0, Math.floor(Number(actor.economy.resources[contract.resourceType].amount || 0))) + contract.remainingQuantity;
+        var reservedCredits = Math.max(0, Math.floor(Number(contract.reservedCredits || 0)));
+        actor.economy.marketReservedCredits = Math.max(0, Math.floor(Number(actor.economy.marketReservedCredits || 0)) - reservedCredits);
+        var taxBuy = marketComputeBpsAmount(reservedCredits, marketFeeConfig(MARKET_TYPE_PRIVATE).taxBps);
+        var sellerPayout = Math.max(0, reservedCredits - taxBuy);
+        marketAddInstantCredits(target.economy, sellerPayout);
+        actor.marketProfile.totalFeesPaidScaled = Math.max(0, Math.floor(Number(actor.marketProfile.totalFeesPaidScaled || 0))) + taxBuy + Math.max(0, Math.floor(Number(contract.listingFeePaid || 0)));
+        var tradeBuy = {
+          id: makeServerId("trade", ts),
+          buyOrderId: contract.id,
+          sellOrderId: contract.id,
+          buyerPlayerId: actorUserId,
+          buyerUsername: actorUsername,
+          sellerPlayerId: userId,
+          sellerUsername: username,
+          marketType: MARKET_TYPE_PRIVATE,
+          allianceId: "",
+          resourceType: contract.resourceType,
+          quantity: contract.remainingQuantity,
+          unitPrice: contract.unitPrice,
+          totalPrice: reservedCredits,
+          taxAmount: taxBuy,
+          createdAt: ts,
+          metadata: { contractId: contract.id }
+        };
+        marketPushTradeProfile(actor.marketProfile, tradeBuy, true);
+        marketPushTradeProfile(target.marketProfile, tradeBuy, false);
+      }
+      contract.remainingQuantity = 0;
+      contract.reservedCredits = 0;
+      contract.reservedResources = 0;
+      contract.listingFeeRemaining = 0;
+      marketMarkOrderClosed(contract, MARKET_ORDER_STATUS_FILLED, ts);
+      marketUpdatePrivateContractIndex(actor.privateIndex, {
+        id: contract.id,
+        status: contract.status,
+        orderType: contract.orderType,
+        resourceType: contract.resourceType,
+        quantity: contract.totalQuantity,
+        remainingQuantity: 0,
+        unitPrice: contract.unitPrice,
+        actorPlayerId: actor.userId,
+        actorUsername: actor.username,
+        targetPlayerId: userId,
+        targetUsername: username,
+        expiresAt: contract.expiresAt,
+        createdAt: contract.createdAt,
+        updatedAt: ts
+      });
+      marketUpdatePrivateContractIndex(target.privateIndex, {
+        id: contract.id,
+        status: contract.status,
+        orderType: contract.orderType,
+        resourceType: contract.resourceType,
+        quantity: contract.totalQuantity,
+        remainingQuantity: 0,
+        unitPrice: contract.unitPrice,
+        actorPlayerId: actor.userId,
+        actorUsername: actor.username,
+        targetPlayerId: userId,
+        targetUsername: username,
+        expiresAt: contract.expiresAt,
+        createdAt: contract.createdAt,
+        updatedAt: ts
+      });
+      return { contract: contract };
+    }
+  );
+  marketCreateInboxMessage(nk, actorUserId, "Contrat prive accepte", username + " a accepte votre contrat prive.", { kind: MARKET_INBOX_META_KIND, contractId: contractId, marketType: MARKET_TYPE_PRIVATE });
+  return JSON.stringify({
+    ok: true,
+    contract: marketNormalizeOrderForClient(tx.contract || tx.result && tx.result.contract),
+    account: marketSerializeAccountResponse(tx.users[userId])
+  });
+}
+
+function rpcMarketDeclinePrivateContract(ctx, _logger, nk, payload) {
+  var userId = requireUserId(ctx);
+  var username = String(ctx.username || userId);
+  var body = parsePayload(payload);
+  var contractId = String(body.contractId || "").trim();
+  if (!contractId) throw new Error("Missing contractId.");
+  var summaryIndex = readMarketPrivateIndexState(nk, userId).state;
+  var summary = null;
+  for (var i = 0; i < (summaryIndex.contracts || []).length; i++) {
+    if (String(summaryIndex.contracts[i].id || "") === contractId) {
+      summary = summaryIndex.contracts[i];
+      break;
+    }
+  }
+  if (!summary) throw new Error("Contract not found.");
+  var actorUserId = String(summary.actorPlayerId || "").trim();
+  var actorUsername = String(summary.actorUsername || actorUserId);
+  var tx = withMarketContractTransaction(
+    nk,
+    [
+      { userId: actorUserId, username: actorUsername },
+      { userId: userId, username: username }
+    ],
+    contractId,
+    function(context, ts) {
+      var contract = normalizeMarketOrder(context.contract);
+      if (!contract) throw new Error("Contract not found.");
+      if (String(contract.targetPlayerId || "") !== userId && marketOwnerUserId(contract) !== userId) throw new Error("Cannot decline this contract.");
+      if (contract.orderType === MARKET_ORDER_SIDE_BUY) {
+        marketReleaseBuyCredits(context.users[actorUserId].economy, contract.reservedCredits);
+        contract.reservedCredits = 0;
+      } else {
+        marketReleaseSellResources(context.users[actorUserId].economy, contract.resourceType, contract.remainingQuantity);
+        contract.reservedResources = 0;
+      }
+      contract.remainingQuantity = 0;
+      marketMarkOrderClosed(contract, MARKET_ORDER_STATUS_DECLINED, ts);
+      marketUpdatePrivateContractIndex(context.users[actorUserId].privateIndex, {
+        id: contract.id,
+        status: contract.status,
+        orderType: contract.orderType,
+        resourceType: contract.resourceType,
+        quantity: contract.totalQuantity,
+        remainingQuantity: 0,
+        unitPrice: contract.unitPrice,
+        actorPlayerId: actorUserId,
+        actorUsername: actorUsername,
+        targetPlayerId: contract.targetPlayerId,
+        targetUsername: contract.targetUsername,
+        expiresAt: contract.expiresAt,
+        createdAt: contract.createdAt,
+        updatedAt: ts
+      });
+      marketUpdatePrivateContractIndex(context.users[userId].privateIndex, {
+        id: contract.id,
+        status: contract.status,
+        orderType: contract.orderType,
+        resourceType: contract.resourceType,
+        quantity: contract.totalQuantity,
+        remainingQuantity: 0,
+        unitPrice: contract.unitPrice,
+        actorPlayerId: actorUserId,
+        actorUsername: actorUsername,
+        targetPlayerId: contract.targetPlayerId,
+        targetUsername: contract.targetUsername,
+        expiresAt: contract.expiresAt,
+        createdAt: contract.createdAt,
+        updatedAt: ts
+      });
+      return { contract: contract };
+    }
+  );
+  marketCreateInboxMessage(nk, actorUserId, "Contrat prive ferme", username + " a refuse ou ferme le contrat prive.", { kind: MARKET_INBOX_META_KIND, contractId: contractId, marketType: MARKET_TYPE_PRIVATE });
+  return JSON.stringify({
+    ok: true,
+    contract: marketNormalizeOrderForClient(tx.contract || tx.result && tx.result.contract),
+    account: marketSerializeAccountResponse(tx.users[userId])
+  });
+}
+
+
+
 
 function cleanAllianceInvites(alliance, serverNowTs) {
   var invites = Array.isArray(alliance.invites) ? alliance.invites : [];
@@ -5484,6 +8205,68 @@ function cleanAllianceApplications(alliance, serverNowTs) {
   }
   alliance.applications = kept;
   return kept;
+}
+
+function hydrateAllianceApplicationsFromProfiles(nk, alliance, serverNowTs) {
+  cleanAllianceApplications(alliance, serverNowTs);
+  if (!nk || typeof nk.sqlQuery !== "function" || !alliance || !alliance.id) return alliance.applications || [];
+
+  var allianceId = escapeSqlLiteral(String(alliance.id || "").trim());
+  if (!allianceId) return alliance.applications || [];
+
+  var memberIds = {};
+  var members = Array.isArray(alliance.members) ? alliance.members : [];
+  for (var i = 0; i < members.length; i++) {
+    var memberUserId = String((members[i] && members[i].userId) || "").trim();
+    if (memberUserId) memberIds[memberUserId] = true;
+  }
+
+  var query =
+    "SELECT s.user_id, COALESCE(u.username, u.display_name, s.user_id::text) AS username, " +
+    "EXTRACT(EPOCH FROM s.update_time)::bigint AS updated_at " +
+    "FROM storage s " +
+    "LEFT JOIN users u ON u.id = s.user_id " +
+    "WHERE s.collection = '" + PLAYER_PROFILE_COLLECTION + "' " +
+    "AND s.key = '" + PLAYER_PROFILE_KEY + "' " +
+    "AND COALESCE(s.value->>'pendingAllianceApplicationId', '') = '" + allianceId + "' " +
+    "ORDER BY s.update_time DESC " +
+    "LIMIT 200";
+
+  var rows = nk.sqlQuery(query) || [];
+  var seen = {};
+  var merged = [];
+  var existing = Array.isArray(alliance.applications) ? alliance.applications : [];
+  for (var j = 0; j < existing.length; j++) {
+    var app = existing[j] || {};
+    var existingUserId = String(app.userId || "").trim();
+    if (!existingUserId || memberIds[existingUserId] || seen[existingUserId]) continue;
+    seen[existingUserId] = true;
+    merged.push({
+      userId: existingUserId,
+      username: String(app.username || existingUserId),
+      message: String(app.message || "").slice(0, 240),
+      createdAt: sanitizePositiveInt(app.createdAt || serverNowTs)
+    });
+  }
+
+  for (var k = 0; k < rows.length; k++) {
+    var row = rows[k] || {};
+    var rowUserId = String(row.user_id || "").trim();
+    if (!rowUserId || memberIds[rowUserId] || seen[rowUserId]) continue;
+    seen[rowUserId] = true;
+    merged.push({
+      userId: rowUserId,
+      username: String(row.username || rowUserId),
+      message: "",
+      createdAt: sanitizePositiveInt(row.updated_at || serverNowTs)
+    });
+  }
+
+  merged.sort(function(a, b) {
+    return sanitizePositiveInt(b.createdAt || 0) - sanitizePositiveInt(a.createdAt || 0);
+  });
+  alliance.applications = merged.slice(0, 150);
+  return alliance.applications;
 }
 
 function cleanInboxInvites(inbox, serverNowTs) {
@@ -5566,16 +8349,6 @@ function computePlayerPointBreakdown(state, transientProgress) {
     var weightedCost = sumWeightedResources(def.cost) * qty;
     if (def.category === "ship") militaryShips += weightedCost * POINT_MULTIPLIERS.ship;
     else militaryDefenses += weightedCost * POINT_MULTIPLIERS.defense;
-  }
-
-  var queue = Array.isArray(state.hangarQueue) ? state.hangarQueue : [];
-  for (var q = 0; q < queue.length; q++) {
-    var queued = queue[q] || {};
-    var queuedDef = HANGAR_UNIT_DEFS[queued.unitId];
-    if (!queuedDef) continue;
-    var queuedWeightedCost = sumWeightedResources(queued.batchCost || {});
-    if (queuedDef.category === "ship") militaryShips += queuedWeightedCost * POINT_MULTIPLIERS.ship;
-    else militaryDefenses += queuedWeightedCost * POINT_MULTIPLIERS.defense;
   }
 
   var military = militaryShips + militaryDefenses;
@@ -6257,6 +9030,19 @@ function queryAdminUsers(nk, queryRaw, limit) {
   return nk.sqlQuery(sql) || [];
 }
 
+function normalizeAdminDisabledAt(rawValue) {
+  var value = String(rawValue || "").trim();
+  if (!value) return "";
+  var lower = value.toLowerCase();
+  if (lower.indexOf("1970-01-01") === 0 || lower.indexOf("0001-01-01") === 0) return "";
+  var normalized = value
+    .replace(/\s+\+\d{4}\s+UTC$/i, "Z")
+    .replace(/\s+UTC$/i, "Z");
+  var parsed = Date.parse(normalized);
+  if (!isFinite(parsed)) return value;
+  return parsed > 1000 ? value : "";
+}
+
 function queryAdminScalarCount(nk, sql, fieldName) {
   if (!nk || typeof nk.sqlQuery !== "function") return 0;
   var rows = nk.sqlQuery(sql) || [];
@@ -6599,6 +9385,7 @@ function useTimeRiftOnHangar(nk, playerId, itemId, quantity, queueId) {
     var effectiveReduction = Math.min(durationSeconds, remaining);
     if (effectiveReduction <= 0) throw new Error("No remaining hangar time to reduce.");
 
+    target.startAt = target.startAt - effectiveReduction;
     target.endAt = Math.max(serverNowTs, target.endAt - effectiveReduction);
     for (var i = index + 1; i < economy.hangarQueue.length; i++) {
       var entry = economy.hangarQueue[i];
@@ -6732,16 +9519,19 @@ function rpcEconomyDebugSeed(ctx, _logger, nk, payload) {
 
 function rpcHangarGetState(ctx, _logger, nk, payload) {
   var userId = requireUserId(ctx);
+  var username = ctx.username || userId;
   parsePayload(payload);
   var tx = withStateTransaction(nk, userId, function(state, ts) {
     completeHangarQueue(state, ts);
     return serializeHangarState(state, ts);
   });
-  return JSON.stringify({ ok: true, hangar: tx.result });
+  var points = syncPlayerPoints(nk, _logger, userId, username, tx.state || null);
+  return JSON.stringify({ ok: true, hangar: tx.result, points: points });
 }
 
-function rpcHangarStart(ctx, _logger, nk, payload) {
+function rpcHangarStart(ctx, logger, nk, payload) {
   var userId = requireUserId(ctx);
+  var username = ctx.username || userId;
   var body = parsePayload(payload);
   var unitId = String(body.unitId || "").trim();
   var quantity = sanitizePositiveInt(Number(body.quantity || 1));
@@ -6752,11 +9542,13 @@ function rpcHangarStart(ctx, _logger, nk, payload) {
     startHangarProduction(state, unitId, quantity, ts);
     return serializeHangarState(state, ts);
   });
-  return JSON.stringify({ ok: true, hangar: tx.result });
+  var points = syncPlayerPoints(nk, logger, userId, username, tx.state || null);
+  return JSON.stringify({ ok: true, hangar: tx.result, points: points });
 }
 
-function rpcHangarCancel(ctx, _logger, nk, payload) {
+function rpcHangarCancel(ctx, logger, nk, payload) {
   var userId = requireUserId(ctx);
+  var username = ctx.username || userId;
   var body = parsePayload(payload);
   var queueIdRaw = String(body.queueId || "").trim();
   var queueId = queueIdRaw.length > 0 ? queueIdRaw : undefined;
@@ -6764,7 +9556,8 @@ function rpcHangarCancel(ctx, _logger, nk, payload) {
     var canceled = cancelHangarProduction(state, queueId, ts).canceled;
     return { canceledId: canceled.id, hangar: serializeHangarState(state, ts) };
   });
-  return JSON.stringify({ ok: true, canceledId: tx.result.canceledId, hangar: tx.result.hangar });
+  var points = syncPlayerPoints(nk, logger, userId, username, tx.state || null);
+  return JSON.stringify({ ok: true, canceledId: tx.result.canceledId, hangar: tx.result.hangar, points: points });
 }
 
 function rpcInventoryGet(ctx, _logger, nk, payload) {
@@ -6824,8 +9617,9 @@ function rpcInventoryMeta(ctx, _logger, nk, payload) {
   });
 }
 
-function rpcInventoryUseItem(ctx, _logger, nk, payload) {
+function rpcInventoryUseItem(ctx, logger, nk, payload) {
   var userId = requireUserId(ctx);
+  var username = ctx.username || userId;
   var body = parsePayload(payload);
   var itemId = String(body.itemId || "").trim();
   var buildingId = String(body.buildingId || "").trim();
@@ -6841,6 +9635,7 @@ function rpcInventoryUseItem(ctx, _logger, nk, payload) {
   if (itemDef.category === "TIME_BOOST") {
     if (target === "hangar") {
       var hangarResult = useTimeRiftOnHangar(nk, userId, itemId, quantity, queueId.length > 0 ? queueId : undefined);
+      var hangarPoints = syncPlayerPoints(nk, logger, userId, username, hangarResult.economy || null);
       return JSON.stringify({
         ok: true,
         used: {
@@ -6853,7 +9648,8 @@ function rpcInventoryUseItem(ctx, _logger, nk, payload) {
         },
         items: serializeInventoryItems(hangarResult.inventory),
         state: hangarResult.economy,
-        hangar: hangarResult.hangar
+        hangar: hangarResult.hangar,
+        points: hangarPoints
       });
     }
 
@@ -7182,7 +9978,7 @@ function rpcGetMyAlliance(ctx, _logger, nk) {
   var myRole = "MEMBER";
   for (var i = 0; i < members.length; i++) {
     if (members[i].userId === userId) {
-      myRole = members[i].role || "MEMBER";
+      myRole = normalizeAllianceMemberRole(members[i].role || "MEMBER");
       break;
     }
   }
@@ -7708,6 +10504,7 @@ function rpcAllianceApply(ctx, _logger, nk, payload) {
       if (!alliance) throw new Error("Alliance not found.");
       if (alliance.isRecruiting === false) throw new Error("Alliance is not recruiting.");
       cleanAllianceApplications(alliance, ts);
+      var members = rebuildAllianceLeadership(alliance, composite.members, ts);
 
       var hasAlreadyApplied = false;
       for (var i = 0; i < alliance.applications.length; i++) {
@@ -8678,7 +11475,7 @@ function rpcAllianceManageOperation(ctx, _logger, nk, payload) {
 var INBOX_COLLECTION = "hsg_inbox_v1";
 var INBOX_META_KEY = "__meta__";
 var INBOX_RATE_KEY_PREFIX = "__rate__:";
-var INBOX_TYPES = ["REWARD", "COMBAT_REPORT", "SYSTEM", "PLAYER"];
+var INBOX_TYPES = ["REWARD", "COMBAT_REPORT", "SYSTEM", "PLAYER", "MARKET"];
 var INBOX_LIST_LIMIT_DEFAULT = 20;
 var INBOX_LIST_LIMIT_MAX = 50;
 var INBOX_LIST_BATCH = 60;
@@ -8692,6 +11489,7 @@ var INBOX_SYSTEM_BROADCAST_MAX_USERS = 100000;
 var INBOX_DAILY_NOON_EXPIRY_SEC = 72 * 60 * 60;
 var INBOX_DAILY_NOON_META_KIND = "DAILY_NOON_CHEST";
 var INBOX_SYSTEM_LOCALIZED_META_KIND = "SYSTEM_LOCALIZED";
+var INBOX_MAP_HARVEST_META_KIND = "MAP_HARVEST_REPORT";
 var INBOX_DAILY_NOON_ACCELERATOR_TABLE = [
   { itemId: "TIME_RIFT_60", weight: 50 },
   { itemId: "TIME_RIFT_300", weight: 35 },
@@ -8889,6 +11687,19 @@ function normalizeInboxMessageMeta(metaRaw) {
       titleEn: String(metaRaw.titleEn || "").trim().slice(0, 140),
       bodyFr: String(metaRaw.bodyFr || "").trim().slice(0, 8000),
       bodyEn: String(metaRaw.bodyEn || "").trim().slice(0, 8000)
+    };
+  }
+  if (kind === INBOX_MAP_HARVEST_META_KIND) {
+    var preview = normalizeInboxAttachments({
+      resources: metaRaw.resources,
+      items: metaRaw.items
+    });
+    return {
+      kind: INBOX_MAP_HARVEST_META_KIND,
+      reportId: String(metaRaw.reportId || "").trim(),
+      fieldId: String(metaRaw.fieldId || "").trim(),
+      resources: preview.resources,
+      items: preview.items
     };
   }
   if (kind !== INBOX_DAILY_NOON_META_KIND) return {};
@@ -9251,6 +12062,8 @@ function createCombatReportMessage(nk, userId, reportData) {
     defender: data.defender || null,
     result: data.result || "unknown",
     loot: data.loot || {},
+    lootCredits: sanitizePositiveInt(data.lootCredits || 0),
+    lootDelivery: String(data.lootDelivery || "instant"),
     protectedCargo: data.protectedCargo || {},
     losses: data.losses || {},
     rounds: Array.isArray(data.rounds) ? data.rounds : [],
@@ -9415,7 +12228,7 @@ function rpcAdminUsersSearch(ctx, _logger, nk, payload) {
       displayName: String(row.display_name || ""),
       avatarUrl: String(row.avatar_url || ""),
       createdAt: String(row.create_time || ""),
-      disabledAt: String(row.disable_time || ""),
+      disabledAt: normalizeAdminDisabledAt(row.disable_time),
       adminRole: roleEntry ? roleEntry.role : ""
     });
   }
@@ -9451,7 +12264,7 @@ function rpcAdminUserGet(ctx, _logger, nk, payload) {
       displayName: String((userRow && userRow.display_name) || ""),
       avatarUrl: String((userRow && userRow.avatar_url) || ""),
       createdAt: String((userRow && userRow.create_time) || ""),
-      disabledAt: String((userRow && userRow.disable_time) || ""),
+      disabledAt: normalizeAdminDisabledAt(userRow && userRow.disable_time),
       adminRole: (getAdminRoleEntry(roleRead.state, targetUserId) || {}).role || ""
     },
     economy: {
@@ -9468,6 +12281,195 @@ function rpcAdminUserGet(ctx, _logger, nk, payload) {
       mapDropNotifications: sanitizePositiveInt(inventoryRead.state.mapDropNotifications || 0)
     },
     profile: profileRead.state || defaultPlayerProfile()
+  });
+}
+
+function adminCountOpenPrivateContracts(privateIndexState, serverNowTs) {
+  var rows = Array.isArray(privateIndexState && privateIndexState.contracts) ? privateIndexState.contracts : [];
+  var count = 0;
+  for (var i = 0; i < rows.length; i++) {
+    var row = rows[i] || {};
+    var status = String(row.status || "").trim().toLowerCase();
+    if (status !== MARKET_ORDER_STATUS_OPEN && status !== MARKET_ORDER_STATUS_PARTIAL) continue;
+    var expiresAt = Math.max(0, Math.floor(Number(row.expiresAt || 0)));
+    if (expiresAt > 0 && expiresAt <= serverNowTs) continue;
+    count++;
+  }
+  return count;
+}
+
+function adminDisableUserAccount(nk, userId) {
+  var safeUserId = escapeSqlLiteral(String(userId || "").trim());
+  if (!safeUserId) throw new Error("Invalid target user.");
+  nk.sqlQuery("UPDATE users SET disable_time = NOW() WHERE id = '" + safeUserId + "'");
+}
+
+function adminRemoveUserFromAllianceIfNeeded(nk, targetUserId, targetUsername, actorUsername) {
+  for (var attempt = 0; attempt < ALLIANCE_WRITE_RETRIES; attempt++) {
+    var ts = nowTs();
+    var playerProfileRead = readPlayerProfile(nk, targetUserId);
+    var legacyProfileRead = readAllianceProfile(nk, targetUserId);
+    var playerProfile = playerProfileRead.state || defaultPlayerProfile();
+    var legacyProfile = legacyProfileRead.state || defaultAllianceProfile();
+    var allianceId = String(playerProfile.allianceId || legacyProfile.allianceId || "").trim();
+    if (!allianceId) return { removed: false, disbanded: false, allianceId: "" };
+
+    var composite = readAllianceCompositeState(nk, allianceId);
+    var alliance = composite.alliance;
+    playerProfile.allianceId = "";
+    playerProfile.pendingAllianceApplicationId = "";
+    playerProfile.updatedAt = ts;
+    legacyProfile = defaultAllianceProfile();
+
+    if (!alliance) {
+      nk.storageWrite([
+        makeStorageWriteReq(PLAYER_PROFILE_COLLECTION, PLAYER_PROFILE_KEY, targetUserId, playerProfile, playerProfileRead.version || "", 0, 0),
+        makeStorageWriteReq(ALLIANCE_PROFILE_COLLECTION, ALLIANCE_PROFILE_KEY, targetUserId, legacyProfile, legacyProfileRead.version || "", 0, 0)
+      ]);
+      return { removed: true, disbanded: false, allianceId: allianceId };
+    }
+
+    var members = rebuildAllianceLeadership(alliance, composite.members, ts);
+    var targetIndex = findAllianceMemberIndex(members, targetUserId);
+    if (targetIndex < 0) {
+      nk.storageWrite([
+        makeStorageWriteReq(PLAYER_PROFILE_COLLECTION, PLAYER_PROFILE_KEY, targetUserId, playerProfile, playerProfileRead.version || "", 0, 0),
+        makeStorageWriteReq(ALLIANCE_PROFILE_COLLECTION, ALLIANCE_PROFILE_KEY, targetUserId, legacyProfile, legacyProfileRead.version || "", 0, 0)
+      ]);
+      return { removed: true, disbanded: false, allianceId: allianceId };
+    }
+
+    var targetRole = String((members[targetIndex] && members[targetIndex].role) || "MEMBER");
+    if (targetRole === "LEADER" && members.length > 1) {
+      throw new Error("Transfer alliance leadership before deleting this user.");
+    }
+
+    members.splice(targetIndex, 1);
+    if (alliance.cachedMemberScores && typeof alliance.cachedMemberScores === "object") {
+      delete alliance.cachedMemberScores[targetUserId];
+      computeAllianceCachedTotal(alliance);
+    }
+
+    if (members.length === 0) {
+      var nameIndexKey = "name:" + String(alliance.name || "").toLowerCase();
+      var tagIndexKey = "tag:" + String(alliance.tag || "").toLowerCase();
+      nk.storageWrite([
+        makeStorageWriteReq(PLAYER_PROFILE_COLLECTION, PLAYER_PROFILE_KEY, targetUserId, playerProfile, playerProfileRead.version || "", 0, 0),
+        makeStorageWriteReq(ALLIANCE_PROFILE_COLLECTION, ALLIANCE_PROFILE_KEY, targetUserId, legacyProfile, legacyProfileRead.version || "", 0, 0)
+      ]);
+      nk.storageDelete([
+        { collection: ALLIANCE_COLLECTION, key: allianceId },
+        { collection: ALLIANCES_PUBLIC_COLLECTION, key: allianceId },
+        { collection: ALLIANCE_MEMBERS_COLLECTION, key: allianceId },
+        { collection: ALLIANCE_INDEX_COLLECTION, key: nameIndexKey },
+        { collection: ALLIANCE_INDEX_COLLECTION, key: tagIndexKey }
+      ]);
+      return { removed: true, disbanded: true, allianceId: allianceId };
+    }
+
+    appendAllianceLog(
+      alliance,
+      "member_kick",
+      String(actorUsername || "admin") + " removed " + String(targetUsername || targetUserId) + " via admin deletion.",
+      String(actorUsername || "admin"),
+      ts
+    );
+    members = rebuildAllianceLeadership(alliance, members, ts);
+    var membersState = {
+      allianceId: allianceId,
+      members: members,
+      updatedAt: ts
+    };
+
+    try {
+      nk.storageWrite([
+        makeStorageWriteReq(PLAYER_PROFILE_COLLECTION, PLAYER_PROFILE_KEY, targetUserId, playerProfile, playerProfileRead.version || "", 0, 0),
+        makeStorageWriteReq(ALLIANCE_PROFILE_COLLECTION, ALLIANCE_PROFILE_KEY, targetUserId, legacyProfile, legacyProfileRead.version || "", 0, 0),
+        makeStorageWriteReq(ALLIANCE_COLLECTION, allianceId, "", alliance, composite.privateVersion || "*", 0, 0),
+        makeStorageWriteReq(ALLIANCES_PUBLIC_COLLECTION, allianceId, "", buildAlliancePublicState(alliance, members), composite.publicVersion || "*", 2, 0),
+        makeStorageWriteReq(ALLIANCE_MEMBERS_COLLECTION, allianceId, "", membersState, composite.membersVersion || "*", 0, 0)
+      ]);
+      return { removed: true, disbanded: false, allianceId: allianceId };
+    } catch (errWrite) {
+      if (attempt === ALLIANCE_WRITE_RETRIES - 1 || !isVersionConflictError(errWrite)) throw errWrite;
+    }
+  }
+  throw new Error("Alliance cleanup failed after retries.");
+}
+
+function rpcAdminUserDelete(ctx, _logger, nk, payload) {
+  var roleEntry = assertAdmin(ctx, nk);
+  if (!roleEntry || roleEntry.role !== ADMIN_ROLE_SUPERADMIN) {
+    throw new Error("Superadmin role required.");
+  }
+  var actorUserId = requireUserId(ctx);
+  var actorUsername = String(ctx.username || actorUserId);
+  var body = parsePayload(payload);
+  var reason = String(body.reason || "").trim();
+  if (reason.length < 3) throw new Error("Reason is required.");
+
+  var targetRaw = String(body.userId || body.username || body.target || "").trim();
+  if (!targetRaw) throw new Error("Missing target.");
+  var target = resolveInboxRecipient(nk, targetRaw);
+  var targetUserId = target.userId;
+  var targetUsername = target.username || targetUserId;
+  if (targetUserId === actorUserId) throw new Error("Cannot delete your own account.");
+
+  var roleRead = readAdminRoleIndex(nk);
+  if (getAdminRoleEntry(roleRead.state, targetUserId)) {
+    throw new Error("Remove admin access before deleting this user.");
+  }
+
+  var rows = queryAdminUsers(nk, targetUserId, 5);
+  var userRow = null;
+  for (var i = 0; i < rows.length; i++) {
+    if (String((rows[i] && rows[i].id) || "") === targetUserId) {
+      userRow = rows[i];
+      break;
+    }
+  }
+  if (userRow && normalizeAdminDisabledAt(userRow.disable_time)) {
+    throw new Error("User already disabled.");
+  }
+
+  var marketProfileRead = readMarketProfile(nk, targetUserId);
+  if (marketGetOpenOrderCount(marketProfileRead.state) > 0) {
+    throw new Error("Cancel open market orders before deleting this user.");
+  }
+  var privateIndexRead = readMarketPrivateIndexState(nk, targetUserId);
+  if (adminCountOpenPrivateContracts(privateIndexRead.state, nowTs()) > 0) {
+    throw new Error("Resolve private market contracts before deleting this user.");
+  }
+
+  var allianceCleanup = adminRemoveUserFromAllianceIfNeeded(nk, targetUserId, targetUsername, actorUsername);
+  adminDisableUserAccount(nk, targetUserId);
+
+  appendAdminAudit(
+    nk,
+    actorUserId,
+    actorUsername,
+    "admin_user_delete",
+    {
+      userId: targetUserId,
+      username: targetUsername
+    },
+    {
+      role: roleEntry.role,
+      disabled: true,
+      allianceRemoved: Boolean(allianceCleanup && allianceCleanup.removed),
+      allianceDisbanded: Boolean(allianceCleanup && allianceCleanup.disbanded),
+      allianceId: allianceCleanup && allianceCleanup.allianceId ? allianceCleanup.allianceId : ""
+    },
+    reason
+  );
+
+  return JSON.stringify({
+    ok: true,
+    userId: targetUserId,
+    username: targetUsername,
+    disabled: true,
+    allianceRemoved: Boolean(allianceCleanup && allianceCleanup.removed),
+    allianceDisbanded: Boolean(allianceCleanup && allianceCleanup.disbanded)
   });
 }
 
@@ -9574,7 +12576,7 @@ function rpcAdminOverview(ctx, _logger, nk, payload) {
       displayName: String(row.display_name || ""),
       avatarUrl: String(row.avatar_url || ""),
       createdAt: String(row.create_time || ""),
-      disabledAt: String(row.disable_time || ""),
+      disabledAt: normalizeAdminDisabledAt(row.disable_time),
       adminRole: (getAdminRoleEntry(roleRead.state, userId) || {}).role || ""
     });
   }
@@ -10944,6 +13946,74 @@ function rpcMapFieldsAttack(ctx, logger, nk, payload) {
   });
 }
 
+function rpcMapPlanetAttack(ctx, logger, nk, payload) {
+  var attackerUserId = requireUserId(ctx);
+  var attackerUsername = ctx.username || attackerUserId;
+  var body = parsePayload(payload);
+  var targetPlayerId = String(body.targetPlayerId || "").trim();
+  var targetUsername = String(body.targetUsername || "").trim();
+  var fleet = Array.isArray(body.fleet) ? body.fleet : [];
+  var commandementEscadreLevel = sanitizePositiveInt(Number(body.commandementEscadreLevel || body.commandement_escadre_level || 0));
+  if (!targetPlayerId) throw new Error("Missing targetPlayerId.");
+  if (!Array.isArray(fleet) || fleet.length <= 0) throw new Error("Missing attack fleet payload.");
+  runMapWorldMaintenance(nk, logger, MAP_WORLD_MAINTENANCE_OWNER_LIMIT);
+
+  var tx = withMapTransaction(nk, attackerUserId, attackerUsername, function(attackerEconomy, attackerInventory, liveMapState, ts, attackerSync) {
+    var maxActiveSlots = resolveMapActiveFleetSlots(attackerEconomy, commandementEscadreLevel);
+    var allowedResources = getAvailableResourcesForPlayer(attackerEconomy);
+    var expedition = startMapPlanetAttackExpedition(
+      attackerEconomy,
+      attackerUserId,
+      attackerUsername,
+      targetPlayerId,
+      targetUsername,
+      ts,
+      fleet,
+      maxActiveSlots
+    );
+    var expeditionList = getResourceExpeditionList(attackerEconomy);
+    var serializedExpeditions = [];
+    for (var ei = 0; ei < expeditionList.length; ei++) {
+      serializedExpeditions.push(serializeMapExpedition(expeditionList[ei], ts));
+    }
+    var fields = [];
+    for (var i = 0; i < liveMapState.fields.length; i++) {
+      fields.push(serializeMapFieldForViewer(liveMapState.fields[i], attackerUserId, allowedResources));
+    }
+    return {
+      __dirty: true,
+      serverNowTs: ts,
+      expeditions: serializedExpeditions,
+      expedition: serializedExpeditions.length > 0 ? serializedExpeditions[0] : serializeMapExpedition(expedition, ts),
+      fields: fields,
+      reports: Array.isArray(attackerEconomy.resourceReports) ? attackerEconomy.resourceReports.slice(0, 8) : [],
+      harvestInventory: serializeHarvestInventory(attackerEconomy),
+      combatInventory: serializeCombatInventory(attackerEconomy),
+      maxActiveExpeditions: maxActiveSlots,
+      syncReport: attackerSync && attackerSync.report ? attackerSync.report : null,
+      state: {
+        resources: serializeResourceAmounts(attackerEconomy),
+        credits: Math.max(0, Math.floor(Number(attackerEconomy.premiumCredits || 0))),
+        mapDropNotifications: sanitizePositiveInt(attackerInventory && attackerInventory.mapDropNotifications || 0)
+      }
+    };
+  });
+
+  return JSON.stringify({
+    ok: true,
+    serverNowTs: tx.result.serverNowTs,
+    expedition: tx.result.expedition,
+    expeditions: tx.result.expeditions,
+    fields: tx.result.fields,
+    reports: tx.result.reports,
+    harvestInventory: tx.result.harvestInventory,
+    combatInventory: tx.result.combatInventory,
+    maxActiveExpeditions: tx.result.maxActiveExpeditions,
+    syncReport: tx.result.syncReport,
+    state: tx.result.state
+  });
+}
+
 function rpcMapPlayers(ctx, logger, nk, payload) {
   var requesterUserId = requireUserId(ctx);
   var requesterUsername = String(ctx.username || requesterUserId).trim();
@@ -11235,6 +14305,21 @@ function InitModule(_ctx, logger, _nk, initializer) {
   initializer.registerRpc("useItem", rpcInventoryUseItem);
   initializer.registerRpc("ranking_get_state", rpcRankingGetState);
   initializer.registerRpc("ranking_sync_progress", rpcRankingSyncProgress);
+  initializer.registerRpc("rpc_market_get_wallet", rpcMarketGetWallet);
+  initializer.registerRpc("rpc_market_get_book", rpcMarketGetBook);
+  initializer.registerRpc("rpc_market_get_alliance_book", rpcMarketGetAllianceBook);
+  initializer.registerRpc("rpc_market_get_history", rpcMarketGetHistory);
+  initializer.registerRpc("rpc_market_create_order", rpcMarketCreateOrder);
+  initializer.registerRpc("rpc_market_cancel_order", rpcMarketCancelOrder);
+  initializer.registerRpc("rpc_market_get_my_orders", rpcMarketGetMyOrders);
+  initializer.registerRpc("rpc_market_get_my_trades", rpcMarketGetMyTrades);
+  initializer.registerRpc("rpc_market_create_private_contract", rpcMarketCreatePrivateContract);
+  initializer.registerRpc("rpc_market_list_private_contracts", rpcMarketListPrivateContracts);
+  initializer.registerRpc("rpc_market_accept_private_contract", rpcMarketAcceptPrivateContract);
+  initializer.registerRpc("rpc_market_decline_private_contract", rpcMarketDeclinePrivateContract);
+  initializer.registerRpc("rpc_market_get_player_market_stats", rpcMarketGetPlayerMarketStats);
+  initializer.registerRpc("rpc_market_create_alert", rpcMarketCreateAlert);
+  initializer.registerRpc("rpc_market_delete_alert", rpcMarketDeleteAlert);
   initializer.registerRpc("rpc_create_alliance", rpcCreateAlliance);
   initializer.registerRpc("rpc_get_my_alliance", rpcGetMyAlliance);
   initializer.registerRpc("rpc_search_alliances", rpcSearchAlliances);
@@ -11268,6 +14353,7 @@ function InitModule(_ctx, logger, _nk, initializer) {
   initializer.registerRpc("admin_audit_list", rpcAdminAuditList);
   initializer.registerRpc("admin_users_search", rpcAdminUsersSearch);
   initializer.registerRpc("admin_user_get", rpcAdminUserGet);
+  initializer.registerRpc("admin_user_delete", rpcAdminUserDelete);
   initializer.registerRpc("admin_map_overview", rpcAdminMapOverview);
   initializer.registerRpc("admin_map_maintenance", rpcAdminMapMaintenance);
   initializer.registerRpc("admin_send_system_message", rpcAdminSendSystemMessage);
@@ -11277,6 +14363,7 @@ function InitModule(_ctx, logger, _nk, initializer) {
   initializer.registerRpc("rpc_map_fields_start", rpcMapFieldsStart);
   initializer.registerRpc("rpc_map_fields_recall", rpcMapFieldsRecall);
   initializer.registerRpc("rpc_map_fields_attack", rpcMapFieldsAttack);
+  initializer.registerRpc("rpc_map_planet_attack", rpcMapPlanetAttack);
   logger.info("Loaded hyperstructure economy runtime module (JS).");
 }
 

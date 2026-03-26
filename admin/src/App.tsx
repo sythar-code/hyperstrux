@@ -63,6 +63,15 @@ type AdminUserDetails = {
   profile: Record<string, unknown>;
 };
 
+type AdminUserDeleteResponse = {
+  ok: boolean;
+  userId: string;
+  username: string;
+  disabled: boolean;
+  allianceRemoved: boolean;
+  allianceDisbanded: boolean;
+};
+
 type AdminAuditEntry = {
   id: string;
   actorUserId: string;
@@ -308,6 +317,9 @@ export default function App() {
   const [selectedUser, setSelectedUser] = useState<AdminUserDetails | null>(null);
   const [selectedUserLoading, setSelectedUserLoading] = useState(false);
   const [selectedUserError, setSelectedUserError] = useState("");
+  const [userDeleteLoading, setUserDeleteLoading] = useState(false);
+  const [userDeleteError, setUserDeleteError] = useState("");
+  const [userDeleteMessage, setUserDeleteMessage] = useState("");
 
   const [systemForm, setSystemForm] = useState({
     titleFr: "",
@@ -406,6 +418,50 @@ export default function App() {
     await Promise.all([loadOverview(), loadAudit(), loadMapOverview()]);
   }, [loadAudit, loadMapOverview, loadOverview]);
 
+  const loadUsers = useCallback(async () => {
+    setUsersLoading(true);
+    setUsersError("");
+    try {
+      const result = await callRpc<{ ok: boolean; items: AdminUserRow[] }>("admin_users_search", { query: userQuery });
+      const nextItems = result.items || [];
+      setUsers(nextItems);
+      if (nextItems.length > 0) {
+        setSelectedUserId((current) => {
+          if (current && nextItems.some((row) => row.userId === current)) return current;
+          return nextItems[0].userId;
+        });
+      } else {
+        setSelectedUserId("");
+        setSelectedUser(null);
+      }
+    } catch (err) {
+      setUsers([]);
+      setSelectedUserId("");
+      setSelectedUser(null);
+      setUsersError(extractErrorMessage(err));
+    } finally {
+      setUsersLoading(false);
+    }
+  }, [callRpc, userQuery]);
+
+  const loadSelectedUserDetails = useCallback(async (userId: string) => {
+    if (!userId) {
+      setSelectedUser(null);
+      setSelectedUserError("");
+      return;
+    }
+    setSelectedUserLoading(true);
+    setSelectedUserError("");
+    try {
+      setSelectedUser(await callRpc<AdminUserDetails>("admin_user_get", { userId }));
+    } catch (err) {
+      setSelectedUser(null);
+      setSelectedUserError(extractErrorMessage(err));
+    } finally {
+      setSelectedUserLoading(false);
+    }
+  }, [callRpc]);
+
   useEffect(() => {
     const restore = async () => {
       const raw = localStorage.getItem(AUTH_SESSION_KEY);
@@ -445,49 +501,18 @@ export default function App() {
 
   useEffect(() => {
     if (!session || !adminStatus?.isAdmin) return;
-    const loadUsers = async () => {
-      setUsersLoading(true);
-      setUsersError("");
-      try {
-        const result = await callRpc<{ ok: boolean; items: AdminUserRow[] }>("admin_users_search", { query: userQuery });
-        setUsers(result.items || []);
-        if (result.items && result.items.length > 0) {
-          setSelectedUserId((current) => {
-            if (current && result.items.some((row) => row.userId === current)) return current;
-            return result.items[0].userId;
-          });
-        } else {
-          setSelectedUserId("");
-          setSelectedUser(null);
-        }
-      } catch (err) {
-        setUsers([]);
-        setSelectedUserId("");
-        setSelectedUser(null);
-        setUsersError(extractErrorMessage(err));
-      } finally {
-        setUsersLoading(false);
-      }
-    };
     void loadUsers();
-  }, [adminStatus?.isAdmin, callRpc, session, userQuery]);
+  }, [adminStatus?.isAdmin, loadUsers, session]);
 
   useEffect(() => {
     if (!session || !adminStatus?.isAdmin || !selectedUserId) return;
-    const loadSelectedUser = async () => {
-      setSelectedUserLoading(true);
-      setSelectedUserError("");
-      try {
-        setSelectedUser(await callRpc<AdminUserDetails>("admin_user_get", { userId: selectedUserId }));
-      } catch (err) {
-        setSelectedUser(null);
-        setSelectedUserError(extractErrorMessage(err));
-      } finally {
-        setSelectedUserLoading(false);
-      }
-    };
-    void loadSelectedUser();
-  }, [adminStatus?.isAdmin, callRpc, selectedUserId, session]);
+    void loadSelectedUserDetails(selectedUserId);
+  }, [adminStatus?.isAdmin, loadSelectedUserDetails, selectedUserId, session]);
+
+  useEffect(() => {
+    setUserDeleteError("");
+    setUserDeleteMessage("");
+  }, [selectedUserId]);
 
   const onLogin = async (event: FormEvent) => {
     event.preventDefault();
@@ -522,6 +547,56 @@ export default function App() {
       setAdminLoading(false);
     }
   };
+
+  const deleteSelectedUser = useCallback(async () => {
+    if (!selectedUser) return;
+    if (selectedUser.user.disabledAt) {
+      setUserDeleteError("Ce compte est deja desactive.");
+      setUserDeleteMessage("");
+      return;
+    }
+    const reason = window.prompt(
+      `Raison de suppression pour ${selectedUser.user.username} :`,
+      "Suppression admin via back-office"
+    );
+    if (reason === null) return;
+    const trimmedReason = reason.trim();
+    if (trimmedReason.length < 3) {
+      setUserDeleteError("La raison doit contenir au moins 3 caracteres.");
+      setUserDeleteMessage("");
+      return;
+    }
+    const confirmed = window.confirm(
+      `Supprimer le compte ${selectedUser.user.username} ?\n\nCette action desactive l'acces au compte.`
+    );
+    if (!confirmed) return;
+
+    setUserDeleteLoading(true);
+    setUserDeleteError("");
+    setUserDeleteMessage("");
+    try {
+      const result = await callRpc<AdminUserDeleteResponse>("admin_user_delete", {
+        userId: selectedUser.user.userId,
+        reason: trimmedReason
+      });
+      await Promise.all([
+        loadUsers(),
+        loadSelectedUserDetails(result.userId),
+        refreshOperationalData()
+      ]);
+      setUserDeleteMessage(
+        result.allianceDisbanded
+          ? `Compte ${result.username} desactive. Alliance dissoute.`
+          : result.allianceRemoved
+            ? `Compte ${result.username} desactive. Membre retire de son alliance.`
+            : `Compte ${result.username} desactive.`
+      );
+    } catch (err) {
+      setUserDeleteError(extractErrorMessage(err));
+    } finally {
+      setUserDeleteLoading(false);
+    }
+  }, [callRpc, loadSelectedUserDetails, loadUsers, refreshOperationalData, selectedUser]);
 
   const submitUserSearch = (event?: FormEvent) => {
     event?.preventDefault();
@@ -932,6 +1007,7 @@ export default function App() {
                       <div className="detail-grid user-meta-grid">
                         <div><span>User ID</span><strong>{selectedUser.user.userId}</strong></div>
                         <div><span>Creation</span><strong>{formatDateTime(selectedUser.user.createdAt)}</strong></div>
+                        <div><span>Desactive</span><strong>{selectedUser.user.disabledAt ? formatDateTime(selectedUser.user.disabledAt) : "Non"}</strong></div>
                         <div><span>Batiments suivis</span><strong>{formatCount(selectedUserBuildingCount)}</strong></div>
                         <div><span>Stacks inventaire</span><strong>{formatCount(selectedUser.inventory.totalStacks)}</strong></div>
                       </div>
@@ -948,7 +1024,19 @@ export default function App() {
                           <Gift size={14} />
                           Preparer un cadeau pour ce joueur
                         </button>
+                        <button
+                          type="button"
+                          className="ghost-btn danger-btn"
+                          onClick={() => void deleteSelectedUser()}
+                          disabled={userDeleteLoading || Boolean(selectedUser.user.disabledAt)}
+                        >
+                          {userDeleteLoading ? <LoaderCircle size={14} className="spin" /> : <AlertTriangle size={14} />}
+                          {selectedUser.user.disabledAt ? "Compte deja supprime" : "Supprimer le compte"}
+                        </button>
                       </div>
+                      <p className="inline-note">Suppression securisee : l'acces au compte est desactive et l'action est auditee.</p>
+                      {userDeleteError ? <div className="form-error">{userDeleteError}</div> : null}
+                      {userDeleteMessage ? <div className="form-success">{userDeleteMessage}</div> : null}
                     </section>
 
                     <section className="detail-card">

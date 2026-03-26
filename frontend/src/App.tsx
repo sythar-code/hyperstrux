@@ -5,6 +5,7 @@ import PopulationCommandScreen from "./PopulationCommandScreen";
 import ResourceCommandScreen from "./ResourceCommandScreen";
 import TechnologyCommandScreen from "./TechnologyCommandScreen";
 import WikiKnowledgeScreen from "./WikiKnowledgeScreen";
+import MarketCommandScreen from "./MarketCommandScreen";
 import {
   ArrowUpCircle,
   Bed,
@@ -49,6 +50,7 @@ import {
   SlidersHorizontal
 } from "lucide-react";
 import {
+  ChangeEvent,
   CSSProperties,
   FocusEvent,
   FormEvent,
@@ -81,7 +83,7 @@ type PopulationBuildingId =
   | "academie_technique"
   | "universite_orbitale";
 
-type RoomType = ResourceId | PopulationBuildingId | "entrepot" | "entrance";
+type RoomType = ResourceId | PopulationBuildingId | "entrepot" | "bourse_orbitale" | "entrance";
 
 interface Room {
   id: string;
@@ -301,6 +303,8 @@ const UI_SCREEN_KEY = "hsg_ui_screen_v1";
 const PROFILE_EMAIL_DRAFT_KEY = "hsg_profile_email_draft_v1";
 const PROFILE_COMMANDER_COLLECTION = "hyperstructure_profile";
 const PROFILE_COMMANDER_KEY = "commander_state_v1";
+const VAULT_PROFILE_COLLECTION = "hyperstructure_profile";
+const VAULT_PROFILE_KEY = "vault_state_v1";
 const UI_LANG_KEY = "hsg_ui_lang_v1";
 const INVENTORY_UI_NOTIFS_KEY = "hsg_inventory_notifs_v1";
 const SCORE_DISPLAY_DIVISOR = 50000;
@@ -411,6 +415,73 @@ const commanderBonusLabel = (commanderId: CommanderId, language: UILanguage) =>
 
 const commanderIdFromAvatar = (avatarUrl?: string | null): CommanderId =>
   COMMANDER_IDS.find((id) => COMMANDER_DEFS[id].image === (avatarUrl || "").trim()) ?? DEFAULT_COMMANDER_ID;
+
+const DEFAULT_PROFILE_AVATAR = COMMANDER_DEFS[DEFAULT_COMMANDER_ID].image;
+
+const PROFILE_AVATAR_MAX_DIMENSION = 192;
+const PROFILE_AVATAR_MAX_BYTES = 220_000;
+
+const readFileAsDataUrl = (file: File) =>
+  new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = typeof reader.result === "string" ? reader.result : "";
+      if (!result) {
+        reject(new Error("Avatar file could not be read."));
+        return;
+      }
+      resolve(result);
+    };
+    reader.onerror = () => reject(new Error("Avatar file could not be read."));
+    reader.readAsDataURL(file);
+  });
+
+const loadImageFromDataUrl = (dataUrl: string) =>
+  new Promise<HTMLImageElement>((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error("Avatar image could not be decoded."));
+    image.src = dataUrl;
+  });
+
+const prepareProfileAvatarDataUrl = async (file: File) => {
+  const allowedTypes = new Set(["image/png", "image/jpeg", "image/webp"]);
+  if (!allowedTypes.has(file.type)) {
+    throw new Error("Formats acceptes: PNG, JPG, WEBP.");
+  }
+  if (file.size > 8 * 1024 * 1024) {
+    throw new Error("Image trop lourde. Limite: 8 Mo.");
+  }
+
+  const inputDataUrl = await readFileAsDataUrl(file);
+  const image = await loadImageFromDataUrl(inputDataUrl);
+  const maxSide = Math.max(image.width || 0, image.height || 0);
+  if (!maxSide) {
+    throw new Error("Image invalide.");
+  }
+
+  const scale = Math.min(1, PROFILE_AVATAR_MAX_DIMENSION / maxSide);
+  const width = Math.max(1, Math.round((image.width || 1) * scale));
+  const height = Math.max(1, Math.round((image.height || 1) * scale));
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext("2d");
+  if (!context) {
+    throw new Error("Canvas indisponible.");
+  }
+  context.clearRect(0, 0, width, height);
+  context.drawImage(image, 0, 0, width, height);
+
+  let output = canvas.toDataURL("image/webp", 0.86);
+  if (output.length > PROFILE_AVATAR_MAX_BYTES) {
+    output = canvas.toDataURL("image/jpeg", 0.82);
+  }
+  if (output.length > PROFILE_AVATAR_MAX_BYTES) {
+    throw new Error("Image encore trop lourde apres compression.");
+  }
+  return output;
+};
 
 type LoginIntroBackdropId = "void" | "orbital" | "collapse" | "command";
 type LoginIntroSpeaker = "system" | "kael" | "lyra" | "title";
@@ -544,10 +615,70 @@ const LOGIN_INTRO_BACKDROP_STYLES: Record<LoginIntroBackdropId, CSSProperties> =
 
 const vaultStorageKeyForUser = (userId?: string | null) =>
   userId && userId.trim().length > 0 ? `${SAVE_KEY_USER_PREFIX}_${userId}` : SAVE_KEY;
+
+const getVaultSnapshotUpdatedAt = (source: any): number => {
+  const value = Math.floor(Number(source?.updatedAt ?? 0));
+  return Number.isFinite(value) && value > 0 ? value : 0;
+};
+
+const hasMeaningfulVaultProgress = (source: any): boolean => {
+  if (!source || typeof source !== "object") return false;
+  const rooms = Array.isArray(source.rooms) ? source.rooms : [];
+  if (
+    rooms.some((room) => {
+      const type = String(room?.type || "").trim();
+      const level = Math.max(0, Math.floor(Number(room?.level ?? 0)));
+      return !["entrance", "carbone", "titane"].includes(type) || level > 1;
+    })
+  ) {
+    return true;
+  }
+
+  const technologyLevels = source.technologyLevels && typeof source.technologyLevels === "object" ? source.technologyLevels : {};
+  for (const key of Object.keys(technologyLevels)) {
+    if (Math.max(0, Math.floor(Number((technologyLevels as Record<string, unknown>)[key] ?? 0))) > 0) return true;
+  }
+
+  if (source.constructionJob && typeof source.constructionJob === "object") return true;
+  if (source.researchJob && typeof source.researchJob === "object") return true;
+
+  const mainMissionState = source.mainMissionState && typeof source.mainMissionState === "object" ? source.mainMissionState : {};
+  if (
+    Math.max(0, Math.floor(Number((mainMissionState as Record<string, unknown>).completedCount ?? 0))) > 0 ||
+    Math.max(0, Math.floor(Number((mainMissionState as Record<string, unknown>).nextIndex ?? 0))) > 0 ||
+    Math.max(0, Math.floor(Number((mainMissionState as Record<string, unknown>).totalRewardCredits ?? 0))) > 0
+  ) {
+    return true;
+  }
+
+  return false;
+};
+
+const choosePreferredVaultSnapshot = (localSource: any, serverSource: any) => {
+  const hasLocal = Boolean(localSource && typeof localSource === "object");
+  const hasServer = Boolean(serverSource && typeof serverSource === "object");
+  if (!hasLocal) return hasServer ? serverSource : null;
+  if (!hasServer) return localSource;
+
+  const localMeaningful = hasMeaningfulVaultProgress(localSource);
+  const serverMeaningful = hasMeaningfulVaultProgress(serverSource);
+  if (localMeaningful && !serverMeaningful) return localSource;
+  if (serverMeaningful && !localMeaningful) return serverSource;
+
+  const localUpdatedAt = getVaultSnapshotUpdatedAt(localSource);
+  const serverUpdatedAt = getVaultSnapshotUpdatedAt(serverSource);
+  if (localUpdatedAt > 0 || serverUpdatedAt > 0) {
+    return serverUpdatedAt > localUpdatedAt ? serverSource : localSource;
+  }
+
+  return localSource;
+};
+
 type UIScreen =
   | "home"
   | "game"
   | "hangar"
+  | "market"
   | "population"
   | "alliance"
   | "ranking"
@@ -783,6 +914,17 @@ const ROOM_CONFIG: Record<RoomType, RoomConfig> = {
     baseCost: 300,
     buildSecondsBase: 120,
     buildGroup: "infrastructure"
+  },
+  bourse_orbitale: {
+    name: "Bourse Orbitale",
+    width: 3,
+    color: "room-power",
+    icon: <Coins size={20} />,
+    image: "/room-images/spatioport-principal2.png",
+    maxLevel: 10,
+    baseCost: 18000,
+    buildSecondsBase: 1500,
+    buildGroup: "infrastructure"
   }
 };
 
@@ -804,7 +946,8 @@ const ROOM_NAME_EN: Record<RoomType, string> = {
   parc_orbital: "Orbital Park",
   academie_technique: "Technical Academy",
   universite_orbitale: "Orbital University",
-  entrepot: "Orbital Warehouse"
+  entrepot: "Orbital Warehouse",
+  bourse_orbitale: "Orbital Exchange"
 };
 
 type BuildGuideEntry = {
@@ -1224,6 +1367,30 @@ const BUILD_GUIDE_CONTENT: Partial<Record<RoomType, BuildGuideEntry>> = {
       "Excellent comfort building to support a growing economy.",
       "Very efficient before a long offline session."
     ]
+  },
+  bourse_orbitale: {
+    roleFr: "Debloque l'economie de marche inter-joueurs. Le marche utilise directement tes credits standards.",
+    roleEn: "Unlocks the player-to-player market economy. The market uses your standard credits directly.",
+    detailsFr: [
+      "Niveau 1 : marche public et 5 ordres actifs.",
+      "Niveau 3 : contrats prives.",
+      "Niveau 8 : marche d'alliance, frais reduits et flux interne."
+    ],
+    detailsEn: [
+      "Level 1: public market and 5 active orders.",
+      "Level 3: private contracts.",
+      "Level 8: alliance market, reduced fees and internal flow."
+    ],
+    tipsFr: [
+      "A construire quand ton economie de base produit deja des excedents vendables.",
+      "Ne remplace pas tes lignes de production : elle monetise tes surplus.",
+      "Monter ce batiment trop tot sans stock exportable n'apporte presque rien."
+    ],
+    tipsEn: [
+      "Build it once your core economy already produces sellable surpluses.",
+      "It does not replace your production lines: it monetizes excess output.",
+      "Upgrading it too early without exportable stock brings almost nothing."
+    ]
   }
 };
 
@@ -1281,7 +1448,8 @@ const BUILDABLE_ROOMS: RoomType[] = [
   "parc_orbital",
   "academie_technique",
   "universite_orbitale",
-  "entrepot"
+  "entrepot",
+  "bourse_orbitale"
 ];
 
 const MAIN_MISSION_TARGET_LEVEL = 50;
@@ -2425,7 +2593,8 @@ const BASE_BUILDING_RESOURCE_COSTS: Record<RoomType, ResourceCost> = {
   parc_orbital: { carbone: 3200, titane: 1300, osmium: 200 },
   academie_technique: { carbone: 6200, titane: 2400, osmium: 600 },
   universite_orbitale: { carbone: 9000, titane: 3200, osmium: 1200, adamantium: 100 },
-  entrepot: { carbone: 1000, titane: 500 }
+  entrepot: { carbone: 1000, titane: 500 },
+  bourse_orbitale: { carbone: 18000, titane: 9000, osmium: 2200, adamantium: 250 }
 };
 
 const TECHNOLOGY_DEFS: TechnologyDef[] = [
@@ -2994,7 +3163,10 @@ const isRoomType = (value: string): value is RoomType =>
   value === "parc_orbital" ||
   value === "academie_technique" ||
   value === "universite_orbitale" ||
-  value === "entrepot";
+  value === "entrepot" ||
+  value === "bourse_orbitale";
+
+const isUniqueRoomType = (value: RoomType) => value === "entrepot" || value === "bourse_orbitale";
 
 const defaultRooms = (): Room[] => [
   { id: "door", x: 0, y: 0, width: 2, type: "entrance", level: 1 },
@@ -3226,8 +3398,11 @@ type MapExpeditionDto = {
   id: string;
   fieldId: string;
   missionKind: "harvest" | "attack";
+  targetKind: "field" | "planet";
   targetPlayerId: string;
   targetUsername: string;
+  targetX: number;
+  targetY: number;
   status: "travel_to_field" | "extracting" | "returning";
   departureAt: number;
   arrivalAt: number;
@@ -3245,6 +3420,7 @@ type MapExpeditionDto = {
   fleet: Array<{ unitId: string; quantity: number }>;
   snapshotResources: Partial<Record<ResourceId, number>>;
   collectedResources: Partial<Record<ResourceId, number>>;
+  collectedCredits: number;
   serverNowTs: number;
 };
 type MapPublicExpeditionDto = {
@@ -3253,8 +3429,11 @@ type MapPublicExpeditionDto = {
   username: string;
   fieldId: string;
   missionKind: "harvest" | "attack";
+  targetKind: "field" | "planet";
   targetPlayerId: string;
   targetUsername: string;
+  targetX: number;
+  targetY: number;
   status: "travel_to_field" | "extracting" | "returning";
   departureAt: number;
   arrivalAt: number;
@@ -4110,7 +4289,7 @@ type ChestLootSummary = {
   rewards: Record<string, number>;
 };
 
-type InboxMessageType = "REWARD" | "COMBAT_REPORT" | "SYSTEM" | "PLAYER";
+type InboxMessageType = "REWARD" | "COMBAT_REPORT" | "SYSTEM" | "PLAYER" | "MARKET";
 
 type InboxAttachment = {
   resources?: Partial<Record<ResourceId, number>>;
@@ -4149,6 +4328,10 @@ type InboxMessage = {
     titleEn?: string;
     bodyFr?: string;
     bodyEn?: string;
+    reportId?: string;
+    fieldId?: string;
+    resources?: Partial<Record<ResourceId, number>>;
+    items?: Array<{ itemId: string; quantity: number }>;
   } | null;
 };
 
@@ -4629,6 +4812,7 @@ export default function App() {
   const [profileCommanderId, setProfileCommanderId] = useState<CommanderId>(DEFAULT_COMMANDER_ID);
   const [activeCommanderId, setActiveCommanderId] = useState<CommanderId>(DEFAULT_COMMANDER_ID);
   const [profileServerEmail, setProfileServerEmail] = useState("");
+  const [profileAvatarBusy, setProfileAvatarBusy] = useState(false);
   const [profileLoading, setProfileLoading] = useState(false);
   const [profileError, setProfileError] = useState("");
   const [profileSaved, setProfileSaved] = useState("");
@@ -4681,6 +4865,7 @@ export default function App() {
   const rankingRpcInFlightRef = useRef(false);
   const rankingRpcBackoffUntilRef = useRef(0);
   const rankingSyncInFlightRef = useRef(false);
+  const vaultServerSyncSignatureRef = useRef("");
   const l = (fr: string, en: string) => (uiLanguage === "en" ? en : fr);
   const inventoryMenuBadgeCount = Math.max(0, inventoryServerBadgeCount + inventoryInboxBadgeCount);
   const mapWarmCacheKey = useMemo(
@@ -4796,7 +4981,7 @@ export default function App() {
     setProfileUsername(username);
     setProfileLanguage(lang);
     setUiLanguage(lang);
-    setProfileAvatar(COMMANDER_DEFS[commanderId].image);
+    setProfileAvatar(avatar);
     setProfileCommanderId(commanderId);
     setActiveCommanderId(commanderId);
     setProfileEmail(email);
@@ -4916,7 +5101,26 @@ export default function App() {
         console.error("economy header refresh error", err);
       }
     }
-  }, [client, invalidateSession, session]);
+  }, [client, invalidateSession, session?.user_id]);
+
+  const applyMarketEconomySnapshot = useCallback((snapshot: { resources?: Record<string, number>; credits?: number; wallet?: { credits?: number } } | null | undefined) => {
+    const resourceSource = snapshot?.resources;
+    if (resourceSource && typeof resourceSource === "object") {
+      setResourceAmounts((prev) => {
+        const next = { ...prev };
+        for (const def of RESOURCE_DEFS) {
+          const raw = Number((resourceSource as Record<string, unknown>)[def.id] ?? NaN);
+          if (Number.isFinite(raw) && raw >= 0) next[def.id] = Math.floor(raw);
+        }
+        return next;
+      });
+      resourceTickRef.current = Date.now();
+    }
+    const nextCredits = Number(snapshot?.credits ?? snapshot?.wallet?.credits ?? NaN);
+    if (Number.isFinite(nextCredits) && nextCredits >= 0) {
+      setCredits(Math.floor(nextCredits));
+    }
+  }, []);
 
   const loadCommanderProfile = useCallback(async () => {
     if (!session) return;
@@ -4924,19 +5128,23 @@ export default function App() {
       const read = await client.readStorageObjects(session, {
         object_ids: [{ collection: PROFILE_COMMANDER_COLLECTION, key: PROFILE_COMMANDER_KEY, user_id: session.user_id }]
       });
-      const stored = read.objects?.[0]?.value as { commanderId?: string } | undefined;
+      const stored = read.objects?.[0]?.value as { commanderId?: string; avatarUrl?: string } | undefined;
       const nextCommanderId = COMMANDER_IDS.includes(stored?.commanderId as CommanderId)
         ? (stored!.commanderId as CommanderId)
-        : commanderIdFromAvatar(profileAvatar);
+        : profileCommanderId;
+      const nextAvatar =
+        typeof stored?.avatarUrl === "string" && stored.avatarUrl.trim()
+          ? stored.avatarUrl.trim()
+          : COMMANDER_DEFS[nextCommanderId].image;
       setProfileCommanderId(nextCommanderId);
       setActiveCommanderId(nextCommanderId);
-      setProfileAvatar(COMMANDER_DEFS[nextCommanderId].image);
+      setProfileAvatar(nextAvatar);
     } catch (err) {
       if (isUnauthorizedError(err)) {
         invalidateSession();
       }
     }
-  }, [client, invalidateSession, profileAvatar, session]);
+  }, [client, invalidateSession, profileCommanderId, session]);
 
   const applyResourceProduction = (base: Record<string, number>, seconds: number, unlocked: string[]) => {
     if (seconds <= 0) return base;
@@ -5052,6 +5260,16 @@ export default function App() {
     }
   };
 
+  const applyRpcPointTotal = (rpcResponse: any) => {
+    const parsed = parseJsonObject(rpcResponse?.payload ?? rpcResponse);
+    const nested = parseJsonObject(parsed?.payload);
+    const source = parseJsonObject(parsed?.points ?? nested?.points);
+    const total = Number(source?.total ?? NaN);
+    if (Number.isFinite(total) && total >= 0) {
+      setPlayerScorePoints(Math.max(0, Math.floor(total)));
+    }
+  };
+
   const loadHangarState = async (silent = false) => {
     if (!session) {
       setHangarQueue([]);
@@ -5071,6 +5289,7 @@ export default function App() {
       const snapshot = normalizeHangarRpcSnapshot(rpc as any);
       if (!snapshot) throw new Error("Invalid hangar payload.");
       applyHangarSnapshot(snapshot, false);
+      applyRpcPointTotal(rpc);
     } catch (err) {
       if (isUnauthorizedError(err)) {
         invalidateSession();
@@ -5207,6 +5426,8 @@ export default function App() {
   }, [loadCreditsFromServer, session?.user_id]);
 
   useEffect(() => {
+    let canceled = false;
+
     const resetToDefaults = () => {
       setRooms(defaultRooms());
       setConstructionJob(null);
@@ -5223,254 +5444,314 @@ export default function App() {
       setUnlockedResourceIds(BASE_UNLOCKED_RESOURCE_IDS);
     };
 
-    setVaultHydrated(false);
-    setVaultHydratedUserId("");
-    resetToDefaults();
-
-    const userId = session?.user_id ?? "";
-    if (!userId) {
-      setVaultHydrated(true);
+    const hydrateVault = async () => {
+      setVaultHydrated(false);
       setVaultHydratedUserId("");
-      return;
-    }
+      vaultServerSyncSignatureRef.current = "";
+      resetToDefaults();
 
-    const scopedSaveKey = vaultStorageKeyForUser(userId);
-    try {
-      let raw = localStorage.getItem(scopedSaveKey);
-
-      if (!raw) {
-        const legacyRaw = localStorage.getItem(SAVE_KEY);
-        if (legacyRaw) {
-          const legacyOwner = localStorage.getItem(SAVE_KEY_LEGACY_OWNER_KEY);
-          if (!legacyOwner || legacyOwner === userId) {
-            localStorage.setItem(SAVE_KEY_LEGACY_OWNER_KEY, userId);
-            localStorage.setItem(scopedSaveKey, legacyRaw);
-            raw = legacyRaw;
-          }
+      const userId = session?.user_id ?? "";
+      if (!userId) {
+        if (!canceled) {
+          setVaultHydrated(true);
+          setVaultHydratedUserId("");
         }
-      }
-
-      if (!raw) {
-        setVaultHydrated(true);
         return;
       }
 
-      const parsed = JSON.parse(raw) as {
-        rooms?: Array<Omit<Room, "type"> & { type: string }>;
-        credits?: number;
-        caps?: number;
-        zoom?: number;
-        pan?: { x: number; y: number };
-        constructionJob?: ConstructionJob | null;
-        technologyLevels?: Partial<Record<TechnologyId, number>>;
-        researchJob?: ResearchJob | null;
-        populationState?: Partial<PopulationState>;
-        mainMissionState?: Partial<MainMissionState>;
-      };
+      const scopedSaveKey = vaultStorageKeyForUser(userId);
+      let localParsed: any = null;
+      let serverParsed: any = null;
 
-      if (parsed.technologyLevels && typeof parsed.technologyLevels === "object") {
-        const restoredLevels = defaultTechnologyLevels();
-        for (const def of TECHNOLOGY_DEFS) {
-          const rawLevel = Number(parsed.technologyLevels[def.id] ?? 0);
-          const safe = Math.max(0, Math.floor(Number.isFinite(rawLevel) ? rawLevel : 0));
-          restoredLevels[def.id] = def.maxLevel ? Math.min(def.maxLevel, safe) : safe;
-        }
-        setTechnologyLevels(restoredLevels);
-      }
+      try {
+        let raw = localStorage.getItem(scopedSaveKey);
 
-      if (Array.isArray(parsed.rooms)) {
-        const sanitizedRooms = parsed.rooms.filter((room) => isRoomType(room.type)).map((room) => ({ ...room, type: room.type as RoomType }));
-        if (sanitizedRooms.length > 0) {
-          const hasCarbone = sanitizedRooms.some((r) => r.type === "carbone");
-          const hasTitane = sanitizedRooms.some((r) => r.type === "titane");
-          const restoredRooms = [...sanitizedRooms];
-          if (!hasCarbone) restoredRooms.push({ id: "starter_carbone", x: 2, y: 0, width: 3, type: "carbone", level: 1 });
-          if (!hasTitane) restoredRooms.push({ id: "starter_titane", x: 5, y: 0, width: 3, type: "titane", level: 1 });
-
-          let restoredJob: ConstructionJob | null =
-            parsed.constructionJob && typeof parsed.constructionJob === "object" && typeof parsed.constructionJob.endAt === "number"
-              ? parsed.constructionJob
-              : null;
-
-          // Anti-perte: si la construction est deja terminee au reload, on l'applique immediatement.
-          if (restoredJob && restoredJob.endAt <= Date.now()) {
-            if (restoredJob.mode === "build") {
-              const cfg = ROOM_CONFIG[restoredJob.roomType];
-              const alreadyExists = restoredRooms.some((room) => room.type === restoredJob!.roomType && restoredJob!.roomType !== "entrepot");
-              if (!alreadyExists) {
-                restoredRooms.push({
-                  id: makeId(),
-                  x: restoredJob.x,
-                  y: restoredJob.y,
-                  width: cfg.width,
-                  type: restoredJob.roomType,
-                  level: 1
-                });
-              }
-            } else {
-              for (let i = 0; i < restoredRooms.length; i += 1) {
-                if (restoredRooms[i].id === restoredJob.roomId) {
-                  restoredRooms[i] = { ...restoredRooms[i], level: restoredJob.targetLevel };
-                  break;
-                }
-              }
+        if (!raw) {
+          const legacyRaw = localStorage.getItem(SAVE_KEY);
+          if (legacyRaw) {
+            const legacyOwner = localStorage.getItem(SAVE_KEY_LEGACY_OWNER_KEY);
+            if (!legacyOwner || legacyOwner === userId) {
+              localStorage.setItem(SAVE_KEY_LEGACY_OWNER_KEY, userId);
+              localStorage.setItem(scopedSaveKey, legacyRaw);
+              raw = legacyRaw;
             }
-            restoredJob = null;
-            localStorage.setItem(
-              scopedSaveKey,
-              JSON.stringify({
-                rooms: restoredRooms,
-                credits: typeof parsed.credits === "number" ? parsed.credits : typeof parsed.caps === "number" ? parsed.caps : STARTING_CREDITS,
-                zoom: typeof parsed.zoom === "number" ? parsed.zoom : BASE_ZOOM,
-                pan: parsed.pan && typeof parsed.pan.x === "number" && typeof parsed.pan.y === "number" ? parsed.pan : { x: 0, y: 200 },
-                constructionJob: null,
-                technologyLevels: parsed.technologyLevels ?? defaultTechnologyLevels(),
-                researchJob: parsed.researchJob ?? null,
-                populationState: parsed.populationState ?? defaultPopulationState(),
-                mainMissionState: parsed.mainMissionState ?? defaultMainMissionState()
-              })
-            );
           }
-
-          setRooms(restoredRooms);
-          if (restoredJob) setConstructionJob(restoredJob);
         }
-      }
 
-      if (parsed.researchJob && typeof parsed.researchJob === "object" && typeof parsed.researchJob.endAt === "number") {
-        const techId = String(parsed.researchJob.technologyId ?? "") as TechnologyId;
-        if (techId in TECHNOLOGY_BY_ID) {
-          setResearchJob(parsed.researchJob as ResearchJob);
+        if (raw) {
+          localParsed = JSON.parse(raw);
         }
+      } catch {
+        localParsed = null;
       }
 
-      if (parsed.populationState && typeof parsed.populationState === "object") {
-        const fallback = defaultPopulationState();
-        const hasOnboardingProtectionUntil =
-          typeof parsed.populationState.onboardingProtectionUntil === "number" &&
-          Number.isFinite(parsed.populationState.onboardingProtectionUntil) &&
-          parsed.populationState.onboardingProtectionUntil > 0;
-        const onboardingProtectionUntil = hasOnboardingProtectionUntil
-          ? Math.max(0, Math.floor(Number(parsed.populationState.onboardingProtectionUntil)))
-          : Date.now() + POPULATION_ONBOARDING_PROTECTION_MS;
-        const legacySeed = !hasOnboardingProtectionUntil;
-        const rawPopulation = Math.floor(Number(parsed.populationState.total ?? fallback.total));
-        const seededPopulation = legacySeed
-          ? Math.max(rawPopulation, POPULATION_ONBOARDING_START_TOTAL)
-          : rawPopulation;
-        const rawFoodStock = Math.max(0, Number(parsed.populationState.foodStock ?? fallback.foodStock));
-        const seededFoodStock = legacySeed
-          ? Math.max(rawFoodStock, POPULATION_ONBOARDING_START_FOOD)
-          : rawFoodStock;
-        const rawStability = clampNumber(Number(parsed.populationState.stability ?? fallback.stability), 0, 100);
-        const seededStability = legacySeed
-          ? Math.max(rawStability, POPULATION_ONBOARDING_START_STABILITY)
-          : rawStability;
-        const nextPopulation: PopulationState = {
-          total: clampNumber(
-            seededPopulation,
-            POPULATION_MIN_VALUE,
-            POPULATION_MAX_VALUE
-          ),
-          foodStock: seededFoodStock,
-          stability: seededStability,
-          isFamine: Boolean(parsed.populationState.isFamine ?? fallback.isFamine),
-          onboardingProtectionUntil,
-          lastTickAt: Math.max(0, Math.floor(Number(parsed.populationState.lastTickAt ?? fallback.lastTickAt))),
-          lastEventRollAt: Math.max(0, Math.floor(Number(parsed.populationState.lastEventRollAt ?? fallback.lastEventRollAt))),
-          lastCrisisRollAt: Math.max(0, Math.floor(Number(parsed.populationState.lastCrisisRollAt ?? fallback.lastCrisisRollAt))),
-          activeEvent:
-            parsed.populationState.activeEvent &&
-            typeof parsed.populationState.activeEvent === "object" &&
-            typeof parsed.populationState.activeEvent.type === "string" &&
-            typeof parsed.populationState.activeEvent.endsAt === "number"
-              ? {
-                  type: parsed.populationState.activeEvent.type as PopulationEventType,
-                  startedAt: Math.max(0, Math.floor(Number(parsed.populationState.activeEvent.startedAt ?? Date.now()))),
-                  endsAt: Math.max(0, Math.floor(Number(parsed.populationState.activeEvent.endsAt)))
-                }
-              : null,
-          activeCrisis:
-            parsed.populationState.activeCrisis &&
-            typeof parsed.populationState.activeCrisis === "object" &&
-            typeof parsed.populationState.activeCrisis.type === "string" &&
-            typeof parsed.populationState.activeCrisis.endsAt === "number"
-              ? {
-                  type: parsed.populationState.activeCrisis.type as PopulationCrisisType,
-                  startedAt: Math.max(0, Math.floor(Number(parsed.populationState.activeCrisis.startedAt ?? Date.now()))),
-                  endsAt: Math.max(0, Math.floor(Number(parsed.populationState.activeCrisis.endsAt)))
-                }
-              : null
-        };
-        setPopulationState(nextPopulation);
-      }
-
-      if (parsed.mainMissionState && typeof parsed.mainMissionState === "object") {
-        const fallback = defaultMainMissionState();
-        const rawActive = Array.isArray(parsed.mainMissionState.activeMissionIds)
-          ? parsed.mainMissionState.activeMissionIds
-          : [];
-        const activeMissionIds = rawActive
-          .map((id) => String(id))
-          .filter((id) => Boolean(MAIN_MISSION_BY_ID[id]))
-          .slice(0, 2);
-        const planLength = MAIN_MISSION_PLAN.length;
-        const nextIndex = clampNumber(
-          Math.max(0, Math.floor(Number(parsed.mainMissionState.nextIndex ?? fallback.nextIndex))),
-          0,
-          planLength
-        );
-        const completedCount = clampNumber(
-          Math.max(0, Math.floor(Number(parsed.mainMissionState.completedCount ?? fallback.completedCount))),
-          0,
-          planLength
-        );
-        const skippedCount = Math.max(0, Math.floor(Number(parsed.mainMissionState.skippedCount ?? fallback.skippedCount)));
-        const totalRewardCredits = Math.max(0, Math.floor(Number(parsed.mainMissionState.totalRewardCredits ?? fallback.totalRewardCredits)));
-        const lastRewardCredits = Math.max(0, Math.floor(Number(parsed.mainMissionState.lastRewardCredits ?? fallback.lastRewardCredits)));
-        const lastRewardCount = Math.max(0, Math.floor(Number(parsed.mainMissionState.lastRewardCount ?? fallback.lastRewardCount)));
-        const lastCompletedAt = Math.max(0, Math.floor(Number(parsed.mainMissionState.lastCompletedAt ?? fallback.lastCompletedAt)));
-        const finished = Boolean(parsed.mainMissionState.finished) || (nextIndex >= planLength && activeMissionIds.length <= 0);
-        const bootstrappedRaw = Boolean(parsed.mainMissionState.bootstrapped);
-        const needsRefill = bootstrappedRaw && !finished && activeMissionIds.length <= 0 && nextIndex < planLength;
-        const bootstrapped = needsRefill ? false : bootstrappedRaw;
-        setMainMissionState({
-          activeMissionIds,
-          nextIndex,
-          completedCount,
-          skippedCount,
-          totalRewardCredits,
-          lastRewardCredits,
-          lastRewardCount,
-          lastCompletedAt,
-          bootstrapped,
-          finished
+      try {
+        const read = await client.readStorageObjects(session, {
+          object_ids: [{ collection: VAULT_PROFILE_COLLECTION, key: VAULT_PROFILE_KEY, user_id: userId }]
         });
+        if (canceled) return;
+        const stored = read.objects?.[0]?.value;
+        if (stored && typeof stored === "object") {
+          serverParsed = stored;
+        }
+      } catch (err) {
+        if (isUnauthorizedError(err)) {
+          if (!canceled) invalidateSession();
+          return;
+        }
+        if (import.meta.env.DEV) {
+          // eslint-disable-next-line no-console
+          console.error("vault hydrate server error", err);
+        }
       }
 
-      if (typeof parsed.credits === "number") setCredits(parsed.credits);
-      else if (typeof parsed.caps === "number") setCredits(parsed.caps);
-      if (typeof parsed.zoom === "number") setZoom(parsed.zoom);
-      if (parsed.pan && typeof parsed.pan.x === "number" && typeof parsed.pan.y === "number") setPan(parsed.pan);
-      // constructionJob est restaure dans le bloc rooms ci-dessus pour garantir la coherence rooms/job.
-    } catch {
-      // ignore malformed local save
-    } finally {
-      setVaultHydrated(true);
-      setVaultHydratedUserId(userId);
-    }
-  }, [session?.user_id]);
+      const parsed = choosePreferredVaultSnapshot(localParsed, serverParsed) as
+        | {
+            rooms?: Array<Omit<Room, "type"> & { type: string }>;
+            credits?: number;
+            caps?: number;
+            zoom?: number;
+            pan?: { x: number; y: number };
+            constructionJob?: ConstructionJob | null;
+            technologyLevels?: Partial<Record<TechnologyId, number>>;
+            researchJob?: ResearchJob | null;
+            populationState?: Partial<PopulationState>;
+            mainMissionState?: Partial<MainMissionState>;
+            updatedAt?: number;
+          }
+        | null;
+
+      if (!parsed) {
+        if (!canceled) {
+          setVaultHydrated(true);
+          setVaultHydratedUserId(userId);
+        }
+        return;
+      }
+
+      try {
+        if (parsed.technologyLevels && typeof parsed.technologyLevels === "object") {
+          const restoredLevels = defaultTechnologyLevels();
+          for (const def of TECHNOLOGY_DEFS) {
+            const rawLevel = Number(parsed.technologyLevels[def.id] ?? 0);
+            const safe = Math.max(0, Math.floor(Number.isFinite(rawLevel) ? rawLevel : 0));
+            restoredLevels[def.id] = def.maxLevel ? Math.min(def.maxLevel, safe) : safe;
+          }
+          setTechnologyLevels(restoredLevels);
+        }
+
+        if (Array.isArray(parsed.rooms)) {
+          const sanitizedRooms = parsed.rooms.filter((room) => isRoomType(room.type)).map((room) => ({ ...room, type: room.type as RoomType }));
+          if (sanitizedRooms.length > 0) {
+            const hasCarbone = sanitizedRooms.some((r) => r.type === "carbone");
+            const hasTitane = sanitizedRooms.some((r) => r.type === "titane");
+            const restoredRooms = [...sanitizedRooms];
+            if (!hasCarbone) restoredRooms.push({ id: "starter_carbone", x: 2, y: 0, width: 3, type: "carbone", level: 1 });
+            if (!hasTitane) restoredRooms.push({ id: "starter_titane", x: 5, y: 0, width: 3, type: "titane", level: 1 });
+
+            let restoredJob: ConstructionJob | null =
+              parsed.constructionJob && typeof parsed.constructionJob === "object" && typeof parsed.constructionJob.endAt === "number"
+                ? parsed.constructionJob
+                : null;
+
+            if (restoredJob && restoredJob.endAt <= Date.now()) {
+              if (restoredJob.mode === "build") {
+                const cfg = ROOM_CONFIG[restoredJob.roomType];
+                const alreadyExists = restoredRooms.some((room) => room.type === restoredJob!.roomType && isUniqueRoomType(restoredJob!.roomType));
+                if (!alreadyExists) {
+                  restoredRooms.push({
+                    id: makeId(),
+                    x: restoredJob.x,
+                    y: restoredJob.y,
+                    width: cfg.width,
+                    type: restoredJob.roomType,
+                    level: 1
+                  });
+                }
+              } else {
+                for (let i = 0; i < restoredRooms.length; i += 1) {
+                  if (restoredRooms[i].id === restoredJob.roomId) {
+                    restoredRooms[i] = { ...restoredRooms[i], level: restoredJob.targetLevel };
+                    break;
+                  }
+                }
+              }
+              restoredJob = null;
+            }
+
+            setRooms(restoredRooms);
+            if (restoredJob) setConstructionJob(restoredJob);
+          }
+        }
+
+        if (parsed.researchJob && typeof parsed.researchJob === "object" && typeof parsed.researchJob.endAt === "number") {
+          const techId = String(parsed.researchJob.technologyId ?? "") as TechnologyId;
+          if (techId in TECHNOLOGY_BY_ID) {
+            setResearchJob(parsed.researchJob as ResearchJob);
+          }
+        }
+
+        if (parsed.populationState && typeof parsed.populationState === "object") {
+          const fallback = defaultPopulationState();
+          const hasOnboardingProtectionUntil =
+            typeof parsed.populationState.onboardingProtectionUntil === "number" &&
+            Number.isFinite(parsed.populationState.onboardingProtectionUntil) &&
+            parsed.populationState.onboardingProtectionUntil > 0;
+          const onboardingProtectionUntil = hasOnboardingProtectionUntil
+            ? Math.max(0, Math.floor(Number(parsed.populationState.onboardingProtectionUntil)))
+            : Date.now() + POPULATION_ONBOARDING_PROTECTION_MS;
+          const legacySeed = !hasOnboardingProtectionUntil;
+          const rawPopulation = Math.floor(Number(parsed.populationState.total ?? fallback.total));
+          const seededPopulation = legacySeed
+            ? Math.max(rawPopulation, POPULATION_ONBOARDING_START_TOTAL)
+            : rawPopulation;
+          const rawFoodStock = Math.max(0, Number(parsed.populationState.foodStock ?? fallback.foodStock));
+          const seededFoodStock = legacySeed
+            ? Math.max(rawFoodStock, POPULATION_ONBOARDING_START_FOOD)
+            : rawFoodStock;
+          const rawStability = clampNumber(Number(parsed.populationState.stability ?? fallback.stability), 0, 100);
+          const seededStability = legacySeed
+            ? Math.max(rawStability, POPULATION_ONBOARDING_START_STABILITY)
+            : rawStability;
+          const nextPopulation: PopulationState = {
+            total: clampNumber(seededPopulation, POPULATION_MIN_VALUE, POPULATION_MAX_VALUE),
+            foodStock: seededFoodStock,
+            stability: seededStability,
+            isFamine: Boolean(parsed.populationState.isFamine ?? fallback.isFamine),
+            onboardingProtectionUntil,
+            lastTickAt: Math.max(0, Math.floor(Number(parsed.populationState.lastTickAt ?? fallback.lastTickAt))),
+            lastEventRollAt: Math.max(0, Math.floor(Number(parsed.populationState.lastEventRollAt ?? fallback.lastEventRollAt))),
+            lastCrisisRollAt: Math.max(0, Math.floor(Number(parsed.populationState.lastCrisisRollAt ?? fallback.lastCrisisRollAt))),
+            activeEvent:
+              parsed.populationState.activeEvent &&
+              typeof parsed.populationState.activeEvent === "object" &&
+              typeof parsed.populationState.activeEvent.type === "string" &&
+              typeof parsed.populationState.activeEvent.endsAt === "number"
+                ? {
+                    type: parsed.populationState.activeEvent.type as PopulationEventType,
+                    startedAt: Math.max(0, Math.floor(Number(parsed.populationState.activeEvent.startedAt ?? Date.now()))),
+                    endsAt: Math.max(0, Math.floor(Number(parsed.populationState.activeEvent.endsAt)))
+                  }
+                : null,
+            activeCrisis:
+              parsed.populationState.activeCrisis &&
+              typeof parsed.populationState.activeCrisis === "object" &&
+              typeof parsed.populationState.activeCrisis.type === "string" &&
+              typeof parsed.populationState.activeCrisis.endsAt === "number"
+                ? {
+                    type: parsed.populationState.activeCrisis.type as PopulationCrisisType,
+                    startedAt: Math.max(0, Math.floor(Number(parsed.populationState.activeCrisis.startedAt ?? Date.now()))),
+                    endsAt: Math.max(0, Math.floor(Number(parsed.populationState.activeCrisis.endsAt)))
+                  }
+                : null
+          };
+          setPopulationState(nextPopulation);
+        }
+
+        if (parsed.mainMissionState && typeof parsed.mainMissionState === "object") {
+          const fallback = defaultMainMissionState();
+          const rawActive = Array.isArray(parsed.mainMissionState.activeMissionIds) ? parsed.mainMissionState.activeMissionIds : [];
+          const activeMissionIds = rawActive
+            .map((id) => String(id))
+            .filter((id) => Boolean(MAIN_MISSION_BY_ID[id]))
+            .slice(0, 2);
+          const planLength = MAIN_MISSION_PLAN.length;
+          const nextIndex = clampNumber(
+            Math.max(0, Math.floor(Number(parsed.mainMissionState.nextIndex ?? fallback.nextIndex))),
+            0,
+            planLength
+          );
+          const completedCount = clampNumber(
+            Math.max(0, Math.floor(Number(parsed.mainMissionState.completedCount ?? fallback.completedCount))),
+            0,
+            planLength
+          );
+          const skippedCount = Math.max(0, Math.floor(Number(parsed.mainMissionState.skippedCount ?? fallback.skippedCount)));
+          const totalRewardCredits = Math.max(0, Math.floor(Number(parsed.mainMissionState.totalRewardCredits ?? fallback.totalRewardCredits)));
+          const lastRewardCredits = Math.max(0, Math.floor(Number(parsed.mainMissionState.lastRewardCredits ?? fallback.lastRewardCredits)));
+          const lastRewardCount = Math.max(0, Math.floor(Number(parsed.mainMissionState.lastRewardCount ?? fallback.lastRewardCount)));
+          const lastCompletedAt = Math.max(0, Math.floor(Number(parsed.mainMissionState.lastCompletedAt ?? fallback.lastCompletedAt)));
+          const finished = Boolean(parsed.mainMissionState.finished) || (nextIndex >= planLength && activeMissionIds.length <= 0);
+          const bootstrappedRaw = Boolean(parsed.mainMissionState.bootstrapped);
+          const needsRefill = bootstrappedRaw && !finished && activeMissionIds.length <= 0 && nextIndex < planLength;
+          const bootstrapped = needsRefill ? false : bootstrappedRaw;
+          setMainMissionState({
+            activeMissionIds,
+            nextIndex,
+            completedCount,
+            skippedCount,
+            totalRewardCredits,
+            lastRewardCredits,
+            lastRewardCount,
+            lastCompletedAt,
+            bootstrapped,
+            finished
+          });
+        }
+
+        if (typeof parsed.credits === "number") setCredits(parsed.credits);
+        else if (typeof parsed.caps === "number") setCredits(parsed.caps);
+        if (typeof parsed.zoom === "number") setZoom(parsed.zoom);
+        if (parsed.pan && typeof parsed.pan.x === "number" && typeof parsed.pan.y === "number") setPan(parsed.pan);
+      } catch {
+        // ignore malformed vault payload
+      } finally {
+        if (!canceled) {
+          setVaultHydrated(true);
+          setVaultHydratedUserId(userId);
+        }
+      }
+    };
+
+    void hydrateVault();
+    return () => {
+      canceled = true;
+    };
+  }, [client, invalidateSession, session]);
 
   useEffect(() => {
     if (!vaultHydrated) return;
-    if (!session?.user_id) return;
+    if (!session) return;
     if (vaultHydratedUserId !== session.user_id) return;
+
     const scopedSaveKey = vaultStorageKeyForUser(session.user_id);
-    localStorage.setItem(
-      scopedSaveKey,
-      JSON.stringify({ rooms, credits, zoom, pan, constructionJob, technologyLevels, researchJob, populationState, mainMissionState })
-    );
-  }, [rooms, credits, zoom, pan, constructionJob, technologyLevels, researchJob, populationState, mainMissionState, vaultHydrated, vaultHydratedUserId, session?.user_id]);
+    const snapshotCore = { rooms, credits, zoom, pan, constructionJob, technologyLevels, researchJob, populationState, mainMissionState };
+    const snapshotPayload = {
+      ...snapshotCore,
+      updatedAt: Date.now()
+    };
+    const signature = JSON.stringify(snapshotCore);
+
+    localStorage.setItem(scopedSaveKey, JSON.stringify(snapshotPayload));
+
+    if (signature === vaultServerSyncSignatureRef.current) return;
+
+    const timer = window.setTimeout(async () => {
+      try {
+        await client.writeStorageObjects(session, [
+          {
+            collection: VAULT_PROFILE_COLLECTION,
+            key: VAULT_PROFILE_KEY,
+            permission_read: 1,
+            permission_write: 1,
+            value: snapshotPayload
+          }
+        ]);
+        vaultServerSyncSignatureRef.current = signature;
+      } catch (err) {
+        if (isUnauthorizedError(err)) {
+          invalidateSession();
+          return;
+        }
+        if (import.meta.env.DEV) {
+          // eslint-disable-next-line no-console
+          console.error("vault persist server error", err);
+        }
+      }
+    }, 900);
+
+    return () => window.clearTimeout(timer);
+  }, [client, constructionJob, credits, invalidateSession, mainMissionState, pan, populationState, researchJob, rooms, session, technologyLevels, vaultHydrated, vaultHydratedUserId, zoom]);
 
   useEffect(() => {
     localStorage.setItem(UI_SCREEN_KEY, screen);
@@ -5494,7 +5775,9 @@ export default function App() {
       .filter((id): id is ResourceId => Boolean(id));
     setUnlockedResourceIds((prev) => {
       const merged = new Set([...prev, ...builtResourceIds, ...BASE_UNLOCKED_RESOURCE_IDS]);
-      return [...merged];
+      const next = [...merged];
+      if (next.length === prev.length && next.every((id, index) => id === prev[index])) return prev;
+      return next;
     });
   }, [rooms]);
 
@@ -6153,7 +6436,7 @@ export default function App() {
     if (constructionJob.mode === "build") {
       const cfg = ROOM_CONFIG[constructionJob.roomType];
       setRooms((prev) => {
-        if (prev.some((room) => room.type === constructionJob.roomType && constructionJob.roomType !== "entrepot")) {
+        if (prev.some((room) => room.type === constructionJob.roomType && isUniqueRoomType(constructionJob.roomType))) {
           return prev;
         }
         const newId = makeId();
@@ -6480,13 +6763,13 @@ export default function App() {
           permission_read: 1,
           permission_write: 1,
           value: {
-            commanderId: commander.id
+            commanderId: commander.id,
+            avatarUrl: profileAvatar
           }
         }
       ]);
 
       setPlayerId(username.slice(0, 20));
-      setProfileAvatar(commander.image);
       setActiveCommanderId(commander.id);
       localStorage.setItem(PROFILE_EMAIL_DRAFT_KEY, email);
 
@@ -6502,6 +6785,32 @@ export default function App() {
       setProfileLoading(false);
     }
   };
+
+  const handleProfileAvatarUpload = useCallback(
+    async (event: ChangeEvent<HTMLInputElement>) => {
+      const file = event.target.files?.[0];
+      event.target.value = "";
+      if (!file) return;
+      setProfileAvatarBusy(true);
+      setProfileError("");
+      setProfileSaved("");
+      try {
+        const nextAvatar = await prepareProfileAvatarDataUrl(file);
+        setProfileAvatar(nextAvatar);
+      } catch (err) {
+        setProfileError(err instanceof Error ? err.message : "Impossible de charger cet avatar.");
+      } finally {
+        setProfileAvatarBusy(false);
+      }
+    },
+    []
+  );
+
+  const resetProfileAvatarToCommander = useCallback(() => {
+    setProfileAvatar((COMMANDER_DEFS[profileCommanderId] ?? COMMANDER_DEFS[DEFAULT_COMMANDER_ID]).image);
+    setProfileError("");
+    setProfileSaved("");
+  }, [profileCommanderId]);
 
   const getGridCoords = (clientX: number, clientY: number) => {
     if (!transformRef.current) return null;
@@ -7013,6 +7322,7 @@ export default function App() {
             const snapshot = normalizeHangarRpcSnapshot(parsed?.hangar ? parsed : nested?.hangar ? nested : rpc);
             if (snapshot) {
               applyHangarSnapshot(snapshot, false);
+              applyRpcPointTotal(rpc);
             } else {
               void loadHangarState(true);
             }
@@ -7108,6 +7418,8 @@ export default function App() {
       const snapshot = normalizeHangarRpcSnapshot(rpc as any);
       if (!snapshot) throw new Error("Invalid hangar payload.");
       applyHangarSnapshot(snapshot, true);
+      applyRpcPointTotal(rpc);
+      void loadRankingState(true);
     } catch (err) {
       if (isUnauthorizedError(err)) {
         invalidateSession();
@@ -7142,6 +7454,8 @@ export default function App() {
       const snapshot = normalizeHangarRpcSnapshot(rpc as any);
       if (!snapshot) throw new Error("Invalid hangar payload.");
       applyHangarSnapshot(snapshot, true);
+      applyRpcPointTotal(rpc);
+      void loadRankingState(true);
     } catch (err) {
       if (isUnauthorizedError(err)) {
         invalidateSession();
@@ -7194,6 +7508,7 @@ export default function App() {
   }> = [
     { screen: "game", label: l("Jeu", "Game"), icon: Play },
     { screen: "hangar", label: l("Hangar", "Hangar"), icon: Swords },
+    { screen: "market", label: l("Marche", "Market"), icon: Coins },
     { screen: "starmap", label: l("Carte", "Map"), icon: Navigation },
     { screen: "technology", label: l("Technologie", "Technology"), icon: Hexagon },
     { screen: "alliance", label: l("Alliance", "Alliance"), icon: Shield },
@@ -7539,8 +7854,24 @@ export default function App() {
             client={client}
             session={session}
             playerId={playerId}
+            profileUsername={profileUsername}
+            profileAvatar={profileAvatar}
             enabled={screen === "chat"}
             language={uiLanguage}
+          />
+        </>
+      ) : screen === "market" ? (
+        <>
+          {renderUnifiedHeader()}
+          <MarketScreen
+            language={uiLanguage}
+            client={client}
+            session={session}
+            playerId={playerId}
+            resourceAmounts={resourceAmounts}
+            onEconomyRefresh={refreshEconomyHeaderState}
+            onEconomySnapshot={applyMarketEconomySnapshot}
+            onUnauthorized={invalidateSession}
           />
         </>
       ) : screen === "resources" ? (
@@ -7712,6 +8043,7 @@ export default function App() {
             profileAvatar={profileAvatar}
             profileCommanderId={profileCommanderId}
             commanderOptions={commanderOptions}
+            profileAvatarBusy={profileAvatarBusy}
             profileError={profileError}
             profileSaved={profileSaved}
             profileLoading={profileLoading}
@@ -7722,9 +8054,14 @@ export default function App() {
               setUiLanguage(lang);
             }}
             onCommanderChange={(commanderId) => {
+              const previousCommanderImage = (COMMANDER_DEFS[profileCommanderId] ?? COMMANDER_DEFS[DEFAULT_COMMANDER_ID]).image;
               setProfileCommanderId(commanderId);
-              setProfileAvatar(COMMANDER_DEFS[commanderId].image);
+              if (!profileAvatar.trim() || profileAvatar === previousCommanderImage) {
+                setProfileAvatar(COMMANDER_DEFS[commanderId].image);
+              }
             }}
+            onAvatarUpload={handleProfileAvatarUpload}
+            onAvatarReset={resetProfileAvatarToCommander}
             onSubmit={saveProfile}
           />
         </>
@@ -8468,6 +8805,7 @@ function SectorMapScreen({
   });
   const [attackFleetDraft, setAttackFleetDraft] = useState<Record<string, string>>({});
   const [fieldPopupId, setFieldPopupId] = useState<string | null>(null);
+  const [planetPopupPlayerId, setPlanetPopupPlayerId] = useState<string | null>(null);
   const [mapNowMs, setMapNowMs] = useState(() => Date.now());
   const [mapServerSync, setMapServerSync] = useState<{ serverMs: number; localMs: number } | null>(null);
   const [viewportSize, setViewportSize] = useState({ width: 0, height: 0 });
@@ -8537,8 +8875,11 @@ function SectorMapScreen({
       id,
       fieldId: String(expeditionRaw.fieldId || ""),
       missionKind: String(expeditionRaw.missionKind || "").trim().toLowerCase() === "attack" ? "attack" : "harvest",
+      targetKind: String(expeditionRaw.targetKind || "").trim().toLowerCase() === "planet" ? "planet" : "field",
       targetPlayerId: String(expeditionRaw.targetPlayerId || "").trim(),
       targetUsername: String(expeditionRaw.targetUsername || "").trim(),
+      targetX: Math.max(0, Math.floor(Number(expeditionRaw.targetX ?? 0))),
+      targetY: Math.max(0, Math.floor(Number(expeditionRaw.targetY ?? 0))),
       status: (String(expeditionRaw.status || "travel_to_field") as MapExpeditionDto["status"]),
       departureAt: Math.max(0, Math.floor(Number(expeditionRaw.departureAt ?? 0))),
       arrivalAt: Math.max(0, Math.floor(Number(expeditionRaw.arrivalAt ?? 0))),
@@ -8560,6 +8901,7 @@ function SectorMapScreen({
       collectedResources: (expeditionRaw.collectedResources && typeof expeditionRaw.collectedResources === "object"
         ? expeditionRaw.collectedResources
         : {}) as Partial<Record<ResourceId, number>>,
+      collectedCredits: Math.max(0, Math.floor(Number(expeditionRaw.collectedCredits ?? 0))),
       serverNowTs: Math.max(0, Math.floor(Number(expeditionRaw.serverNowTs ?? Math.floor(Date.now() / 1000))))
     };
   };
@@ -8581,7 +8923,8 @@ function SectorMapScreen({
     const id = String(expeditionRaw.id || "").trim();
     const playerId = String(expeditionRaw.playerId || "").trim();
     const fieldId = String(expeditionRaw.fieldId || "").trim();
-    if (!id || !playerId || !fieldId) return null;
+    const targetKind = String(expeditionRaw.targetKind || "").trim().toLowerCase() === "planet" ? "planet" : "field";
+    if (!id || !playerId || (targetKind === "field" && !fieldId)) return null;
     const status = String(expeditionRaw.status || "travel_to_field").trim().toLowerCase();
     if (status !== "travel_to_field" && status !== "extracting" && status !== "returning") return null;
     return {
@@ -8590,8 +8933,11 @@ function SectorMapScreen({
       username: String(expeditionRaw.username || playerId).trim() || playerId,
       fieldId,
       missionKind: String(expeditionRaw.missionKind || "").trim().toLowerCase() === "attack" ? "attack" : "harvest",
+      targetKind,
       targetPlayerId: String(expeditionRaw.targetPlayerId || "").trim(),
       targetUsername: String(expeditionRaw.targetUsername || "").trim(),
+      targetX: Math.max(0, Math.floor(Number(expeditionRaw.targetX ?? 0))),
+      targetY: Math.max(0, Math.floor(Number(expeditionRaw.targetY ?? 0))),
       status: status as MapPublicExpeditionDto["status"],
       departureAt: Math.max(0, Math.floor(Number(expeditionRaw.departureAt ?? 0))),
       arrivalAt: Math.max(0, Math.floor(Number(expeditionRaw.arrivalAt ?? 0))),
@@ -8759,7 +9105,7 @@ function SectorMapScreen({
       }
     };
     void loadPlayers();
-    const interval = setInterval(() => void loadPlayers(), 60000);
+    const interval = setInterval(() => void loadPlayers(), 10000);
     return () => {
       cancelled = true;
       clearInterval(interval);
@@ -8919,6 +9265,9 @@ function SectorMapScreen({
     return fallback;
   }, [cachedMapCombatInventory, hangarInventory, mapCombatInventory]);
 
+  const harvestAvailabilitySignature = useMemo(() => JSON.stringify(harvestAvailability), [harvestAvailability]);
+  const combatAvailabilitySignature = useMemo(() => JSON.stringify(combatAvailability), [combatAvailability]);
+
   useEffect(() => {
     setFleetDraft((prev) => {
       let changed = false;
@@ -8934,7 +9283,7 @@ function SectorMapScreen({
       }
       return changed ? next : prev;
     });
-  }, [harvestAvailability]);
+  }, [harvestAvailabilitySignature]);
 
   useEffect(() => {
     setAttackFleetDraft((prev) => {
@@ -8951,7 +9300,7 @@ function SectorMapScreen({
       }
       return changed ? next : prev;
     });
-  }, [combatAvailability]);
+  }, [combatAvailabilitySignature]);
 
   const hasValidHarvestFleetSelection = useMemo(() => {
     for (const unitId of Object.keys(fleetDraft)) {
@@ -9028,7 +9377,14 @@ function SectorMapScreen({
   useEffect(() => {
     const node = containerRef.current;
     if (!node) return;
-    const syncSize = () => setViewportSize({ width: node.clientWidth, height: node.clientHeight });
+    const syncSize = () => {
+      const nextWidth = node.clientWidth;
+      const nextHeight = node.clientHeight;
+      setViewportSize((prev) => {
+        if (prev.width === nextWidth && prev.height === nextHeight) return prev;
+        return { width: nextWidth, height: nextHeight };
+      });
+    };
     syncSize();
     const onResize = () => syncSize();
     window.addEventListener("resize", onResize);
@@ -9119,6 +9475,13 @@ function SectorMapScreen({
     return row ?? null;
   }, [fieldPopupId, mapResourceEntities]);
 
+  const planetPopupTarget = useMemo(() => {
+    if (!planetPopupPlayerId) return null;
+    const row = sectorPlayerPlanets.find((entity) => entity.userId === planetPopupPlayerId);
+    if (!row || row.isSelf) return null;
+    return row;
+  }, [planetPopupPlayerId, sectorPlayerPlanets]);
+
   const selectedFieldEntity = fieldPopupEntity;
   const fieldPopupOccupiedBySelf = Boolean(
     fieldPopupEntity &&
@@ -9131,6 +9494,29 @@ function SectorMapScreen({
     normalizeMapEntityId(fieldPopupEntity.occupiedByPlayerId || "") !== "" &&
     normalizeMapEntityId(fieldPopupEntity.occupiedByPlayerId || "") !== currentUserId
   );
+  const selectedAttackTarget = useMemo(() => {
+    if (selectedFieldEntity) {
+      return {
+        kind: "field" as const,
+        x: selectedFieldEntity.x,
+        y: selectedFieldEntity.y,
+        targetPlayerId: String(selectedFieldEntity.occupiedByPlayerId || "").trim(),
+        targetUsername: String(selectedFieldEntity.occupiedByUsername || "").trim(),
+        label: sectorEntityDisplayName(selectedFieldEntity, language)
+      };
+    }
+    if (planetPopupTarget) {
+      return {
+        kind: "planet" as const,
+        x: planetPopupTarget.x,
+        y: planetPopupTarget.y,
+        targetPlayerId: planetPopupTarget.userId,
+        targetUsername: planetPopupTarget.username,
+        label: planetPopupTarget.username
+      };
+    }
+    return null;
+  }, [language, planetPopupTarget, selectedFieldEntity]);
 
   const selectedFieldPlan = useMemo(() => {
     if (!selectedFieldEntity) return null;
@@ -9187,9 +9573,9 @@ function SectorMapScreen({
       weightedSpeed += row.speed * row.quantity;
       shipCount += row.quantity;
     }
-    const origin = selectedFieldEntity ? mapPlayerToPlanetCoordinates(currentUserId || "guest") : null;
-    const dx = origin && selectedFieldEntity ? selectedFieldEntity.x - origin.x : 0;
-    const dy = origin && selectedFieldEntity ? selectedFieldEntity.y - origin.y : 0;
+    const origin = selectedAttackTarget ? mapPlayerToPlanetCoordinates(currentUserId || "guest") : null;
+    const dx = origin && selectedAttackTarget ? selectedAttackTarget.x - origin.x : 0;
+    const dy = origin && selectedAttackTarget ? selectedAttackTarget.y - origin.y : 0;
     const distance = Math.sqrt(dx * dx + dy * dy);
     const travelSeconds =
       shipCount > 0 && weightedSpeed > 0
@@ -9207,17 +9593,17 @@ function SectorMapScreen({
       distance,
       travelSeconds,
       fuelCredits:
-        selectedFieldEntity
+        selectedAttackTarget
           ? estimateMapFleetFuelCredits(
               rows.map((row) => ({ unitId: row.unitId, quantity: row.quantity })),
               currentUserId || "guest",
-              selectedFieldEntity.x,
-              selectedFieldEntity.y,
+              selectedAttackTarget.x,
+              selectedAttackTarget.y,
               "attack"
             )
           : 0
     };
-  }, [attackFleetDraft, combatAvailability, combatInventoryById, currentUserId, selectedFieldEntity]);
+  }, [attackFleetDraft, combatAvailability, combatInventoryById, currentUserId, selectedAttackTarget]);
 
   const selectedAttackHasCombatForce = useMemo(
     () => Boolean(selectedAttackPlan && selectedAttackPlan.totalForce > 0),
@@ -9378,12 +9764,17 @@ function SectorMapScreen({
     () =>
       derivedDisplayedMapExpeditions
         .map(({ expedition, timeline }) => {
-          const field = displayedMapFields.find((row) => row.id === expedition.fieldId);
-          if (!field) return null;
           const status = timeline.status;
           if (status !== "travel_to_field" && status !== "returning") return null;
           const home = selfPlanetCoords;
-          const fieldPoint = { x: field.x, y: field.y };
+          const field = expedition.fieldId ? displayedMapFields.find((row) => row.id === expedition.fieldId) : null;
+          const fieldPoint =
+            expedition.targetKind === "planet"
+              ? { x: expedition.targetX, y: expedition.targetY }
+              : field
+                ? { x: field.x, y: field.y }
+                : null;
+          if (!fieldPoint) return null;
           const returning = status === "returning";
           const start = returning ? fieldPoint : home;
           const target = returning ? home : fieldPoint;
@@ -9424,12 +9815,17 @@ function SectorMapScreen({
     () =>
       derivedPublicMapExpeditions
         .map(({ expedition, timeline }) => {
-          const field = displayedMapFields.find((row) => row.id === expedition.fieldId);
-          if (!field) return null;
           const status = timeline.status;
           if (status !== "travel_to_field" && status !== "returning") return null;
           const home = mapPlanetCoordsByUserId.get(expedition.playerId) ?? mapPlayerToPlanetCoordinates(expedition.playerId);
-          const fieldPoint = { x: field.x, y: field.y };
+          const field = expedition.fieldId ? displayedMapFields.find((row) => row.id === expedition.fieldId) : null;
+          const fieldPoint =
+            expedition.targetKind === "planet"
+              ? { x: expedition.targetX, y: expedition.targetY }
+              : field
+                ? { x: field.x, y: field.y }
+                : null;
+          if (!fieldPoint) return null;
           const returning = status === "returning";
           const start = returning ? fieldPoint : home;
           const target = returning ? home : fieldPoint;
@@ -9704,9 +10100,19 @@ function SectorMapScreen({
       .filter((row) => row.progress < 1);
 
     for (const { expedition, timeline } of derivedDisplayedMapExpeditions) {
-      const field = displayedMapFields.find((row) => row.id === expedition.fieldId);
-      const fieldName = field ? mapFieldDisplayName(field.id, language) : mapFieldDisplayName(expedition.fieldId, language);
-      const fieldCoords = field ? { x: field.x, y: field.y } : undefined;
+      const field = expedition.fieldId ? displayedMapFields.find((row) => row.id === expedition.fieldId) : null;
+      const fieldName =
+        expedition.targetKind === "planet"
+          ? `${language === "en" ? "Hyperstructure" : "Hyperstructure"} ${String(expedition.targetUsername || expedition.targetPlayerId || "").trim()}`
+          : field
+            ? mapFieldDisplayName(field.id, language)
+            : mapFieldDisplayName(expedition.fieldId, language);
+      const fieldCoords =
+        expedition.targetKind === "planet"
+          ? { x: expedition.targetX, y: expedition.targetY }
+          : field
+            ? { x: field.x, y: field.y }
+            : undefined;
       const status = timeline.status;
       const isAttackMission = expedition.missionKind === "attack";
       const targetUsername = String(expedition.targetUsername || "").trim();
@@ -9722,7 +10128,7 @@ function SectorMapScreen({
       const route = isAttackMission
         ? status === "returning"
           ? `${fieldName} -> ${language === "en" ? "Your planet" : "Votre planete"}`
-          : `${language === "en" ? "Your planet" : "Votre planete"} -> ${fieldName}${targetUsername ? ` • ${language === "en" ? "Target" : "Cible"} ${targetUsername}` : ""}`
+          : `${language === "en" ? "Your planet" : "Votre planete"} -> ${fieldName}${targetUsername && expedition.targetKind !== "planet" ? ` • ${language === "en" ? "Target" : "Cible"} ${targetUsername}` : ""}`
         : status === "extracting"
           ? `${fieldName} - ${language === "en" ? "Harvesting in progress" : "Exploitation en cours"}`
           : status === "returning"
@@ -9733,7 +10139,7 @@ function SectorMapScreen({
       if (remainingSeconds <= 0) continue;
       const harvestSummary = mapInFlightHarvestSummaryById[expedition.id];
       const incomingAttack =
-        !isAttackMission && status !== "returning"
+        expedition.targetKind !== "planet" && !isAttackMission && status !== "returning"
           ? incomingHostileFieldAttackByFieldId[expedition.fieldId]
           : undefined;
       rows.unshift({
@@ -10254,6 +10660,7 @@ function SectorMapScreen({
 
     if (entity.type === "resource") {
       setFieldPopupId(entity.id);
+      setPlanetPopupPlayerId(null);
       setSelectedEntity(null);
       setActionMode("none");
       return;
@@ -10261,6 +10668,7 @@ function SectorMapScreen({
 
     setSelectedEntity(entity);
     setFieldPopupId(null);
+    setPlanetPopupPlayerId(null);
     setActionMode("none");
   };
 
@@ -10743,6 +11151,77 @@ function SectorMapScreen({
       return false;
     } finally {
       if (!options?.keepBusy) setMapActionBusy(false);
+    }
+  };
+
+  const launchAttackOnPlanet = async (targetPlayerId: string, targetUsername: string) => {
+    if (!session) return false;
+    const fleetPayload = buildAttackFleetPayload(false);
+    if (fleetPayload.length <= 0) {
+      setMapActionError(
+        l(
+          "Aucun vaisseau de combat disponible dans votre stock serveur.",
+          "No combat ship is currently available in your server stock."
+        )
+      );
+      return false;
+    }
+    try {
+      setMapActionBusy(true);
+      setMapActionError("");
+      const rpc = await client.rpc(
+        session,
+        "rpc_map_planet_attack",
+        JSON.stringify({
+          targetPlayerId,
+          targetUsername,
+          fleet: fleetPayload,
+          commandementEscadreLevel
+        })
+      );
+      const parsed = parseJsonObject((rpc as any)?.payload ?? rpc);
+      const nested = parseJsonObject(parsed?.payload);
+      const source = Object.keys(nested).length > 0 ? nested : parsed;
+      applyMapPayload(source);
+      setPlanetPopupPlayerId(null);
+      return true;
+    } catch (err) {
+      let detail = extractRpcErrorMessage(err);
+      if (!detail && err instanceof Response) {
+        try {
+          const raw = await err.text();
+          const parsed = parseJsonObject(raw);
+          detail =
+            String(parsed.message || parsed.error || parsed.error_message || "").trim() ||
+            raw.trim();
+        } catch {
+          // noop
+        }
+      }
+      const detailLower = String(detail || "").toLowerCase();
+      if (detailLower.includes("not enough credits for fleet fuel")) {
+        detail = l(
+          "Credits insuffisants pour payer le carburant de cette mission.",
+          "Not enough credits to pay this mission fuel cost."
+        );
+      } else if (detailLower.includes("active fleet slot limit reached")) {
+        detail = l(
+          "Nombre maximal de flottes actives atteint pour votre niveau de Commandement d'Escadre.",
+          "Maximum active fleet slots reached for your Squadron Command level."
+        );
+      }
+      setMapActionError(
+        detail
+          ? `${l("Attaque impossible", "Attack unavailable")}: ${detail}`
+          : l("Assaut planetaire impossible pour le moment.", "Planetary assault unavailable right now.")
+      );
+      if (import.meta.env.DEV) {
+        // eslint-disable-next-line no-console
+        console.error("map planet attack error", err);
+      }
+      return false;
+    } finally {
+      setMapActionBusy(false);
     }
   };
 
@@ -11241,16 +11720,29 @@ function SectorMapScreen({
           ))}
 
           {sectorPlayerPlanets.map((playerPlanet) => (
-            <div
+            <button
               key={`player_planet_${playerPlanet.userId}`}
-              className={`sector-player-world ${playerPlanet.isSelf ? "self" : ""}`}
+              type="button"
+              className={`sector-player-world ${playerPlanet.isSelf ? "self" : "hostile"} ${planetPopupTarget?.userId === playerPlanet.userId ? "selected" : ""}`}
               style={{ left: playerPlanet.x, top: playerPlanet.y }}
+              onClick={(event) => {
+                event.stopPropagation();
+                if (playerPlanet.isSelf) {
+                  centerOnMyPosition();
+                  return;
+                }
+                setPlanetPopupPlayerId(playerPlanet.userId);
+                setFieldPopupId(null);
+                setSelectedEntity(null);
+                setActionMode("none");
+              }}
+              title={playerPlanet.isSelf ? l("Votre hyperstructure", "Your hyperstructure") : l("Attaquer l'hyperstructure", "Attack the hyperstructure")}
             >
               <span className="sector-player-tag">{playerPlanet.username}</span>
               <span className="sector-world">
                 <span className="sector-world-sprite" style={getPlanetSpriteStyle(playerPlanet.worldType)} />
               </span>
-            </div>
+            </button>
           ))}
 
           {sectorEntities.map((entity) => {
@@ -12392,6 +12884,288 @@ function SectorMapScreen({
           </div>
         </div>
       ) : null}
+
+      {planetPopupTarget ? (
+        <div className="sector-field-modal-backdrop" onClick={() => setPlanetPopupPlayerId(null)}>
+          <div className="sector-field-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="sector-detail-head">
+              <div>
+                <h4>{l("Assaut d'hyperstructure", "Hyperstructure assault")}</h4>
+                <p>
+                  {planetPopupTarget.username} - [{planetPopupTarget.x}, {planetPopupTarget.y}]
+                </p>
+              </div>
+              <button type="button" onClick={() => setPlanetPopupPlayerId(null)}><X size={18} /></button>
+            </div>
+
+            {mapActionError ? <p className="sector-map-error">{mapActionError}</p> : null}
+
+            <div className="sector-field-modal-body">
+              <section className="sector-field-priority">
+                <div className="sector-field-priority-head">
+                  <span className="sector-field-status-badge occupied">{l("Hostile", "Hostile")}</span>
+                  <span className="sector-field-type-badge">{l("Hyperstructure", "Hyperstructure")}</span>
+                  <span className="sector-field-info-badge">{l("Cible planetaire", "Planetary target")}</span>
+                </div>
+                <p className="sector-field-operator">
+                  {l("Commandant detecte", "Detected commander")} <strong>{planetPopupTarget.username}</strong>
+                </p>
+                <div className="sector-field-brief">
+                  <article className="sector-field-brief-card">
+                    <span>{l("Distance", "Distance")}</span>
+                    <strong>{selectedAttackPlan ? `${Math.round(selectedAttackPlan.distance).toLocaleString()} u` : "--"}</strong>
+                  </article>
+                  <article className="sector-field-brief-card">
+                    <span>{l("Impact estime", "Estimated impact")}</span>
+                    <strong>
+                      {selectedAttackPlan
+                        ? `${Math.floor(selectedAttackPlan.travelSeconds / 60)}m ${selectedAttackPlan.travelSeconds % 60}s`
+                        : "--"}
+                    </strong>
+                  </article>
+                  <article className="sector-field-brief-card">
+                    <span>{l("Carburant flotte", "Fleet fuel")}</span>
+                    <strong>{selectedAttackPlan ? `${selectedAttackPlan.fuelCredits.toLocaleString()} ${l("Credits", "Credits")}` : "--"}</strong>
+                  </article>
+                </div>
+                <details className="sector-field-spoiler">
+                  <summary>{l("Doctrine d'assaut", "Assault doctrine")}</summary>
+                  <div className="sector-field-spoiler-content">
+                    <p className="sector-empty">
+                      {l(
+                        "Le serveur resout le combat contre les defenses orbitales et les vaisseaux a quai. En cas de victoire, 60% des ressources de la planete sont charges sur votre flotte. Les pertes sont partielles pour eviter les wipes totaux.",
+                        "The server resolves combat against orbital defenses and docked ships. On victory, 60% of the planet resources are loaded onto your fleet. Losses remain partial to avoid total wipes."
+                      )}
+                    </p>
+                    <p className="sector-empty">
+                      {l(
+                        "La destruction d'une partie de la flotte a quai genere aussi un salvage en credits, livre au retour.",
+                        "Destroying part of the docked fleet also generates a credit salvage payout, delivered on return."
+                      )}
+                    </p>
+                  </div>
+                </details>
+              </section>
+
+              <section className="sector-field-command-panel attack">
+                <div className="sector-field-command-head">
+                  <div>
+                    <h5>{l("Escadre d'assaut", "Strike force")}</h5>
+                    <p>
+                      {l(
+                        "Composez la flotte d'attaque. Le cout en credits evolue en fonction de la distance et des coques engagees.",
+                        "Build the attacking fleet. Credit fuel cost scales with both distance and the selected hulls."
+                      )}
+                    </p>
+                  </div>
+                  <span className="sector-field-slot-pill alert">{l("Cible", "Target")} {planetPopupTarget.username}</span>
+                </div>
+
+                <div className="sector-field-action-row">
+                  <button type="button" className="sector-field-quick-fill" onClick={fillAllAttackFleetDraft}>
+                    {l("Tout engager", "Engage all")}
+                  </button>
+                  <button type="button" className="sector-field-quick-fill subtle" onClick={clearAllAttackFleetDraft}>
+                    {l("Reinitialiser", "Reset")}
+                  </button>
+                </div>
+
+                <div className="sector-field-command-stats">
+                  <article>
+                    <span>{l("Puissance", "Firepower")}</span>
+                    <strong>{selectedAttackPlan ? selectedAttackPlan.totalForce.toLocaleString() : "--"}</strong>
+                  </article>
+                  <article>
+                    <span>{l("Endurance", "Endurance")}</span>
+                    <strong>{selectedAttackPlan ? selectedAttackPlan.totalEndurance.toLocaleString() : "--"}</strong>
+                  </article>
+                  <article>
+                    <span>{l("Capture max", "Loot cap")}</span>
+                    <strong>{selectedAttackPlan ? selectedAttackPlan.totalLootCapacity.toLocaleString() : "--"}</strong>
+                  </article>
+                  <article>
+                    <span>{l("Vitesse moyenne", "Average speed")}</span>
+                    <strong>{selectedAttackPlan ? selectedAttackPlan.averageSpeed.toLocaleString() : "--"}</strong>
+                  </article>
+                  <article>
+                    <span>{l("Distance", "Distance")}</span>
+                    <strong>{selectedAttackPlan ? `${Math.round(selectedAttackPlan.distance).toLocaleString()} u` : "--"}</strong>
+                  </article>
+                  <article>
+                    <span>{l("Carburant", "Fuel")}</span>
+                    <strong>{selectedAttackPlan ? `${selectedAttackPlan.fuelCredits.toLocaleString()} ${l("Credits", "Credits")}` : "--"}</strong>
+                  </article>
+                </div>
+
+                {availableAttackShipRows.length <= 0 ? (
+                  <p className="sector-empty">
+                    {l(
+                      "Aucun vaisseau de combat offensif n'est disponible. Construisez d'abord une escadre dans le Hangar.",
+                      "No offensive combat ship is available. Build a strike wing in the Hangar first."
+                    )}
+                  </p>
+                ) : (
+                  <div className="sector-field-command-grid">
+                    {availableAttackShipRows.map((row) => {
+                      const unitId = row.unitId;
+                      const available = Math.max(0, Math.floor(Number(row.quantity ?? 0)));
+                      const raw = attackFleetDraft[unitId] ?? "0";
+                      const currentQty = Math.max(0, Math.min(available, Math.floor(Number(raw || 0))));
+                      const shipImage = HANGAR_SHIP_IMAGE_MAP[unitId];
+                      const selectedForce = currentQty * row.force;
+                      const selectedEndurance = currentQty * row.endurance;
+                      const selectedLoot = currentQty * row.lootCapacity;
+                      return (
+                        <article
+                          key={`planet_attack_${unitId}`}
+                          className={`sector-field-unit-card ${currentQty > 0 ? "selected" : ""} ${unitId.replace(/_/g, "-")}`}
+                        >
+                          <div className="sector-field-unit-media">
+                            {shipImage ? (
+                              <img
+                                src={shipImage}
+                                alt={hangarUnitDisplayName(unitId, unitId, language)}
+                                className="sector-field-unit-ship"
+                              />
+                            ) : null}
+                            <span className="sector-field-unit-role">{l("Assaut planetaire", "Planetary assault")}</span>
+                            <span className="sector-field-unit-available">
+                              {available.toLocaleString()} {l("disponibles", "available")}
+                            </span>
+                            <span className="sector-field-unit-count">
+                              {l("Selection", "Selected")} {currentQty}
+                            </span>
+                          </div>
+
+                          <div className="sector-field-unit-card-head">
+                            <div>
+                              <strong>{hangarUnitDisplayName(unitId, unitId, language)}</strong>
+                              <p>{hangarUnitDisplayDescription(unitId, unitId, language)}</p>
+                              <small>{l("En reserve", "In reserve")}: {available}</small>
+                            </div>
+                            <span className="sector-field-unit-tag">{row.force > 0 ? l("Combat", "Combat") : l("Soutien", "Support")}</span>
+                          </div>
+
+                          <div className="sector-field-unit-toolbar">
+                            <button
+                              type="button"
+                              className="sector-field-mini-btn"
+                              onClick={() => setAttackFleetDraftForUnit(unitId, "max")}
+                              disabled={mapActionBusy || available <= 0}
+                            >
+                              MAX
+                            </button>
+                            <button
+                              type="button"
+                              className="sector-field-mini-btn subtle"
+                              onClick={() => setAttackFleetDraftForUnit(unitId, "clear")}
+                              disabled={mapActionBusy || currentQty <= 0}
+                            >
+                              {l("RAZ", "CLR")}
+                            </button>
+                          </div>
+
+                          <div className="sector-field-unit-stats">
+                            <span>
+                              <small>{l("Force", "Force")}</small>
+                              <b>{row.force.toLocaleString()}</b>
+                            </span>
+                            <span>
+                              <small>{l("Endurance", "Endurance")}</small>
+                              <b>{row.endurance.toLocaleString()}</b>
+                            </span>
+                            <span>
+                              <small>{l("Vitesse", "Speed")}</small>
+                              <b>{row.speed.toLocaleString()}</b>
+                            </span>
+                          </div>
+
+                          <div className="sector-field-quantity-picker">
+                            <button
+                              type="button"
+                              onClick={() => setAttackFleetDraft((prev) => ({ ...prev, [unitId]: String(Math.max(0, currentQty - 1)) }))}
+                              disabled={mapActionBusy || currentQty <= 0}
+                            >
+                              -
+                            </button>
+                            <input
+                              type="number"
+                              min={0}
+                              max={available}
+                              value={raw}
+                              onChange={(e) => {
+                                const next = Math.max(0, Math.min(available, Math.floor(Number(e.target.value || 0))));
+                                setAttackFleetDraft((prev) => ({ ...prev, [unitId]: String(next) }));
+                              }}
+                            />
+                            <button
+                              type="button"
+                              onClick={() => setAttackFleetDraft((prev) => ({ ...prev, [unitId]: String(Math.min(available, currentQty + 1)) }))}
+                              disabled={mapActionBusy || currentQty >= available}
+                            >
+                              +
+                            </button>
+                          </div>
+
+                          <div className="sector-field-unit-contrib">
+                            <span>
+                              <small>{l("Force mission", "Mission force")}</small>
+                              <b>{selectedForce.toLocaleString()}</b>
+                            </span>
+                            <span>
+                              <small>{l("Tenue mission", "Mission endurance")}</small>
+                              <b>{selectedEndurance.toLocaleString()}</b>
+                            </span>
+                            <span>
+                              <small>{l("Capture mission", "Mission loot")}</small>
+                              <b>{selectedLoot.toLocaleString()}</b>
+                            </span>
+                          </div>
+                        </article>
+                      );
+                    })}
+                  </div>
+                )}
+
+                <div className="sector-field-command-foot">
+                  <div className="sector-field-launch-brief danger">
+                    <span>{l("Distance", "Distance")} <strong>{selectedAttackPlan ? `${Math.round(selectedAttackPlan.distance).toLocaleString()} u` : "--"}</strong></span>
+                    <span>{l("Carburant", "Fuel")} <strong>{selectedAttackPlan ? `${selectedAttackPlan.fuelCredits.toLocaleString()} ${l("Credits", "Credits")}` : "--"}</strong></span>
+                  </div>
+                  <button
+                    type="button"
+                    className="sector-war-btn sector-field-launch-btn"
+                    onClick={() => void launchAttackOnPlanet(planetPopupTarget.userId, planetPopupTarget.username)}
+                    disabled={mapActionBusy || !hasValidAttackFleetSelection}
+                  >
+                    {mapActionBusy
+                      ? l("Engagement...", "Engaging...")
+                      : l("Attaquer l'hyperstructure", "Attack the hyperstructure")}
+                  </button>
+                  <p>
+                    {!hasValidAttackFleetSelection
+                      ? selectedAttackPlan && selectedAttackPlan.fleet.length > 0 && !selectedAttackHasCombatForce
+                        ? l(
+                            "Ajoutez au moins un vaisseau de combat. Les transporteurs seuls ne peuvent pas lancer l'assaut.",
+                            "Add at least one combat ship. Transports alone cannot launch the assault."
+                          )
+                        : l("Selectionnez au moins une escadre de combat.", "Select at least one combat squadron.")
+                      : selectedAttackPlan
+                        ? l(
+                            `En cas de victoire, 60% des ressources de la planete et le salvage en credits seront charges sur la flotte au retour. Carburant estime: ${selectedAttackPlan.fuelCredits.toLocaleString()} credits.`,
+                            `On victory, 60% of the planet resources and salvaged credits will be loaded onto the returning fleet. Estimated fuel: ${selectedAttackPlan.fuelCredits.toLocaleString()} credits.`
+                          )
+                        : l(
+                            "En cas de victoire, votre flotte repart avec le pillage et le salvage recuperes.",
+                            "On victory, your fleet leaves with the raid loot and salvage."
+                          )}
+                  </p>
+                </div>
+              </section>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </main>
   );
 }
@@ -12441,6 +13215,7 @@ function HangarScreen({
   const familyTactical = (family: HangarUnitFamily) => (language === "en" ? HANGAR_FAMILY_META[family].tacticalEn : HANGAR_FAMILY_META[family].tacticalFr);
   const familyImportance = (family: HangarUnitFamily) => (language === "en" ? HANGAR_FAMILY_META[family].importanceEn : HANGAR_FAMILY_META[family].importanceFr);
   const [tab, setTab] = useState<HangarCategory>("ship");
+  const [viewMode, setViewMode] = useState<"line" | "card">("line");
   const [familyFilter, setFamilyFilter] = useState<"all" | HangarUnitFamily>("all");
   const [quantityByUnit, setQuantityByUnit] = useState<Record<string, string>>({});
   const [boostItemId, setBoostItemId] = useState("");
@@ -12638,6 +13413,57 @@ function HangarScreen({
     }
   };
 
+  const renderUnitDetails = (def: HangarUnitDef, family: HangarUnitFamily, requestedQty: number, fuelBase: number) => (
+    <div className="hangar-v4-details-popover">
+      <div className="hangar-v4-details-intel">
+        <div className="hangar-v4-hover-head">
+          <strong>{l("Renseignement rapide", "Quick intel")}</strong>
+          <span>{familyLabel(family)}</span>
+        </div>
+        <p>{familySummary(family)}</p>
+      </div>
+      <div className="hangar-v4-details-grid">
+        <div>
+          <small>{l("Categorie", "Category")}</small>
+          <b>{def.category === "ship" ? l("Vaisseau", "Ship") : l("Defense", "Defense")}</b>
+        </div>
+        <div>
+          <small>{l("Famille", "Family")}</small>
+          <b>{familyLabel(family)}</b>
+        </div>
+        <div>
+          <small>{l("Temps unite", "Unit build time")}</small>
+          <b>{formatDuration(def.buildSeconds)}</b>
+        </div>
+        <div>
+          <small>{l("Temps serie", "Batch time")}</small>
+          <b>{formatDuration(def.buildSeconds * requestedQty)}</b>
+        </div>
+        <div>
+          <small>{def.category === "ship" ? l("Capacite / coque", "Cargo / hull") : l("Cadence", "Cadence")}</small>
+          <b>{def.category === "ship" ? Number(def.capacity ?? 0).toLocaleString() : String(def.reload ?? "-")}</b>
+        </div>
+        <div>
+          <small>{def.category === "ship" ? l("Q / h", "Quantum / h") : l("Carburant", "Fuel")}</small>
+          <b>{def.category === "ship" ? Number(def.quantumPerHour ?? 0).toLocaleString() : l("Stationnaire", "Static")}</b>
+        </div>
+      </div>
+      <div className="hangar-v4-doctrine-copy">
+        <p>{unitStrategicAdvice(def)}</p>
+        {def.category === "ship" ? (
+          <p>
+            {l(
+              `Carburant de reference: ${fuelBase.toLocaleString()} credits / 1000 distance. Plus la flotte est lourde et plus la route est longue, plus la mission coutera cher.`,
+              `Reference fuel: ${fuelBase.toLocaleString()} credits / 1000 distance. The heavier the fleet and the longer the route, the more expensive the mission becomes.`
+            )}
+          </p>
+        ) : (
+          <p>{l("Plateforme stationnaire: pas de carburant, mais une vraie dette industrielle a la production.", "Stationary platform: no fuel, but a real industrial debt when built.")}</p>
+        )}
+      </div>
+    </div>
+  );
+
   return (
     <main className="hangar-v4-shell">
       <section className="hangar-v4-hero">
@@ -12658,39 +13484,45 @@ function HangarScreen({
               <Shield size={15} /> {l("Defenses", "Defenses")}
             </button>
           </div>
-          <div className="hangar-v4-doctrine-banner">
-            <Coins size={16} />
-            <div>
-              <strong>{l("Carburant tactique en credits", "Credit-based tactical fuel")}</strong>
-              <span>
-                {l(
-                  "Chaque mission carte consomme des credits selon le type de coque, la distance et le role de la flotte.",
-                  "Each map mission consumes credits based on hull class, distance and fleet role."
-                )}
-              </span>
-            </div>
-          </div>
         </div>
         <div className="hangar-v4-hero-stats">
           <article className="hangar-v4-kpi">
             <small>{l("File active", "Active queue")}</small>
-            <strong>{totalQueuedUnits.toLocaleString()}</strong>
-            <span>{activeQueueItem ? `${queueWithDefs[0]?.def ? unitName(queueWithDefs[0].def) : l("Production", "Production")} x${activeQueueItem.quantity}` : l("Aucune production", "No production")}</span>
+            <div className="hangar-v4-kpi-inline">
+              <strong>{totalQueuedUnits.toLocaleString()}</strong>
+              <span className="hangar-v4-kpi-copy">
+                {activeQueueItem ? (
+                  <>
+                    <b>{queueWithDefs[0]?.def ? unitName(queueWithDefs[0].def) : l("Production", "Production")}</b>
+                    <em className="hangar-v4-kpi-qty">{activeQueueItem.quantity.toLocaleString()}</em>
+                    <i>{l("unites", "units")}</i>
+                  </>
+                ) : (
+                  l("Aucune production", "No production")
+                )}
+              </span>
+            </div>
           </article>
           <article className="hangar-v4-kpi">
             <small>{l("Puissance de reserve", "Reserve power")}</small>
-            <strong>{totalCombatReserve.toLocaleString()}</strong>
-            <span>{l("Force offensive stockee", "Stored offensive firepower")}</span>
+            <div className="hangar-v4-kpi-inline">
+              <strong>{totalCombatReserve.toLocaleString()}</strong>
+              <span>{l("Force offensive stockee", "Stored offensive firepower")}</span>
+            </div>
           </article>
           <article className="hangar-v4-kpi">
             <small>{l("Soute logistique", "Logistics lift")}</small>
-            <strong>{totalHarvestLift.toLocaleString()}</strong>
-            <span>{l("Capacite de transport disponible", "Available haul capacity")}</span>
+            <div className="hangar-v4-kpi-inline">
+              <strong>{totalHarvestLift.toLocaleString()}</strong>
+              <span>{l("Capacite de transport disponible", "Available haul capacity")}</span>
+            </div>
           </article>
           <article className="hangar-v4-kpi">
             <small>{l("Couverture defensive", "Defensive screen")}</small>
-            <strong>{totalDefensePower.toLocaleString()}</strong>
-            <span>{l("Feu stationnaire cumule", "Total static firepower")}</span>
+            <div className="hangar-v4-kpi-inline">
+              <strong>{totalDefensePower.toLocaleString()}</strong>
+              <span>{l("Feu stationnaire cumule", "Total static firepower")}</span>
+            </div>
           </article>
         </div>
       </section>
@@ -12720,9 +13552,11 @@ function HangarScreen({
                   return (
                     <article key={item.id} className={`hangar-v4-queue-item ${index === 0 ? "active" : ""}`}>
                       <header>
-                        <div>
+                        <div className="hangar-v4-queue-copy">
                           <strong>{unitName(def)}</strong>
-                          <small>{item.quantity.toLocaleString()} {l("unites", "units")}</small>
+                          <small>
+                            <span className="hangar-v4-queue-qty">{item.quantity.toLocaleString()}</span> {l("unites", "units")}
+                          </small>
                         </div>
                         {index === 0 ? (
                           <button
@@ -12845,27 +13679,23 @@ function HangarScreen({
             <div>
               <span className="hangar-v4-eyebrow">{tab === "ship" ? l("Catalogue d'escadres", "Squadron catalog") : l("Catalogue defensif", "Defense catalog")}</span>
               <h3>{tab === "ship" ? l("Vaisseaux classes par role", "Ships ordered by role") : l("Defenses classees par fonction", "Defenses ordered by function")}</h3>
-              <p>
-                {l(
-                  "Les modeles verrouilles restent masques jusqu'au debloquage. Les cartes donnent la synthese, le hover ouvre le renseignement rapide et les spoilers gardent les details hors du flux principal.",
-                  "Locked models stay hidden until unlocked. Cards show the summary, hover opens quick intel, and spoilers keep deep details out of the main flow."
-                )}
-              </p>
             </div>
-            <div className="hangar-v4-family-pills">
-              <button type="button" className={familyFilter === "all" ? "active" : ""} onClick={() => setFamilyFilter("all")}>
-                {l("Toutes", "All")}
-              </button>
-              {readyFamilies.map((family) => (
-                <button
-                  key={`family_filter_${family}`}
-                  type="button"
-                  className={familyFilter === family ? "active" : ""}
-                  onClick={() => setFamilyFilter(family)}
-                >
-                  {familyLabel(family)}
+            <div className="hangar-v4-catalog-controls">
+              <div className="hangar-v4-family-pills">
+                <button type="button" className={familyFilter === "all" ? "active" : ""} onClick={() => setFamilyFilter("all")}>
+                  {l("Toutes", "All")}
                 </button>
-              ))}
+                {readyFamilies.map((family) => (
+                  <button
+                    key={`family_filter_${family}`}
+                    type="button"
+                    className={familyFilter === family ? "active" : ""}
+                    onClick={() => setFamilyFilter(family)}
+                  >
+                    {familyLabel(family)}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
 
@@ -12889,151 +13719,192 @@ function HangarScreen({
                   </div>
                   <div className="hangar-v4-family-meta">
                     <span>{familyDefs.length.toLocaleString()} {tab === "ship" ? l("modeles visibles", "visible models") : l("plateformes visibles", "visible platforms")}</span>
-                    <span>{familyTactical(family)}</span>
+                    <div className="hangar-v4-display-toggle">
+                      <button
+                        type="button"
+                        onClick={() => setViewMode((current) => (current === "line" ? "card" : "line"))}
+                        title={viewMode === "line" ? l("Passer en vue cartes", "Switch to card view") : l("Passer en vue ligne", "Switch to line view")}
+                      >
+                        {viewMode === "line" ? l("Vue cartes", "Card view") : l("Vue ligne", "Line view")}
+                      </button>
+                    </div>
                   </div>
                 </header>
 
-                <div className="hangar-v4-grid">
-                  {familyDefs.map((def) => {
-                    const requestedQty = Math.max(1, Math.floor(Number(quantityByUnit[def.id] ?? 1) || 1));
-                    const maxBuildable = maxCraftableFromResources(authoritativeResources, def.cost);
-                    const batchCost = scaleCost(def.cost, requestedQty);
-                    const affordable = canAffordCost(authoritativeResources, batchCost);
-                    const unitImagePath = def.category === "ship" ? HANGAR_SHIP_IMAGE_MAP[def.id] : HANGAR_DEFENSE_IMAGE_MAP[def.id];
-                    const produced = Math.max(0, Math.floor(Number(inventory[def.id] ?? 0)));
-                    const fuelBase = def.category === "ship" ? hangarUnitFuelBasePer1000(def.id) : 0;
-                    const hoverImage = unitImagePath || "/room-images/vaisseau.png";
-                    return (
-                      <article key={def.id} className={`hangar-v4-card ${def.category} ${family.replace(/_/g, "-")}`}>
-                        <div className="hangar-v4-card-bg" style={{ backgroundImage: `url(${hoverImage})` }} />
-                        <div className="hangar-v4-card-top">
-                          <span className="hangar-v4-badge">{unitRoleLabel(def)}</span>
-                          <span className="hangar-v4-badge subtle">{familyImportance(family)}</span>
-                        </div>
-                        <div className="hangar-v4-card-main">
-                          <div className="hangar-v4-card-media">
-                            <img
-                              src={hoverImage}
-                              alt={unitName(def)}
-                              className="hangar-v4-card-ship"
-                              onError={(e) => {
-                                const img = e.currentTarget as HTMLImageElement;
-                                if (!img.src.endsWith("/room-images/vaisseau.png")) img.src = "/room-images/vaisseau.png";
-                              }}
-                            />
+                {viewMode === "card" ? (
+                  <div className="hangar-v4-grid">
+                    {familyDefs.map((def) => {
+                      const requestedQty = Math.max(1, Math.floor(Number(quantityByUnit[def.id] ?? 1) || 1));
+                      const maxBuildable = maxCraftableFromResources(authoritativeResources, def.cost);
+                      const batchCost = scaleCost(def.cost, requestedQty);
+                      const affordable = canAffordCost(authoritativeResources, batchCost);
+                      const unitImagePath = def.category === "ship" ? HANGAR_SHIP_IMAGE_MAP[def.id] : HANGAR_DEFENSE_IMAGE_MAP[def.id];
+                      const produced = Math.max(0, Math.floor(Number(inventory[def.id] ?? 0)));
+                      const fuelBase = def.category === "ship" ? hangarUnitFuelBasePer1000(def.id) : 0;
+                      const hoverImage = unitImagePath || "/room-images/vaisseau.png";
+                      return (
+                        <article key={def.id} className={`hangar-v4-card ${def.category} ${family.replace(/_/g, "-")}`}>
+                          <div className="hangar-v4-card-bg" style={{ backgroundImage: `url(${hoverImage})` }} />
+                          <div className="hangar-v4-card-top">
+                            <span className="hangar-v4-badge">{unitRoleLabel(def)}</span>
+                            <span className="hangar-v4-badge subtle">{familyImportance(family)}</span>
                           </div>
-                          <div className="hangar-v4-card-headline">
-                            <strong>{unitName(def)}</strong>
-                            <small>{unitDescription(def)}</small>
-                          </div>
-                          <div className="hangar-v4-card-stock">
-                            <span>{l("En service", "Owned")} <b>{produced.toLocaleString()}</b></span>
-                            <span>{l("Fabricable", "Buildable")} <b>{maxBuildable.toLocaleString()}</b></span>
-                          </div>
-                          <div className="hangar-v4-card-stats">
-                            <span>
-                              <small>{l("Force", "Force")}</small>
-                              <b>{def.force.toLocaleString()}</b>
-                            </span>
-                            <span>
-                              <small>{l("Endurance", "Endurance")}</small>
-                              <b>{def.endurance.toLocaleString()}</b>
-                            </span>
-                            <span>
-                              <small>{def.category === "ship" ? l("Vitesse", "Speed") : l("Portee", "Range")}</small>
-                              <b>{def.category === "ship" ? Math.max(0, Number(def.speed ?? 0)).toLocaleString() : String(def.range ?? "-")}</b>
-                            </span>
-                            <span>
-                              <small>{def.category === "ship" ? l("Carburant / 1000", "Fuel / 1000") : l("Rechargement", "Reload")}</small>
-                              <b>{def.category === "ship" ? `${fuelBase.toLocaleString()} ${l("cr", "cr")}` : String(def.reload ?? "-")}</b>
-                            </span>
-                          </div>
-                          <ResourceCostDisplay cost={batchCost} available={authoritativeResources} language={language} compact className="hangar-v4-costs" />
-                          <div className="hangar-v4-build-row">
-                            <label>
-                              <span>{l("Quantite", "Quantity")}</span>
-                              <input
-                                type="number"
-                                min={1}
-                                max={Math.max(1, maxBuildable)}
-                                value={quantityByUnit[def.id] ?? "1"}
-                                onChange={(e) => setQuantityByUnit((prev) => ({ ...prev, [def.id]: e.target.value }))}
+                          <div className="hangar-v4-card-main">
+                            <div className="hangar-v4-card-media">
+                              <img
+                                src={hoverImage}
+                                alt={unitName(def)}
+                                className="hangar-v4-card-ship"
+                                onError={(e) => {
+                                  const img = e.currentTarget as HTMLImageElement;
+                                  if (!img.src.endsWith("/room-images/vaisseau.png")) img.src = "/room-images/vaisseau.png";
+                                }}
                               />
-                            </label>
-                            <button
-                              type="button"
-                              disabled={!affordable || actionBusy || maxBuildable <= 0 || loading || !serverResourcesReady}
-                              onClick={() => void onQueue(def.id, requestedQty)}
-                            >
-                              {actionBusy ? l("Transmission...", "Transmitting...") : l("Lancer la serie", "Queue batch")}
-                            </button>
-                          </div>
-                        </div>
-
-                        <div className="hangar-v4-hover-intel">
-                          <div className="hangar-v4-hover-head">
-                            <strong>{l("Renseignement rapide", "Quick intel")}</strong>
-                            <span>{familyLabel(family)}</span>
-                          </div>
-                          <p>{familySummary(family)}</p>
-                          <ul>
-                            <li>{unitStrategicAdvice(def)}</li>
-                            <li>
-                              {def.category === "ship"
-                                ? l(
-                                    `Base carburant: ${fuelBase.toLocaleString()} credits par 1000 distance. Les attaques coutent plus qu'une collecte.`,
-                                    `Fuel base: ${fuelBase.toLocaleString()} credits per 1000 distance. Attacks cost more than harvesting.`
-                                  )
-                                : l("Plateforme stationnaire: pas de carburant, mais une vraie dette industrielle a la production.", "Stationary platform: no fuel, but a real industrial debt when built.")}
-                            </li>
-                          </ul>
-                        </div>
-
-                        <details className="hangar-v4-details">
-                          <summary>{l("Doctrine & fiche", "Doctrine & sheet")}</summary>
-                          <div className="hangar-v4-details-grid">
-                            <div>
-                              <small>{l("Categorie", "Category")}</small>
-                              <b>{def.category === "ship" ? l("Vaisseau", "Ship") : l("Defense", "Defense")}</b>
                             </div>
-                            <div>
-                              <small>{l("Famille", "Family")}</small>
-                              <b>{familyLabel(family)}</b>
+                            <div className="hangar-v4-card-headline">
+                              <strong>{unitName(def)}</strong>
+                              <small>{unitDescription(def)}</small>
                             </div>
-                            <div>
-                              <small>{l("Temps unite", "Unit build time")}</small>
-                              <b>{formatDuration(def.buildSeconds)}</b>
+                            <div className="hangar-v4-card-stock">
+                              <span className="hangar-v4-card-stock-primary">
+                                <small>{l("En service", "Owned")}</small>
+                                <b>{produced.toLocaleString()}</b>
+                              </span>
+                              <span className="hangar-v4-card-stock-secondary">
+                                <small>{l("Fabricable", "Buildable")}</small>
+                                <b>{maxBuildable.toLocaleString()}</b>
+                              </span>
                             </div>
-                            <div>
-                              <small>{l("Temps serie", "Batch time")}</small>
-                              <b>{formatDuration(def.buildSeconds * requestedQty)}</b>
+                            <div className="hangar-v4-card-stats">
+                              <span>
+                                <small>{l("Force", "Force")}</small>
+                                <b>{def.force.toLocaleString()}</b>
+                              </span>
+                              <span>
+                                <small>{l("Endurance", "Endurance")}</small>
+                                <b>{def.endurance.toLocaleString()}</b>
+                              </span>
+                              <span>
+                                <small>{def.category === "ship" ? l("Vitesse", "Speed") : l("Portee", "Range")}</small>
+                                <b>{def.category === "ship" ? Math.max(0, Number(def.speed ?? 0)).toLocaleString() : String(def.range ?? "-")}</b>
+                              </span>
+                              <span>
+                                <small>{def.category === "ship" ? l("Carburant / 1000", "Fuel / 1000") : l("Rechargement", "Reload")}</small>
+                                <b>{def.category === "ship" ? `${fuelBase.toLocaleString()} ${l("cr", "cr")}` : String(def.reload ?? "-")}</b>
+                              </span>
                             </div>
-                            <div>
-                              <small>{def.category === "ship" ? l("Capacite / coque", "Cargo / hull") : l("Cadence", "Cadence")}</small>
-                              <b>{def.category === "ship" ? Number(def.capacity ?? 0).toLocaleString() : String(def.reload ?? "-")}</b>
-                            </div>
-                            <div>
-                              <small>{def.category === "ship" ? l("Q / h", "Quantum / h") : l("Carburant", "Fuel")}</small>
-                              <b>{def.category === "ship" ? Number(def.quantumPerHour ?? 0).toLocaleString() : l("Stationnaire", "Static")}</b>
+                            <ResourceCostDisplay cost={batchCost} available={authoritativeResources} language={language} compact className="hangar-v4-costs" />
+                            <div className="hangar-v4-build-row">
+                              <label>
+                                <span>{l("Quantite", "Quantity")}</span>
+                                <input
+                                  type="number"
+                                  min={1}
+                                  max={Math.max(1, maxBuildable)}
+                                  value={quantityByUnit[def.id] ?? "1"}
+                                  onChange={(e) => setQuantityByUnit((prev) => ({ ...prev, [def.id]: e.target.value }))}
+                                />
+                              </label>
+                              <button
+                                type="button"
+                                disabled={!affordable || actionBusy || maxBuildable <= 0 || loading || !serverResourcesReady}
+                                onClick={() => void onQueue(def.id, requestedQty)}
+                              >
+                                {actionBusy ? l("Transmission...", "Transmitting...") : l("Lancer la serie", "Queue batch")}
+                              </button>
                             </div>
                           </div>
-                          <div className="hangar-v4-doctrine-copy">
-                            <p>{familyTactical(family)}</p>
-                            <p>{unitStrategicAdvice(def)}</p>
-                            {def.category === "ship" ? (
-                              <p>
-                                {l(
-                                  `Carburant de reference: ${fuelBase.toLocaleString()} credits / 1000 distance. Plus la flotte est lourde et plus la route est longue, plus la mission coutera cher.`,
-                                  `Reference fuel: ${fuelBase.toLocaleString()} credits / 1000 distance. The heavier the fleet and the longer the route, the more expensive the mission becomes.`
-                                )}
-                              </p>
-                            ) : null}
+                          <details className="hangar-v4-details">
+                            <summary>{l("Doctrine & fiche", "Doctrine & sheet")}</summary>
+                            {renderUnitDetails(def, family, requestedQty, fuelBase)}
+                          </details>
+                        </article>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="hangar-v4-line-list">
+                    {familyDefs.map((def) => {
+                      const requestedQty = Math.max(1, Math.floor(Number(quantityByUnit[def.id] ?? 1) || 1));
+                      const maxBuildable = maxCraftableFromResources(authoritativeResources, def.cost);
+                      const batchCost = scaleCost(def.cost, requestedQty);
+                      const affordable = canAffordCost(authoritativeResources, batchCost);
+                      const unitImagePath = def.category === "ship" ? HANGAR_SHIP_IMAGE_MAP[def.id] : HANGAR_DEFENSE_IMAGE_MAP[def.id];
+                      const produced = Math.max(0, Math.floor(Number(inventory[def.id] ?? 0)));
+                      const fuelBase = def.category === "ship" ? hangarUnitFuelBasePer1000(def.id) : 0;
+                      const hoverImage = unitImagePath || "/room-images/vaisseau.png";
+                      return (
+                        <article key={def.id} className={`hangar-v4-line-item ${def.category}`}>
+                          <div className="hangar-v4-line-main">
+                            <div className="hangar-v4-line-visual">
+                              <img
+                                src={hoverImage}
+                                alt={unitName(def)}
+                                className="hangar-v4-line-ship"
+                                onError={(e) => {
+                                  const img = e.currentTarget as HTMLImageElement;
+                                  if (!img.src.endsWith("/room-images/vaisseau.png")) img.src = "/room-images/vaisseau.png";
+                                }}
+                              />
+                            </div>
+                            <div className="hangar-v4-line-copy">
+                              <div className="hangar-v4-line-tags">
+                                <span className="hangar-v4-badge">{unitRoleLabel(def)}</span>
+                                <span className="hangar-v4-badge subtle">{familyImportance(family)}</span>
+                              </div>
+                              <strong>{unitName(def)}</strong>
+                              <p>{unitDescription(def)}</p>
+                              <div className="hangar-v4-line-stockbar">
+                                <div className="hangar-v4-line-stock-primary">
+                                  <small>{l("En service", "Owned")}</small>
+                                  <b>{produced.toLocaleString()}</b>
+                                </div>
+                                <div className="hangar-v4-line-stock-secondary">
+                                  <small>{l("Fabricable", "Buildable")}</small>
+                                  <span>{maxBuildable.toLocaleString()}</span>
+                                </div>
+                              </div>
+                            </div>
                           </div>
-                        </details>
-                      </article>
-                    );
-                  })}
-                </div>
+                          <div className="hangar-v4-line-body">
+                            <div className="hangar-v4-line-stats">
+                              <span><small>{l("Force", "Force")}</small><b>{def.force.toLocaleString()}</b></span>
+                              <span><small>{l("Endurance", "Endurance")}</small><b>{def.endurance.toLocaleString()}</b></span>
+                              <span><small>{def.category === "ship" ? l("Vitesse", "Speed") : l("Portee", "Range")}</small><b>{def.category === "ship" ? Math.max(0, Number(def.speed ?? 0)).toLocaleString() : String(def.range ?? "-")}</b></span>
+                              <span><small>{def.category === "ship" ? l("Carburant / 1000", "Fuel / 1000") : l("Rechargement", "Reload")}</small><b>{def.category === "ship" ? `${fuelBase.toLocaleString()} ${l("cr", "cr")}` : String(def.reload ?? "-")}</b></span>
+                            </div>
+                            <div className="hangar-v4-line-order">
+                              <ResourceCostDisplay cost={batchCost} available={authoritativeResources} language={language} compact className="hangar-v4-costs hangar-v4-line-costs" />
+                              <div className="hangar-v4-build-row hangar-v4-build-row-line">
+                                <label>
+                                  <span>{l("Quantite", "Quantity")}</span>
+                                  <input
+                                    type="number"
+                                    min={1}
+                                    max={Math.max(1, maxBuildable)}
+                                    value={quantityByUnit[def.id] ?? "1"}
+                                    onChange={(e) => setQuantityByUnit((prev) => ({ ...prev, [def.id]: e.target.value }))}
+                                  />
+                                </label>
+                                <button
+                                  type="button"
+                                  disabled={!affordable || actionBusy || maxBuildable <= 0 || loading || !serverResourcesReady}
+                                  onClick={() => void onQueue(def.id, requestedQty)}
+                                >
+                                  {actionBusy ? l("Transmission...", "Transmitting...") : l("Lancer la serie", "Queue batch")}
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                          <details className="hangar-v4-details hangar-v4-line-details">
+                            <summary>{l("Doctrine & fiche", "Doctrine & sheet")}</summary>
+                            {renderUnitDetails(def, family, requestedQty, fuelBase)}
+                          </details>
+                        </article>
+                      );
+                    })}
+                  </div>
+                )}
               </section>
             ))
           )}
@@ -14449,7 +15320,7 @@ function RankingScreen({
       const metadata = parseJsonObject(entry?.metadata);
       const rank = Math.max(1, Math.floor(Number(entry?.rank ?? index + 1)));
       const score = formatDisplayedScoreLabel(Number(entry?.score ?? 0));
-      const subscore = Math.max(0, Math.floor(Number(entry?.subscore ?? 0)));
+      const subscore = formatDisplayedScoreLabel(Number(entry?.subscore ?? 0));
       const ownerId = String(entry?.ownerId ?? "");
       const allianceId = String(metadata?.allianceId ?? "");
       const fallbackName = ownerId ? ownerId.slice(0, 10) : `#${rank}`;
@@ -14560,12 +15431,45 @@ function RankingScreen({
                 )}
               </span>
               <strong className="score">{row.score}</strong>
-              <span className="subscore">{row.subscore.toLocaleString()}</span>
+              <span className="subscore">{row.subscore}</span>
             </div>
           ))
         )}
       </section>
     </main>
+  );
+}
+
+function MarketScreen({
+  language,
+  client,
+  session,
+  playerId,
+  resourceAmounts,
+  onEconomyRefresh,
+  onEconomySnapshot,
+  onUnauthorized
+}: {
+  language: UILanguage;
+  client: Client;
+  session: Session | null;
+  playerId: string;
+  resourceAmounts: Record<string, number>;
+  onEconomyRefresh: () => Promise<void> | void;
+  onEconomySnapshot?: (snapshot: { resources?: Record<string, number>; credits?: number; wallet?: { credits?: number } } | null | undefined) => void;
+  onUnauthorized: () => void;
+}) {
+  return (
+    <MarketCommandScreen
+      language={language}
+      client={client}
+      session={session}
+      playerId={playerId}
+      resourceAmounts={resourceAmounts}
+      onEconomyRefresh={onEconomyRefresh}
+      onEconomySnapshot={onEconomySnapshot}
+      onUnauthorized={onUnauthorized}
+    />
   );
 }
 
@@ -15379,7 +16283,41 @@ function InboxScreen({
   onClaimApplied: (payload: any) => void;
 }) {
   const l = (fr: string, en: string) => (language === "en" ? en : fr);
-  const [tab, setTab] = useState<"ALL" | "COMBAT_REPORT" | "REWARD" | "SYSTEM" | "PLAYER">("ALL");
+  const resolveProfileAvatarUrls = useCallback(
+    async (userIds: string[]) => {
+      if (!session) return {} as Record<string, string>;
+      const unique = [...new Set(userIds.map((id) => String(id || "").trim()).filter(Boolean))];
+      if (unique.length <= 0) return {} as Record<string, string>;
+      try {
+        const read = await client.readStorageObjects(session, {
+          object_ids: unique.map((userId) => ({
+            collection: PROFILE_COMMANDER_COLLECTION,
+            key: PROFILE_COMMANDER_KEY,
+            user_id: userId
+          }))
+        });
+        const next: Record<string, string> = {};
+        for (const row of read.objects ?? []) {
+          const userId = String(row.user_id || "").trim();
+          if (!userId) continue;
+          const value = row.value as { commanderId?: string; avatarUrl?: string } | undefined;
+          const commanderId = COMMANDER_IDS.includes(value?.commanderId as CommanderId)
+            ? (value!.commanderId as CommanderId)
+            : DEFAULT_COMMANDER_ID;
+          const avatarUrl =
+            typeof value?.avatarUrl === "string" && value.avatarUrl.trim()
+              ? value.avatarUrl.trim()
+              : COMMANDER_DEFS[commanderId].image;
+          next[userId] = avatarUrl;
+        }
+        return next;
+      } catch {
+        return {} as Record<string, string>;
+      }
+    },
+    [client, session]
+  );
+  const [tab, setTab] = useState<"ALL" | "COMBAT_REPORT" | "REWARD" | "SYSTEM" | "PLAYER" | "MARKET">("ALL");
   const [items, setItems] = useState<InboxMessage[]>([]);
   const [cursor, setCursor] = useState("");
   const [hasMore, setHasMore] = useState(false);
@@ -15432,7 +16370,7 @@ function InboxScreen({
   const inboxDisplayBody = (message: InboxMessage) => {
     const meta = message.meta && typeof message.meta === "object" ? message.meta : null;
     const localized = language === "en" ? String(meta?.bodyEn || "").trim() : String(meta?.bodyFr || "").trim();
-    return localized || message.body;
+    return String(localized || message.body || "").replace(/â€¢/g, "•");
   };
 
   const parseAttachmentItem = (itemId: string, quantity: number): InventoryViewItem => {
@@ -15477,8 +16415,10 @@ function InboxScreen({
     };
   };
 
-  const selectedAttachmentInventoryItems = useMemo(() => {
-    if (!selectedMessage || !selectedMessage.hasAttachments) return [];
+  const buildInboxPreviewInventoryItems = (
+    itemsRaw: unknown,
+    chestsRaw?: unknown
+  ): InventoryViewItem[] => {
     const merged = new Map<string, InventoryViewItem>();
     const pushMerged = (item: InventoryViewItem) => {
       const key = `${item.category}|${item.id}|${item.durationSeconds ?? 0}|${item.chestType ?? ""}`;
@@ -15490,13 +16430,13 @@ function InboxScreen({
       existing.quantity = Math.max(0, Math.floor(Number(existing.quantity || 0))) + Math.max(0, Math.floor(Number(item.quantity || 0)));
     };
 
-    const items = Array.isArray(selectedMessage.attachments.items) ? selectedMessage.attachments.items : [];
+    const items = Array.isArray(itemsRaw) ? itemsRaw : [];
     for (const row of items) {
       const parsed = parseAttachmentItem(String(row?.itemId || ""), Math.max(0, Math.floor(Number(row?.quantity ?? 0))));
       if (parsed.quantity > 0) pushMerged(parsed);
     }
 
-    const chests = Array.isArray(selectedMessage.attachments.chests) ? selectedMessage.attachments.chests : [];
+    const chests = Array.isArray(chestsRaw) ? chestsRaw : [];
     for (const row of chests) {
       const chestType = String(row?.chestType || "CLASSIC").toUpperCase();
       const normalizedType: NonNullable<InventoryViewItem["chestType"]> =
@@ -15519,6 +16459,24 @@ function InboxScreen({
     }
 
     return Array.from(merged.values()).sort((a, b) => String(a.name).localeCompare(String(b.name)));
+  };
+
+  const selectedAttachmentInventoryItems = useMemo(() => {
+    if (!selectedMessage || !selectedMessage.hasAttachments) return [];
+    return buildInboxPreviewInventoryItems(selectedMessage.attachments.items, selectedMessage.attachments.chests);
+  }, [selectedMessage, language]);
+
+  const selectedHarvestReportPreview = useMemo(() => {
+    const meta = selectedMessage?.meta && typeof selectedMessage.meta === "object" ? selectedMessage.meta : null;
+    if (!meta || String(meta.kind || "").toUpperCase() !== "MAP_HARVEST_REPORT") return null;
+    const resources = meta.resources && typeof meta.resources === "object" ? meta.resources : {};
+    const hasResources = RESOURCE_DEFS.some((def) => Math.max(0, Math.floor(Number(resources[def.id] || 0))) > 0);
+    const items = buildInboxPreviewInventoryItems(meta.items);
+    if (!hasResources && items.length <= 0) return null;
+    return {
+      resources,
+      items
+    };
   }, [selectedMessage, language]);
 
   const resolveAttachmentItemImage = (item: InventoryViewItem) => {
@@ -15719,6 +16677,8 @@ function InboxScreen({
         summary: normalizeCombatSummary(report.defenderSummary, defenderSurvivors)
       },
       loot: normalizeCombatResources(report.loot),
+      lootCredits: Math.max(0, Math.floor(Number(report.lootCredits || 0))),
+      lootDelivery: String(report.lootDelivery || "instant").trim().toLowerCase() === "return" ? "return" : "instant",
       protectedCargo: normalizeCombatResources(report.protectedCargo),
       rounds
     };
@@ -15774,6 +16734,15 @@ function InboxScreen({
       )}
     </div>
   );
+
+  const renderCombatCreditLootRow = (amount: number) =>
+    amount > 0 ? (
+      <article className="combat-resource-row combat-credit-row">
+        <span className="combat-credit-icon" aria-hidden="true">₵</span>
+        <span className="combat-resource-name">{l("Credits recuperes", "Credits salvaged")}</span>
+        <strong className="combat-resource-qty">+{amount.toLocaleString()}</strong>
+      </article>
+    ) : null;
 
   const selectedMessageIsDailyNoonChest = useMemo(() => {
     if (!selectedMessage) return false;
@@ -16001,6 +16970,7 @@ function InboxScreen({
 
   const refreshAfterAction = async () => {
     await loadInbox(true);
+    await refreshInboxUnread(true);
     if (tab === "PLAYER" && selectedThreadPeerId) {
       await loadPlayerThread(selectedThreadPeerId, true);
     }
@@ -16186,7 +17156,7 @@ function InboxScreen({
         const parsed = parseJsonObject((rpc as any)?.payload ?? rpc);
         const nested = parseJsonObject(parsed?.payload);
         const source = Array.isArray(parsed?.items) ? parsed.items : Array.isArray(nested?.items) ? nested.items : [];
-        const mapped: InboxRecipientSuggestion[] = source
+        const mappedBase: InboxRecipientSuggestion[] = source
           .filter((row: any) => row && typeof row.userId === "string")
           .map((row: any) => ({
             userId: String(row.userId),
@@ -16195,6 +17165,11 @@ function InboxScreen({
             avatarUrl: String(row.avatarUrl || "")
           }))
           .filter((row) => row.userId !== session.user_id);
+        const avatarMap = await resolveProfileAvatarUrls(mappedBase.map((row) => row.userId));
+        const mapped = mappedBase.map((row) => ({
+          ...row,
+          avatarUrl: avatarMap[row.userId] || row.avatarUrl || DEFAULT_PROFILE_AVATAR
+        }));
         setRecipientSuggestions(mapped);
       } catch {
         if (!cancelled) setRecipientSuggestions([]);
@@ -16207,7 +17182,7 @@ function InboxScreen({
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [client, enabled, sendToUserId, session]);
+  }, [client, enabled, resolveProfileAvatarUrls, sendToUserId, session]);
 
   useEffect(() => {
     if (!enabled) return;
@@ -16258,6 +17233,7 @@ function InboxScreen({
             { id: "ALL", label: l("Tous", "All") },
             { id: "COMBAT_REPORT", label: l("Combat", "Combat") },
             { id: "REWARD", label: l("Recompenses", "Rewards") },
+            { id: "MARKET", label: l("Marche", "Market") },
             { id: "SYSTEM", label: l("Systeme", "System") },
             { id: "PLAYER", label: l("Joueurs", "Players") }
           ].map((t) => (
@@ -16458,6 +17434,51 @@ function InboxScreen({
             </div>
             <p className="inbox-body">{inboxDisplayBody(selectedMessage)}</p>
 
+            {selectedHarvestReportPreview ? (
+              <section className="inbox-attachments inbox-harvest-preview">
+                <h4>{l("Butin d'exploitation", "Harvest loot")}</h4>
+                <p className="inbox-harvest-note">
+                  {l("Gains deja credites sur votre compte.", "Rewards already credited to your account.")}
+                </p>
+                <ResourceCostDisplay
+                  cost={selectedHarvestReportPreview.resources as ResourceCost}
+                  available={selectedHarvestReportPreview.resources as Record<string, number>}
+                  language={language}
+                  compact
+                />
+                {selectedHarvestReportPreview.items.length > 0 ? (
+                  <div className="inbox-attachment-grid">
+                    {selectedHarvestReportPreview.items.map((item, index) => {
+                      const qty = Math.max(0, Math.floor(Number(item.quantity || 0)));
+                      const itemUiKey = `harvest_${item.id}_${item.category}_${item.durationSeconds ?? 0}_${item.chestType ?? ""}_${index}`;
+                      return (
+                        <article key={itemUiKey} className="inventory-card inbox-attachment-card">
+                          <div className="inventory-card-main">
+                            <div className="inventory-item-visual-wrap">
+                              <img
+                                src={resolveAttachmentItemImage(item)}
+                                alt={item.name}
+                                className="inventory-item-visual"
+                                loading="lazy"
+                              />
+                              <span className="inventory-item-qty">x{qty.toLocaleString()}</span>
+                            </div>
+                            <div className="inventory-item-content">
+                              <header>
+                                <strong>{item.category === "RESOURCE_CRATE" && item.chestType ? chestTierLabel(item.chestType) : item.name}</strong>
+                                <span>{attachmentCategoryLabel(item)}</span>
+                              </header>
+                              <p className="inventory-item-effect">{attachmentEffectLabel(item)}</p>
+                            </div>
+                          </div>
+                        </article>
+                      );
+                    })}
+                  </div>
+                ) : null}
+              </section>
+            ) : null}
+
             {selectedCombatReport ? (
               <section className="inbox-combat-report">
                 <header className="combat-report-head">
@@ -16531,8 +17552,15 @@ function InboxScreen({
                   <article className="combat-outcome-card tone-loot">
                     <header>
                       <strong>{l("Butin capture", "Loot captured")}</strong>
-                      <span>{selectedCombatReport.loot.length > 0 ? l("Credite immediatement", "Granted immediately") : l("Aucun", "None")}</span>
+                      <span>
+                        {selectedCombatReport.loot.length > 0 || selectedCombatReport.lootCredits > 0
+                          ? selectedCombatReport.lootDelivery === "return"
+                            ? l("Livre au retour de la flotte", "Delivered when the fleet returns")
+                            : l("Credite immediatement", "Granted immediately")
+                          : l("Aucun", "None")}
+                      </span>
                     </header>
+                    {renderCombatCreditLootRow(selectedCombatReport.lootCredits)}
                     {renderCombatResourceRows(selectedCombatReport.loot, l("Aucun butin sur ce combat.", "No loot from this combat."), "loot")}
                   </article>
                   <article className="combat-outcome-card tone-protected">
@@ -16689,7 +17717,7 @@ function InboxScreen({
                       setRecipientSuggestions([]);
                     }}
                   >
-                    <img src={row.avatarUrl || "/avatars/avatar-01.png"} alt={row.username} />
+                    <img src={row.avatarUrl || DEFAULT_PROFILE_AVATAR} alt={row.username} />
                     <span>
                       <strong>{row.username}</strong>
                       {row.displayName ? <em>{row.displayName}</em> : null}
@@ -16738,12 +17766,16 @@ function ChatScreen({
   client,
   session,
   playerId,
+  profileUsername,
+  profileAvatar,
   enabled,
   language
 }: {
   client: Client;
   session: Session | null;
   playerId: string;
+  profileUsername: string;
+  profileAvatar: string;
   enabled: boolean;
   language: UILanguage;
 }) {
@@ -16810,6 +17842,55 @@ function ChatScreen({
     const payload = parseJsonObject(rpc?.payload);
     return payload && typeof payload === "object" ? payload : {};
   };
+
+  const resolveProfileAvatarUrls = useCallback(
+    async (userIds: string[]) => {
+      if (!session) return {} as Record<string, string>;
+      const unique = [...new Set(userIds.map((id) => String(id || "").trim()).filter(Boolean))];
+      if (unique.length <= 0) return {} as Record<string, string>;
+      try {
+        const read = await client.readStorageObjects(session, {
+          object_ids: unique.map((userId) => ({
+            collection: PROFILE_COMMANDER_COLLECTION,
+            key: PROFILE_COMMANDER_KEY,
+            user_id: userId
+          }))
+        });
+        const next: Record<string, string> = {};
+        for (const row of read.objects ?? []) {
+          const userId = String(row.user_id || "").trim();
+          if (!userId) continue;
+          const value = row.value as { commanderId?: string; avatarUrl?: string } | undefined;
+          const commanderId = COMMANDER_IDS.includes(value?.commanderId as CommanderId)
+            ? (value!.commanderId as CommanderId)
+            : DEFAULT_COMMANDER_ID;
+          const avatarUrl =
+            typeof value?.avatarUrl === "string" && value.avatarUrl.trim()
+              ? value.avatarUrl.trim()
+              : COMMANDER_DEFS[commanderId].image;
+          next[userId] = avatarUrl;
+        }
+        return next;
+      } catch {
+        return {} as Record<string, string>;
+      }
+    },
+    [client, session]
+  );
+
+  useEffect(() => {
+    if (!session?.user_id) return;
+    const username = (profileUsername || playerId || session.username || "").trim();
+    if (!username) return;
+    setUserDirectory((prev) => ({
+      ...prev,
+      [session.user_id]: {
+        id: session.user_id,
+        username,
+        avatarUrl: profileAvatar || DEFAULT_PROFILE_AVATAR
+      }
+    }));
+  }, [playerId, profileAvatar, profileUsername, session]);
 
   const hydrateLikesForMessages = async (channelId: string, messageIds: string[]) => {
     if (!session) return;
@@ -16893,13 +17974,14 @@ function ChatScreen({
     if (!missing.length) return;
     try {
       const res = await client.getUsers(session, missing, undefined, undefined);
+      const avatarMap = await resolveProfileAvatarUrls(missing);
       const next: Record<string, { id: string; username: string; avatarUrl: string }> = {};
       for (const user of res.users ?? []) {
         if (!user.id) continue;
         next[user.id] = {
           id: user.id,
           username: user.username ?? `user_${user.id.slice(0, 6)}`,
-          avatarUrl: user.avatar_url ?? ""
+          avatarUrl: avatarMap[user.id] || user.avatar_url || DEFAULT_PROFILE_AVATAR
         };
       }
       if (Object.keys(next).length > 0) {
@@ -16940,10 +18022,11 @@ function ChatScreen({
         const exact = await client.getUsers(session, undefined, [targetRaw], undefined);
         const u = exact.users?.[0];
         if (u?.id) {
+          const avatarMap = await resolveProfileAvatarUrls([u.id]);
           targetUser = {
             id: u.id,
             username: u.username ?? targetRaw,
-            avatarUrl: u.avatar_url ?? ""
+            avatarUrl: avatarMap[u.id] || u.avatar_url || DEFAULT_PROFILE_AVATAR
           };
         }
       }
@@ -17255,7 +18338,7 @@ function ChatScreen({
                   type="button"
                   onClick={() => setPrivateTarget(u.username)}
                 >
-                  <img src={u.avatarUrl || "/avatars/avatar-01.png"} alt={u.username} />
+                  <img src={u.avatarUrl || DEFAULT_PROFILE_AVATAR} alt={u.username} />
                   <span>{u.username}</span>
                 </button>
               ))}
@@ -17277,7 +18360,7 @@ function ChatScreen({
               <div className="chat-meta">
                 <span className="chat-user">
                   <img
-                    src={(msg.senderId && userDirectory[msg.senderId]?.avatarUrl) || "/avatars/avatar-01.png"}
+                    src={(msg.senderId && userDirectory[msg.senderId]?.avatarUrl) || DEFAULT_PROFILE_AVATAR}
                     alt={msg.sender}
                   />
                   <strong>{(msg.senderId && userDirectory[msg.senderId]?.username) || msg.sender}</strong>
@@ -17717,6 +18800,7 @@ function ProfileScreen({
   profileAvatar,
   profileCommanderId,
   commanderOptions,
+  profileAvatarBusy,
   profileError,
   profileSaved,
   profileLoading,
@@ -17724,6 +18808,8 @@ function ProfileScreen({
   onEmailChange,
   onLanguageChange,
   onCommanderChange,
+  onAvatarUpload,
+  onAvatarReset,
   onSubmit
 }: {
   language: UILanguage;
@@ -17735,6 +18821,7 @@ function ProfileScreen({
   profileAvatar: string;
   profileCommanderId: CommanderId;
   commanderOptions: CommanderDef[];
+  profileAvatarBusy: boolean;
   profileError: string;
   profileSaved: string;
   profileLoading: boolean;
@@ -17742,10 +18829,13 @@ function ProfileScreen({
   onEmailChange: (v: string) => void;
   onLanguageChange: (v: "fr" | "en") => void;
   onCommanderChange: (v: CommanderId) => void;
+  onAvatarUpload: (event: ChangeEvent<HTMLInputElement>) => void;
+  onAvatarReset: () => void;
   onSubmit: (e: FormEvent) => void;
 }) {
   const l = (fr: string, en: string) => (language === "en" ? en : fr);
   const activeCommander = COMMANDER_DEFS[profileCommanderId] ?? COMMANDER_DEFS[DEFAULT_COMMANDER_ID];
+  const usesCustomAvatar = profileAvatar.trim() !== activeCommander.image;
   return (
     <main className="profile-layout">
       <form className="profile-card" onSubmit={onSubmit}>
@@ -17773,6 +18863,45 @@ function ProfileScreen({
         </div>
 
         <div className="avatar-block">
+          <p>{l("Avatar du profil", "Profile avatar")}</p>
+          <div className="profile-avatar-upload-row">
+            <label className={`profile-avatar-upload ${profileAvatarBusy ? "busy" : ""}`}>
+              <input
+                type="file"
+                accept="image/png,image/jpeg,image/webp"
+                onChange={onAvatarUpload}
+                disabled={profileAvatarBusy}
+              />
+              <span>{profileAvatarBusy ? l("Compression...", "Compressing...") : l("Charger un avatar", "Upload avatar")}</span>
+            </label>
+            <button
+              type="button"
+              className="profile-avatar-reset"
+              onClick={onAvatarReset}
+              disabled={!usesCustomAvatar || profileAvatarBusy}
+            >
+              {l("Revenir au portrait du commandant", "Use commander portrait")}
+            </button>
+          </div>
+          <div className="profile-avatar-summary">
+            <img
+              className="profile-commander-portrait profile-avatar-preview"
+              src={profileAvatar}
+              alt={l("Avatar du profil", "Profile avatar")}
+              loading="lazy"
+              decoding="async"
+            />
+            <div>
+              <strong>{l("Avatar actif", "Active avatar")}</strong>
+              <small>{l("Visible sur votre profil et les surfaces sociales du jeu.", "Visible on your profile and social surfaces across the game.")}</small>
+              <span className={`profile-avatar-mode ${usesCustomAvatar ? "custom" : ""}`}>
+                {usesCustomAvatar ? l("Avatar personnalise actif", "Custom avatar active") : l("Portrait du commandant actif", "Commander portrait active")}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <div className="avatar-block commander-block">
           <p>{l("Choisir un commandant", "Choose a commander")}</p>
           <CommanderSelect
             language={language}
@@ -17801,7 +18930,12 @@ function ProfileScreen({
 
         <div className="profile-note">
           <Mail size={14} />
-          <span>{l("Le pseudo, la langue et l'avatar sont synchronises. L'email saisi est conserve pour la prochaine etape securisee.", "Username, language and avatar are synced. Entered email is kept for the next secure step.")}</span>
+          <span>
+            {l(
+              "Le pseudo, la langue et l'avatar sont synchronises. Avatar custom accepte: PNG, JPG ou WEBP compresse localement.",
+              "Username, language and avatar are synced. Custom avatar supports PNG, JPG or WEBP and is compressed locally."
+            )}
+          </span>
         </div>
       </form>
     </main>
@@ -18651,6 +19785,7 @@ function UpgradeModal({
     </div>
   );
 }
+
 
 
 
