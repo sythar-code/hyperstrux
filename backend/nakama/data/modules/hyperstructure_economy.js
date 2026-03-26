@@ -8996,11 +8996,12 @@ function queryAdminUsers(nk, queryRaw, limit) {
   if (!nk || typeof nk.sqlQuery !== "function") throw new Error("Admin user search requires sqlQuery support.");
   var safeLimit = Math.max(1, Math.min(ADMIN_USER_SEARCH_LIMIT_MAX, sanitizePositiveInt(limit || ADMIN_USER_SEARCH_LIMIT_DEFAULT)));
   var raw = String(queryRaw || "").trim().toLowerCase();
+  var systemUserId = escapeSqlLiteral(SYSTEM_USER_ID);
   var sql;
   if (!raw) {
     sql =
       "SELECT id, username, display_name, avatar_url, create_time, disable_time " +
-      "FROM users ORDER BY create_time DESC LIMIT " + safeLimit;
+      "FROM users WHERE id <> '" + systemUserId + "' ORDER BY create_time DESC LIMIT " + safeLimit;
   } else {
     var escaped = escapeSqlLiteral(raw);
     var allowUuidMatch = isUuidLike(raw);
@@ -9021,7 +9022,7 @@ function queryAdminUsers(nk, queryRaw, limit) {
     rankParts.push("WHEN lower(username) LIKE '" + escaped + "%' THEN 3 ");
     sql =
       "SELECT id, username, display_name, avatar_url, create_time, disable_time " +
-      "FROM users WHERE " + whereParts.join(" OR ") + " " +
+      "FROM users WHERE id <> '" + systemUserId + "' AND (" + whereParts.join(" OR ") + ") " +
       "ORDER BY " +
       "CASE " + rankParts.join("") +
       "ELSE 4 END, create_time DESC " +
@@ -12242,6 +12243,9 @@ function rpcAdminUserGet(ctx, _logger, nk, payload) {
   if (!targetRaw) throw new Error("Missing target.");
   var target = resolveInboxRecipient(nk, targetRaw);
   var targetUserId = target.userId;
+  if (targetUserId === SYSTEM_USER_ID) {
+    throw new Error("Reserved system user cannot be opened in admin.");
+  }
   var targetUsername = target.username || targetUserId;
   var rows = queryAdminUsers(nk, targetUserId, 5);
   var userRow = null;
@@ -12250,6 +12254,9 @@ function rpcAdminUserGet(ctx, _logger, nk, payload) {
       userRow = rows[i];
       break;
     }
+  }
+  if (!userRow) {
+    throw new Error("User not found.");
   }
   var economyRead = readEconomyState(nk, targetUserId);
   var inventoryRead = readInventoryState(nk, targetUserId);
@@ -12412,6 +12419,9 @@ function rpcAdminUserDelete(ctx, _logger, nk, payload) {
   if (!targetRaw) throw new Error("Missing target.");
   var target = resolveInboxRecipient(nk, targetRaw);
   var targetUserId = target.userId;
+  if (targetUserId === SYSTEM_USER_ID) {
+    throw new Error("Reserved system user cannot be deleted.");
+  }
   var targetUsername = target.username || targetUserId;
   if (targetUserId === actorUserId) throw new Error("Cannot delete your own account.");
 
