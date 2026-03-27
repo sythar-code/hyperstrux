@@ -174,7 +174,7 @@ export default function ResourceCommandScreen({
             <strong>{economyState}</strong>
             <span>{l("Ressources debloquees", "Unlocked resources")}: {unlockedCount} / {totalCount}</span>
             <p>
-              {l("Derniere sauvegarde", "Last save")}:{" "}
+              {l("Derniere synchro serveur", "Last server sync")}:{" "}
               <b>{lastSavedAt ? new Date(lastSavedAt).toLocaleTimeString() : l("En attente", "Pending")}</b>
             </p>
           </article>

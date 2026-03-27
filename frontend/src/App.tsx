@@ -289,6 +289,43 @@ type MainMissionState = {
   finished: boolean;
 };
 
+type RankingMetric = "total" | "economy" | "research" | "military";
+type RankingBoards = Record<RankingMetric, any[]>;
+type RankingPointBreakdown = Record<RankingMetric, number>;
+
+const EMPTY_RANKING_BOARDS: RankingBoards = {
+  total: [],
+  economy: [],
+  research: [],
+  military: []
+};
+
+const EMPTY_RANKING_BREAKDOWN: RankingPointBreakdown = {
+  total: 0,
+  economy: 0,
+  research: 0,
+  military: 0
+};
+
+const sanitizeRankingNumber = (raw: unknown) => {
+  const value = Number(raw);
+  return Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0;
+};
+
+const normalizeRankingBreakdown = (source: any): RankingPointBreakdown => ({
+  total: sanitizeRankingNumber(source?.total),
+  economy: sanitizeRankingNumber(source?.economy),
+  research: sanitizeRankingNumber(source?.research),
+  military: sanitizeRankingNumber(source?.military)
+});
+
+const normalizeRankingBoards = (source: any, fallbackTotal: any[] = []): RankingBoards => ({
+  total: Array.isArray(source?.total) ? source.total : fallbackTotal,
+  economy: Array.isArray(source?.economy) ? source.economy : [],
+  research: Array.isArray(source?.research) ? source.research : [],
+  military: Array.isArray(source?.military) ? source.military : []
+});
+
 const GRID_WIDTH = 14;
 const CELL_WIDTH = 78;
 const CELL_HEIGHT = 96;
@@ -303,8 +340,6 @@ const UI_SCREEN_KEY = "hsg_ui_screen_v1";
 const PROFILE_EMAIL_DRAFT_KEY = "hsg_profile_email_draft_v1";
 const PROFILE_COMMANDER_COLLECTION = "hyperstructure_profile";
 const PROFILE_COMMANDER_KEY = "commander_state_v1";
-const VAULT_PROFILE_COLLECTION = "hyperstructure_profile";
-const VAULT_PROFILE_KEY = "vault_state_v1";
 const UI_LANG_KEY = "hsg_ui_lang_v1";
 const INVENTORY_UI_NOTIFS_KEY = "hsg_inventory_notifs_v1";
 const SCORE_DISPLAY_DIVISOR = 50000;
@@ -331,6 +366,27 @@ const formatDisplayedScoreLabel = (rawScore: number) => {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2
   });
+};
+
+const USERNAME_MIN_LENGTH = 3;
+const USERNAME_MAX_LENGTH = 20;
+const USERNAME_REGEX = /^[A-Za-z0-9_. -]+$/;
+
+const validatePlayerUsernameInput = (raw: string, l: (fr: string, en: string) => string) => {
+  const value = raw.replace(/[\u200B-\u200D\uFEFF]/g, "").trim();
+  if (value.length < USERNAME_MIN_LENGTH || value.length > USERNAME_MAX_LENGTH) {
+    return l(
+      "Pseudo invalide. Utilise entre 3 et 20 caracteres.",
+      "Invalid username. Use between 3 and 20 characters."
+    );
+  }
+  if (/[\x00-\x1F\x7F<>'\"`\\]/.test(value) || !USERNAME_REGEX.test(value)) {
+    return l(
+      "Pseudo invalide. Utilise uniquement lettres, chiffres, espace, point, tiret ou underscore.",
+      "Invalid username. Use only letters, numbers, spaces, dots, hyphens, or underscores."
+    );
+  }
+  return "";
 };
 
 function resolveTimeBoostImage(durationSeconds?: number | null) {
@@ -615,64 +671,6 @@ const LOGIN_INTRO_BACKDROP_STYLES: Record<LoginIntroBackdropId, CSSProperties> =
 
 const vaultStorageKeyForUser = (userId?: string | null) =>
   userId && userId.trim().length > 0 ? `${SAVE_KEY_USER_PREFIX}_${userId}` : SAVE_KEY;
-
-const getVaultSnapshotUpdatedAt = (source: any): number => {
-  const value = Math.floor(Number(source?.updatedAt ?? 0));
-  return Number.isFinite(value) && value > 0 ? value : 0;
-};
-
-const hasMeaningfulVaultProgress = (source: any): boolean => {
-  if (!source || typeof source !== "object") return false;
-  const rooms = Array.isArray(source.rooms) ? source.rooms : [];
-  if (
-    rooms.some((room) => {
-      const type = String(room?.type || "").trim();
-      const level = Math.max(0, Math.floor(Number(room?.level ?? 0)));
-      return !["entrance", "carbone", "titane"].includes(type) || level > 1;
-    })
-  ) {
-    return true;
-  }
-
-  const technologyLevels = source.technologyLevels && typeof source.technologyLevels === "object" ? source.technologyLevels : {};
-  for (const key of Object.keys(technologyLevels)) {
-    if (Math.max(0, Math.floor(Number((technologyLevels as Record<string, unknown>)[key] ?? 0))) > 0) return true;
-  }
-
-  if (source.constructionJob && typeof source.constructionJob === "object") return true;
-  if (source.researchJob && typeof source.researchJob === "object") return true;
-
-  const mainMissionState = source.mainMissionState && typeof source.mainMissionState === "object" ? source.mainMissionState : {};
-  if (
-    Math.max(0, Math.floor(Number((mainMissionState as Record<string, unknown>).completedCount ?? 0))) > 0 ||
-    Math.max(0, Math.floor(Number((mainMissionState as Record<string, unknown>).nextIndex ?? 0))) > 0 ||
-    Math.max(0, Math.floor(Number((mainMissionState as Record<string, unknown>).totalRewardCredits ?? 0))) > 0
-  ) {
-    return true;
-  }
-
-  return false;
-};
-
-const choosePreferredVaultSnapshot = (localSource: any, serverSource: any) => {
-  const hasLocal = Boolean(localSource && typeof localSource === "object");
-  const hasServer = Boolean(serverSource && typeof serverSource === "object");
-  if (!hasLocal) return hasServer ? serverSource : null;
-  if (!hasServer) return localSource;
-
-  const localMeaningful = hasMeaningfulVaultProgress(localSource);
-  const serverMeaningful = hasMeaningfulVaultProgress(serverSource);
-  if (localMeaningful && !serverMeaningful) return localSource;
-  if (serverMeaningful && !localMeaningful) return serverSource;
-
-  const localUpdatedAt = getVaultSnapshotUpdatedAt(localSource);
-  const serverUpdatedAt = getVaultSnapshotUpdatedAt(serverSource);
-  if (localUpdatedAt > 0 || serverUpdatedAt > 0) {
-    return serverUpdatedAt > localUpdatedAt ? serverSource : localSource;
-  }
-
-  return localSource;
-};
 
 type UIScreen =
   | "home"
@@ -1697,6 +1695,157 @@ const buildRoomLevelMap = (rooms: Room[]): Partial<Record<RoomType, number>> => 
     out[room.type] = Math.max(out[room.type] ?? 0, room.level);
   }
   return out;
+};
+
+const SERVER_SYNC_ROOM_TYPES: RoomType[] = ["carbone", "titane", ...BUILDABLE_ROOMS];
+
+const extractServerRoomLevels = (buildings: Record<string, any> | null | undefined): Partial<Record<RoomType, number>> => {
+  const out: Partial<Record<RoomType, number>> = {
+    carbone: 1,
+    titane: 1,
+    entrepot: 1
+  };
+  for (const type of SERVER_SYNC_ROOM_TYPES) {
+    const raw = Number((buildings as Record<string, any> | undefined)?.[type]?.level ?? 0);
+    const safe = Math.max(0, Math.floor(Number.isFinite(raw) ? raw : 0));
+    if (safe > 0 || type === "carbone" || type === "titane" || type === "entrepot") {
+      out[type] = safe > 0 ? safe : type === "entrepot" || type === "carbone" || type === "titane" ? 1 : 0;
+    }
+  }
+  return out;
+};
+
+const findAutoBuildSlotForRooms = (sourceRooms: Room[], type: RoomType): { x: number; y: number } | null => {
+  const width = ROOM_CONFIG[type].width;
+  const searchMaxY = Math.max(8, Math.max(...sourceRooms.map((r) => r.y), 0) + 4);
+  for (let y = 0; y <= searchMaxY; y += 1) {
+    for (let x = 0; x <= GRID_WIDTH - width; x += 1) {
+      const blocked = sourceRooms.some((r) => r.y === y && x < r.x + r.width && x + width > r.x);
+      if (!blocked) return { x, y };
+    }
+  }
+  return null;
+};
+
+const areRoomsEqual = (left: Room[], right: Room[]): boolean =>
+  left.length === right.length &&
+  left.every((room, index) => {
+    const other = right[index];
+    return Boolean(
+      other &&
+        room.id === other.id &&
+        room.x === other.x &&
+        room.y === other.y &&
+        room.width === other.width &&
+        room.type === other.type &&
+        room.level === other.level
+    );
+  });
+
+const areConstructionJobsEqual = (left: ConstructionJob | null, right: ConstructionJob | null): boolean => {
+  if (!left && !right) return true;
+  if (!left || !right) return false;
+  if (left.mode !== right.mode) return false;
+  if (left.id !== right.id || left.roomType !== right.roomType || left.targetLevel !== right.targetLevel) return false;
+  if (left.startedAt !== right.startedAt || left.endAt !== right.endAt) return false;
+  if (left.mode === "build" && right.mode === "build") {
+    return left.x === right.x && left.y === right.y;
+  }
+  if (left.mode === "upgrade" && right.mode === "upgrade") {
+    return left.roomId === right.roomId;
+  }
+  return false;
+};
+
+const syncRoomsWithServerBuildings = (
+  baseRooms: Room[],
+  roomLevels: Partial<Record<RoomType, number>>
+): Room[] => {
+  const next: Room[] = [];
+  const entrance = baseRooms.find((room) => room.type === "entrance") ?? defaultRooms()[0];
+  next.push({ ...entrance, level: 1 });
+
+  for (const type of SERVER_SYNC_ROOM_TYPES) {
+    const level = Math.max(0, Math.floor(Number(roomLevels[type] ?? 0)));
+    if (level <= 0) continue;
+
+    const existing = baseRooms.find((room) => room.type === type);
+    if (existing) {
+      next.push({ ...existing, width: ROOM_CONFIG[type].width, level });
+      continue;
+    }
+
+    const slot = findAutoBuildSlotForRooms(next, type) ?? { x: 0, y: Math.max(...next.map((room) => room.y), 0) + 1 };
+    next.push({
+      id: `srv_${type}`,
+      x: slot.x,
+      y: slot.y,
+      width: ROOM_CONFIG[type].width,
+      type,
+      level
+    });
+  }
+
+  return next;
+};
+
+const buildConstructionJobFromServerState = (
+  state: Record<string, any> | null | undefined,
+  syncedRooms: Room[],
+  previousJob: ConstructionJob | null,
+  optimisticBuildPlacement?: { roomType: RoomType; x: number; y: number } | null
+): ConstructionJob | null => {
+  const slots = ["building_construct_slot", "building_upgrade_slot"]
+    .map((slotId) => ({ slotId, entry: state?.[slotId] }))
+    .filter((row) => row.entry && typeof row.entry === "object" && typeof row.entry.buildingId === "string" && typeof row.entry.endAt === "number")
+    .sort((a, b) => Number(a.entry.endAt || 0) - Number(b.entry.endAt || 0));
+
+  const active = slots[0];
+  if (!active) return null;
+
+  const roomType = String(active.entry.buildingId || "").trim() as RoomType;
+  if (!(roomType in ROOM_CONFIG)) return null;
+
+  const startedAt = Math.max(0, Math.floor(Number(active.entry.startedAt || 0))) * 1000;
+  const endAt = Math.max(0, Math.floor(Number(active.entry.endAt || 0))) * 1000;
+  const targetLevel = Math.max(1, Math.floor(Number(active.entry.targetLevel || 1)));
+  const batchCost = active.entry.cost && typeof active.entry.cost === "object" ? (active.entry.cost as ResourceCost) : {};
+  const builtRoom = syncedRooms.find((room) => room.type === roomType) ?? null;
+  const shouldTreatAsBuild = active.slotId === "building_construct_slot" && !builtRoom && targetLevel <= 1;
+
+  if (shouldTreatAsBuild) {
+    const placement =
+      (previousJob && previousJob.mode === "build" && previousJob.roomType === roomType
+        ? { x: previousJob.x, y: previousJob.y }
+        : null) ??
+      (optimisticBuildPlacement && optimisticBuildPlacement.roomType === roomType ? optimisticBuildPlacement : null) ??
+      findAutoBuildSlotForRooms(syncedRooms, roomType) ??
+      { x: 0, y: Math.max(...syncedRooms.map((room) => room.y), 0) + 1 };
+
+    return {
+      id: String(active.entry.id || `${active.slotId}_${roomType}`),
+      mode: "build",
+      roomType,
+      x: placement.x,
+      y: placement.y,
+      targetLevel: 1,
+      startedAt,
+      endAt,
+      costPaid: batchCost
+    };
+  }
+
+  if (!builtRoom) return null;
+  return {
+    id: String(active.entry.id || `${active.slotId}_${roomType}`),
+    mode: "upgrade",
+    roomId: builtRoom.id,
+    roomType,
+    targetLevel,
+    startedAt,
+    endAt,
+    costPaid: batchCost
+  };
 };
 
 const getPopulationSnapshot = (
@@ -4471,8 +4620,6 @@ function ResourceTextWithIcon({
   );
 }
 
-const RESOURCE_STORAGE_COLLECTION = "hyperstructure";
-const RESOURCE_STORAGE_KEY = "resources_state_v1";
 const PENDING_BUILD_ROOM_ID = "__pending_build__";
 const BASE_UNLOCKED_RESOURCE_IDS = ["carbone", "titane"];
 
@@ -4844,8 +4991,10 @@ export default function App() {
   const [hangarActionBusy, setHangarActionBusy] = useState(false);
   const [playerScorePoints, setPlayerScorePoints] = useState<number>(0);
   const [playerScoreRank, setPlayerScoreRank] = useState<number>(0);
-  const [rankingPlayers, setRankingPlayers] = useState<any[]>([]);
-  const [rankingAlliances, setRankingAlliances] = useState<any[]>([]);
+  const [playerScoreBreakdown, setPlayerScoreBreakdown] = useState<RankingPointBreakdown>(EMPTY_RANKING_BREAKDOWN);
+  const [playerScoreRanks, setPlayerScoreRanks] = useState<RankingPointBreakdown>(EMPTY_RANKING_BREAKDOWN);
+  const [rankingPlayers, setRankingPlayers] = useState<RankingBoards>(EMPTY_RANKING_BOARDS);
+  const [rankingAlliances, setRankingAlliances] = useState<RankingBoards>(EMPTY_RANKING_BOARDS);
   const [rankingLoading, setRankingLoading] = useState(false);
   const [rankingError, setRankingError] = useState("");
   const [inboxUnreadCount, setInboxUnreadCount] = useState(0);
@@ -4865,7 +5014,6 @@ export default function App() {
   const rankingRpcInFlightRef = useRef(false);
   const rankingRpcBackoffUntilRef = useRef(0);
   const rankingSyncInFlightRef = useRef(false);
-  const vaultServerSyncSignatureRef = useRef("");
   const l = (fr: string, en: string) => (uiLanguage === "en" ? en : fr);
   const inventoryMenuBadgeCount = Math.max(0, inventoryServerBadgeCount + inventoryInboxBadgeCount);
   const mapWarmCacheKey = useMemo(
@@ -4967,6 +5115,8 @@ export default function App() {
   const resourceRatesRef = useRef<Record<string, number>>({});
   const storageCapacityRef = useRef<number>(storageCapacity);
   const populationStateRef = useRef<PopulationState>(defaultPopulationState());
+  const roomsRef = useRef<Room[]>(defaultRooms());
+  const constructionJobRef = useRef<ConstructionJob | null>(null);
   const commanderOptions = useMemo(() => COMMANDER_IDS.map((id) => COMMANDER_DEFS[id]), []);
 
   const applyAccount = (account: Awaited<ReturnType<Client["getAccount"]>>, fallbackSession: Session | null) => {
@@ -5018,7 +5168,6 @@ export default function App() {
           invalidateSession();
           return;
         }
-        setCredits((prev) => prev + delta);
         if (import.meta.env.DEV) {
           // eslint-disable-next-line no-console
           console.error("credit grant sync error", err);
@@ -5091,6 +5240,7 @@ export default function App() {
         });
       }
       resourceTickRef.current = Date.now();
+      setResourceLastSavedAt(Date.now());
     } catch (err) {
       if (isUnauthorizedError(err)) {
         invalidateSession();
@@ -5115,12 +5265,96 @@ export default function App() {
         return next;
       });
       resourceTickRef.current = Date.now();
+      setResourceLastSavedAt(Date.now());
     }
     const nextCredits = Number(snapshot?.credits ?? snapshot?.wallet?.credits ?? NaN);
     if (Number.isFinite(nextCredits) && nextCredits >= 0) {
       setCredits(Math.floor(nextCredits));
     }
   }, []);
+
+  const applyServerEconomyGameState = useCallback(
+    (
+      source: any,
+      options?: {
+        optimisticBuildPlacement?: { roomType: RoomType; x: number; y: number } | null;
+      }
+    ) => {
+      const state =
+        source?.state && typeof source.state === "object"
+          ? source.state
+          : source && typeof source === "object"
+            ? source
+            : null;
+      if (!state) return;
+
+      const now = Date.now();
+      const resourceSource = state.resources && typeof state.resources === "object" ? state.resources : null;
+      if (resourceSource) {
+        const nextResourceAmounts: Record<string, number> = {};
+        for (const def of RESOURCE_DEFS) {
+          const row = (resourceSource as Record<string, any>)[def.id];
+          const raw = Number(row && typeof row === "object" ? row.amount : row);
+          nextResourceAmounts[def.id] = Number.isFinite(raw) && raw >= 0 ? raw : 0;
+        }
+        resourceAmountsRef.current = nextResourceAmounts;
+        setResourceAmounts((prev) => {
+          const same = RESOURCE_DEFS.every((def) => Number(prev[def.id] ?? 0) === Number(nextResourceAmounts[def.id] ?? 0));
+          return same ? prev : nextResourceAmounts;
+        });
+      }
+
+      const nextCredits = Number(state.premiumCredits ?? state.credits ?? NaN);
+      if (Number.isFinite(nextCredits) && nextCredits >= 0) {
+        setCredits(Math.floor(nextCredits));
+      }
+
+      const buildingSource = state.buildings && typeof state.buildings === "object" ? (state.buildings as Record<string, any>) : null;
+      if (buildingSource) {
+        const roomLevels = extractServerRoomLevels(buildingSource);
+        const syncedRooms = syncRoomsWithServerBuildings(roomsRef.current, roomLevels);
+        const previousRoomByType = new Map(roomsRef.current.map((room) => [room.type, room]));
+        const nextRoomByType = new Map(syncedRooms.map((room) => [room.type, room]));
+        const fxRoom =
+          syncedRooms.find((room) => {
+            if (room.type === "entrance") return false;
+            const previous = previousRoomByType.get(room.type);
+            return !previous || room.level > previous.level;
+          }) ?? null;
+
+        if (!areRoomsEqual(roomsRef.current, syncedRooms)) {
+          roomsRef.current = syncedRooms;
+          setRooms(syncedRooms);
+        }
+        if (fxRoom) setConstructionFxRoomId(nextRoomByType.get(fxRoom.type)?.id ?? fxRoom.id);
+
+        const unlocked = Array.from(
+          new Set([
+            ...BASE_UNLOCKED_RESOURCE_IDS,
+            ...RESOURCE_DEFS.filter((def) => Math.max(0, Math.floor(Number(roomLevels[def.id] ?? 0))) > 0).map((def) => def.id)
+          ])
+        );
+        resourceUnlockedRef.current = unlocked;
+        setUnlockedResourceIds((prev) =>
+          prev.length === unlocked.length && prev.every((value, index) => value === unlocked[index]) ? prev : unlocked
+        );
+
+        const nextConstructionJob = buildConstructionJobFromServerState(
+          state,
+          syncedRooms,
+          constructionJobRef.current,
+          options?.optimisticBuildPlacement ?? null
+        );
+        constructionJobRef.current = nextConstructionJob;
+        setConstructionJob((prev) => (areConstructionJobsEqual(prev, nextConstructionJob) ? prev : nextConstructionJob));
+      }
+
+      resourceTickRef.current = now;
+      setResourceOfflineSeconds(0);
+      setResourceLastSavedAt(now);
+    },
+    []
+  );
 
   const loadCommanderProfile = useCallback(async () => {
     if (!session) return;
@@ -5161,30 +5395,6 @@ export default function App() {
       next[def.id] = Math.min(cap, produced);
     }
     return next;
-  };
-
-  const persistResources = async () => {
-    if (!session) return;
-    try {
-      await client.writeStorageObjects(session, [
-        {
-          collection: RESOURCE_STORAGE_COLLECTION,
-          key: RESOURCE_STORAGE_KEY,
-          permission_read: 1,
-          permission_write: 1,
-          value: {
-            amounts: resourceAmountsRef.current,
-            unlocked: resourceUnlockedRef.current,
-            lastTick: resourceTickRef.current
-          }
-        }
-      ]);
-      setResourceLastSavedAt(Date.now());
-    } catch (err) {
-      if (isUnauthorizedError(err)) {
-        invalidateSession();
-      }
-    }
   };
 
   const loadInventory = async (ackMapDropNotifications = false) => {
@@ -5264,9 +5474,17 @@ export default function App() {
     const parsed = parseJsonObject(rpcResponse?.payload ?? rpcResponse);
     const nested = parseJsonObject(parsed?.payload);
     const source = parseJsonObject(parsed?.points ?? nested?.points);
-    const total = Number(source?.total ?? NaN);
-    if (Number.isFinite(total) && total >= 0) {
-      setPlayerScorePoints(Math.max(0, Math.floor(total)));
+    const nextBreakdown = normalizeRankingBreakdown(source);
+    if (nextBreakdown.total > 0 || Object.values(nextBreakdown).some((value) => value > 0)) {
+      setPlayerScoreBreakdown((prev) => {
+        const same =
+          prev.total === nextBreakdown.total &&
+          prev.economy === nextBreakdown.economy &&
+          prev.research === nextBreakdown.research &&
+          prev.military === nextBreakdown.military;
+        return same ? prev : nextBreakdown;
+      });
+      setPlayerScorePoints(nextBreakdown.total);
     }
   };
 
@@ -5310,8 +5528,10 @@ export default function App() {
     if (!session) {
       setPlayerScorePoints(0);
       setPlayerScoreRank(0);
-      setRankingPlayers([]);
-      setRankingAlliances([]);
+      setPlayerScoreBreakdown(EMPTY_RANKING_BREAKDOWN);
+      setPlayerScoreRanks(EMPTY_RANKING_BREAKDOWN);
+      setRankingPlayers(EMPTY_RANKING_BOARDS);
+      setRankingAlliances(EMPTY_RANKING_BOARDS);
       setRankingError("");
       return;
     }
@@ -5329,12 +5549,17 @@ export default function App() {
       const nested = parseJsonObject(parsed?.payload);
       const source = Object.keys(nested).length > 0 ? nested : parsed;
       const player = source?.player && typeof source.player === "object" ? source.player : {};
-      const points = Number(player?.points?.total ?? 0);
-      const rank = Number(player?.rank ?? 0);
-      setPlayerScorePoints(Number.isFinite(points) ? Math.max(0, Math.floor(points)) : 0);
-      setPlayerScoreRank(Number.isFinite(rank) ? Math.max(0, Math.floor(rank)) : 0);
-      setRankingPlayers(Array.isArray(source?.playerTop) ? source.playerTop : []);
-      setRankingAlliances(Array.isArray(source?.allianceTop) ? source.allianceTop : []);
+      const nextBreakdown = normalizeRankingBreakdown(player?.points);
+      const nextRanks = normalizeRankingBreakdown(player?.ranks);
+      const nextPlayerBoards = normalizeRankingBoards(source?.playerBoards, Array.isArray(source?.playerTop) ? source.playerTop : []);
+      const nextAllianceBoards = normalizeRankingBoards(source?.allianceBoards, Array.isArray(source?.allianceTop) ? source.allianceTop : []);
+      const fallbackRank = sanitizeRankingNumber(player?.rank);
+      setPlayerScorePoints(nextBreakdown.total);
+      setPlayerScoreRank(nextRanks.total || fallbackRank);
+      setPlayerScoreBreakdown(nextBreakdown);
+      setPlayerScoreRanks(nextRanks.total || fallbackRank ? { ...nextRanks, total: nextRanks.total || fallbackRank } : nextRanks);
+      setRankingPlayers(nextPlayerBoards);
+      setRankingAlliances(nextAllianceBoards);
     } catch (err) {
       if (isUnauthorizedError(err)) {
         invalidateSession();
@@ -5356,18 +5581,17 @@ export default function App() {
     }
   };
 
-  const syncRankingProgress = async () => {
+  const syncRankingProgress = async (researchPointsOverride?: number) => {
     if (!session) return;
     if (rankingSyncInFlightRef.current) return;
 
     rankingSyncInFlightRef.current = true;
     try {
       const progress = {
-        rooms: rooms.map((room) => ({
-          type: room.type,
-          level: Math.max(0, Math.floor(Number(room.level || 0)))
-        })),
-        researchPoints: computeResearchInvestmentPoints(technologyLevels)
+        researchPoints:
+          typeof researchPointsOverride === "number" && Number.isFinite(researchPointsOverride)
+            ? Math.max(0, Math.floor(researchPointsOverride))
+            : computeResearchInvestmentPoints(technologyLevels)
       };
       const rpc = await client.rpc(session, "ranking_sync_progress", JSON.stringify({ progress }));
       const parsed = parseJsonObject((rpc as any)?.payload ?? rpc);
@@ -5447,7 +5671,6 @@ export default function App() {
     const hydrateVault = async () => {
       setVaultHydrated(false);
       setVaultHydratedUserId("");
-      vaultServerSyncSignatureRef.current = "";
       resetToDefaults();
 
       const userId = session?.user_id ?? "";
@@ -5461,7 +5684,6 @@ export default function App() {
 
       const scopedSaveKey = vaultStorageKeyForUser(userId);
       let localParsed: any = null;
-      let serverParsed: any = null;
 
       try {
         let raw = localStorage.getItem(scopedSaveKey);
@@ -5485,27 +5707,7 @@ export default function App() {
         localParsed = null;
       }
 
-      try {
-        const read = await client.readStorageObjects(session, {
-          object_ids: [{ collection: VAULT_PROFILE_COLLECTION, key: VAULT_PROFILE_KEY, user_id: userId }]
-        });
-        if (canceled) return;
-        const stored = read.objects?.[0]?.value;
-        if (stored && typeof stored === "object") {
-          serverParsed = stored;
-        }
-      } catch (err) {
-        if (isUnauthorizedError(err)) {
-          if (!canceled) invalidateSession();
-          return;
-        }
-        if (import.meta.env.DEV) {
-          // eslint-disable-next-line no-console
-          console.error("vault hydrate server error", err);
-        }
-      }
-
-      const parsed = choosePreferredVaultSnapshot(localParsed, serverParsed) as
+      const parsed = (localParsed && typeof localParsed === "object" ? localParsed : null) as
         | {
             rooms?: Array<Omit<Room, "type"> & { type: string }>;
             credits?: number;
@@ -5707,7 +5909,7 @@ export default function App() {
     return () => {
       canceled = true;
     };
-  }, [client, invalidateSession, session]);
+  }, [session]);
 
   useEffect(() => {
     if (!vaultHydrated) return;
@@ -5715,43 +5917,20 @@ export default function App() {
     if (vaultHydratedUserId !== session.user_id) return;
 
     const scopedSaveKey = vaultStorageKeyForUser(session.user_id);
-    const snapshotCore = { rooms, credits, zoom, pan, constructionJob, technologyLevels, researchJob, populationState, mainMissionState };
     const snapshotPayload = {
-      ...snapshotCore,
+      rooms,
+      credits,
+      zoom,
+      pan,
+      constructionJob,
+      technologyLevels,
+      researchJob,
+      populationState,
+      mainMissionState,
       updatedAt: Date.now()
     };
-    const signature = JSON.stringify(snapshotCore);
-
     localStorage.setItem(scopedSaveKey, JSON.stringify(snapshotPayload));
-
-    if (signature === vaultServerSyncSignatureRef.current) return;
-
-    const timer = window.setTimeout(async () => {
-      try {
-        await client.writeStorageObjects(session, [
-          {
-            collection: VAULT_PROFILE_COLLECTION,
-            key: VAULT_PROFILE_KEY,
-            permission_read: 1,
-            permission_write: 1,
-            value: snapshotPayload
-          }
-        ]);
-        vaultServerSyncSignatureRef.current = signature;
-      } catch (err) {
-        if (isUnauthorizedError(err)) {
-          invalidateSession();
-          return;
-        }
-        if (import.meta.env.DEV) {
-          // eslint-disable-next-line no-console
-          console.error("vault persist server error", err);
-        }
-      }
-    }, 900);
-
-    return () => window.clearTimeout(timer);
-  }, [client, constructionJob, credits, invalidateSession, mainMissionState, pan, populationState, researchJob, rooms, session, technologyLevels, vaultHydrated, vaultHydratedUserId, zoom]);
+  }, [constructionJob, credits, mainMissionState, pan, populationState, researchJob, rooms, session, technologyLevels, vaultHydrated, vaultHydratedUserId, zoom]);
 
   useEffect(() => {
     localStorage.setItem(UI_SCREEN_KEY, screen);
@@ -5768,6 +5947,14 @@ export default function App() {
   useEffect(() => {
     resourceUnlockedRef.current = unlockedResourceIds;
   }, [unlockedResourceIds]);
+
+  useEffect(() => {
+    roomsRef.current = rooms;
+  }, [rooms]);
+
+  useEffect(() => {
+    constructionJobRef.current = constructionJob;
+  }, [constructionJob]);
 
   useEffect(() => {
     const builtResourceIds = rooms
@@ -5906,6 +6093,7 @@ export default function App() {
       setHangarActionBusy(false);
       setHangarError("");
       setServerClockOffsetMs(0);
+      setResourceLastSavedAt(null);
       return;
     }
 
@@ -5914,79 +6102,12 @@ export default function App() {
       setResourceLoading(true);
       setResourceError("");
       try {
-        const [read, economyRpc] = await Promise.all([
-          client.readStorageObjects(session, {
-            object_ids: [{ collection: RESOURCE_STORAGE_COLLECTION, key: RESOURCE_STORAGE_KEY, user_id: session.user_id }]
-          }),
-          client.rpc(session, "economy_get_state", "{}").catch(() => null)
-        ]);
-        const stored = read.objects?.[0]?.value as { amounts?: Record<string, number>; unlocked?: string[]; lastTick?: number } | undefined;
+        const economyRpc = await client.rpc(session, "economy_get_state", "{}");
         const parsedEconomy = parseJsonObject((economyRpc as any)?.payload ?? economyRpc);
         const nestedEconomy = parseJsonObject(parsedEconomy?.payload);
         const economySource = Object.keys(nestedEconomy).length > 0 ? nestedEconomy : parsedEconomy;
-        const now = Date.now();
-        const storedBase: Record<string, number> = {};
-        const serverBase: Record<string, number> = {};
-        for (const r of RESOURCE_DEFS) {
-          storedBase[r.id] = 0;
-          serverBase[r.id] = 0;
-        }
-
-        if (stored?.amounts && typeof stored.amounts === "object") {
-          for (const key of Object.keys(storedBase)) {
-            const v = stored.amounts[key];
-            storedBase[key] = typeof v === "number" && Number.isFinite(v) ? v : 0;
-          }
-        }
-
-        const serverResources =
-          (economySource?.state?.resources && typeof economySource.state.resources === "object" ? economySource.state.resources : null) ??
-          (economySource?.resources && typeof economySource.resources === "object" ? economySource.resources : null);
-        if (serverResources) {
-          for (const key of Object.keys(serverBase)) {
-            const row = (serverResources as Record<string, any>)[key];
-            const raw = Number(row && typeof row === "object" ? row.amount : row);
-            serverBase[key] = Number.isFinite(raw) && raw > 0 ? raw : 0;
-          }
-        }
-
-        const storedUnlocked = Array.isArray(stored?.unlocked) && stored!.unlocked!.length > 0 ? stored!.unlocked! : BASE_UNLOCKED_RESOURCE_IDS;
-        const serverBuildings =
-          (economySource?.state?.buildings && typeof economySource.state.buildings === "object" ? economySource.state.buildings : null) ??
-          (economySource?.buildings && typeof economySource.buildings === "object" ? economySource.buildings : null);
-        const serverUnlockedSet = new Set<string>(BASE_UNLOCKED_RESOURCE_IDS);
-        if (serverBuildings) {
-          for (const r of RESOURCE_DEFS) {
-            const rawLevel = Number((serverBuildings as Record<string, any>)[r.id]?.level ?? 0);
-            if ((Number.isFinite(rawLevel) && rawLevel > 0) || Number(serverBase[r.id] || 0) > 0) {
-              serverUnlockedSet.add(r.id);
-            }
-          }
-        }
-
-        const storedTotal = Object.values(storedBase).reduce((sum, value) => sum + Math.max(0, Number(value || 0)), 0);
-        const serverTotal = Object.values(serverBase).reduce((sum, value) => sum + Math.max(0, Number(value || 0)), 0);
-        const hasStoredSnapshot = Boolean(stored?.amounts && typeof stored.amounts === "object");
-        const shouldUseServerSeed =
-          serverTotal > 0 &&
-          (!hasStoredSnapshot || storedTotal <= 0 || storedTotal < serverTotal * 0.02);
-
-        const seedAmounts = shouldUseServerSeed ? serverBase : storedBase;
-        const unlocked = Array.from(new Set([...(shouldUseServerSeed ? Array.from(serverUnlockedSet) : storedUnlocked), ...Array.from(serverUnlockedSet)]));
-        const lastTick =
-          shouldUseServerSeed
-            ? now
-            : typeof stored?.lastTick === "number" && stored.lastTick > 0
-              ? stored.lastTick
-              : now;
-        const offlineSeconds = Math.max(0, Math.floor((now - lastTick) / 1000));
-        const produced = applyResourceProduction(seedAmounts, offlineSeconds, unlocked);
-
         if (canceled) return;
-        setUnlockedResourceIds(unlocked);
-        setResourceAmounts(produced);
-        setResourceOfflineSeconds(shouldUseServerSeed ? 0 : offlineSeconds);
-        resourceTickRef.current = now;
+        applyServerEconomyGameState(economySource);
       } catch (err) {
         if (!canceled) {
           // Force logout when refresh token is invalid/expired to stop 401 loop.
@@ -6006,13 +6127,47 @@ export default function App() {
     return () => {
       canceled = true;
     };
-  }, [client, session, uiLanguage]);
+  }, [applyServerEconomyGameState, client, session, uiLanguage]);
 
   useEffect(() => {
     if (!session) return;
     void loadCommanderProfile();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session?.user_id]);
+
+  useEffect(() => {
+    if (!session) return;
+    let cancelled = false;
+
+    const syncEconomyState = async () => {
+      try {
+        const rpc = await client.rpc(session, "economy_get_state", "{}");
+        if (cancelled) return;
+        const parsed = parseJsonObject((rpc as any)?.payload ?? rpc);
+        const nested = parseJsonObject(parsed?.payload);
+        const source = Object.keys(nested).length > 0 ? nested : parsed;
+        applyServerEconomyGameState(source);
+      } catch (err) {
+        if (isUnauthorizedError(err)) {
+          invalidateSession();
+          return;
+        }
+        if (import.meta.env.DEV) {
+          // eslint-disable-next-line no-console
+          console.error("economy sync poll error", err);
+        }
+      }
+    };
+
+    const interval = window.setInterval(() => {
+      void syncEconomyState();
+    }, 5000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [applyServerEconomyGameState, client, invalidateSession, session]);
 
   useEffect(() => {
     if (!session) return;
@@ -6047,8 +6202,10 @@ export default function App() {
     if (!session) {
       setPlayerScorePoints(0);
       setPlayerScoreRank(0);
-      setRankingPlayers([]);
-      setRankingAlliances([]);
+      setPlayerScoreBreakdown(EMPTY_RANKING_BREAKDOWN);
+      setPlayerScoreRanks(EMPTY_RANKING_BREAKDOWN);
+      setRankingPlayers(EMPTY_RANKING_BOARDS);
+      setRankingAlliances(EMPTY_RANKING_BOARDS);
       setRankingLoading(false);
       setRankingError("");
       return;
@@ -6243,28 +6400,6 @@ export default function App() {
   }, [session?.user_id, inventoryInboxBadgeCount, inventoryPendingItemNotifications, inventoryVisibleItemNotifications]);
 
   useEffect(() => {
-    if (!session || resourceLoading) return;
-    const interval = setInterval(() => {
-      void persistResources();
-    }, 10000);
-    return () => clearInterval(interval);
-  }, [resourceLoading, session]);
-
-  useEffect(() => {
-    if (!session) return;
-    const onHidden = () => {
-      if (document.visibilityState === "hidden") {
-        void persistResources();
-      }
-    };
-    document.addEventListener("visibilitychange", onHidden);
-    return () => {
-      document.removeEventListener("visibilitychange", onHidden);
-      void persistResources();
-    };
-  }, [session]);
-
-  useEffect(() => {
     const restore = async () => {
       setAuthChecking(true);
       setNakamaStatus("connecting");
@@ -6430,51 +6565,18 @@ export default function App() {
   }, [client, invalidateSession, mapWarmCacheKey, screen, session]);
 
   useEffect(() => {
-    if (!constructionJob) return;
-    if (nowMs < constructionJob.endAt) return;
-
-    if (constructionJob.mode === "build") {
-      const cfg = ROOM_CONFIG[constructionJob.roomType];
-      setRooms((prev) => {
-        if (prev.some((room) => room.type === constructionJob.roomType && isUniqueRoomType(constructionJob.roomType))) {
-          return prev;
-        }
-        const newId = makeId();
-        setConstructionFxRoomId(newId);
-        return [
-          ...prev,
-          {
-            id: newId,
-            x: constructionJob.x,
-            y: constructionJob.y,
-            width: cfg.width,
-            type: constructionJob.roomType,
-            level: 1
-          }
-        ];
-      });
-    } else {
-      setRooms((prev) =>
-        prev.map((room) => {
-          if (room.id !== constructionJob.roomId) return room;
-          setConstructionFxRoomId(room.id);
-          return { ...room, level: constructionJob.targetLevel };
-        })
-      );
-    }
-
-    setConstructionJob(null);
-  }, [constructionJob, nowMs]);
-
-  useEffect(() => {
     if (!researchJob) return;
     if (nowMs < researchJob.endAt) return;
-    setTechnologyLevels((prev) => ({
-      ...prev,
-      [researchJob.technologyId]: Math.max(prev[researchJob.technologyId] ?? 0, researchJob.targetLevel)
-    }));
+    const nextLevels = {
+      ...technologyLevels,
+      [researchJob.technologyId]: Math.max(technologyLevels[researchJob.technologyId] ?? 0, researchJob.targetLevel)
+    };
+    setTechnologyLevels(nextLevels);
     setResearchJob(null);
-  }, [nowMs, researchJob]);
+    void syncRankingProgress(computeResearchInvestmentPoints(nextLevels));
+    void loadRankingState(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nowMs, researchJob, technologyLevels]);
 
   useEffect(() => {
     if (!constructionFxRoomId) return;
@@ -6516,9 +6618,12 @@ export default function App() {
       return;
     }
 
-    if (authMode === "signup" && username.length < 3) {
-      setAuthError(l("Pseudo minimum: 3 caracteres.", "Minimum username length: 3 characters."));
-      return;
+    if (authMode === "signup") {
+      const usernameError = validatePlayerUsernameInput(username, l);
+      if (usernameError) {
+        setAuthError(usernameError);
+        return;
+      }
     }
 
     setAuthLoading(true);
@@ -6599,27 +6704,11 @@ export default function App() {
             level: Math.max(0, Math.floor(Number(room.level || 0)))
           }))
           .sort((a, b) => String(a.type).localeCompare(String(b.type))),
-        researchLevels: TECHNOLOGY_DEFS.map((def) => ({
-          id: def.id,
-          level: Math.max(0, Math.floor(Number(technologyLevels[def.id] ?? 0)))
-        })),
-        constructionJob: constructionJob
-          ? {
-              mode: constructionJob.mode,
-              roomType: constructionJob.roomType,
-              targetLevel: constructionJob.targetLevel,
-              costPaid: constructionJob.costPaid
-            }
-          : null,
-        researchJob: researchJob
-          ? {
-              technologyId: researchJob.technologyId,
-              targetLevel: researchJob.targetLevel,
-              costPaid: researchJob.costPaid
-            }
-          : null
+        constructionActive: Boolean(constructionJob),
+        hangarQueueSize: hangarQueue.length,
+        completedResearchPoints: computeResearchInvestmentPoints(technologyLevels)
       }),
-    [constructionJob, researchJob, rooms, technologyLevels]
+    [constructionJob, hangarQueue.length, rooms, technologyLevels]
   );
 
   useEffect(() => {
@@ -6739,8 +6828,9 @@ export default function App() {
 
     const username = profileUsername.trim();
     const email = profileEmail.trim();
-    if (username.length < 3) {
-      setProfileError("Pseudo minimum: 3 caracteres.");
+    const usernameError = validatePlayerUsernameInput(username, l);
+    if (usernameError) {
+      setProfileError(usernameError);
       setProfileSaved("");
       return;
     }
@@ -6861,7 +6951,7 @@ export default function App() {
     return null;
   };
 
-  const startBuildAt = (type: RoomType, slot: { x: number; y: number }) => {
+  const startBuildAt = async (type: RoomType, slot: { x: number; y: number }) => {
     if (!session) return;
     if (constructionJob) return;
     if (rooms.some((room) => room.type === type)) return;
@@ -6878,21 +6968,34 @@ export default function App() {
     if (finalX + cfg.width - 1 > space.maxX) finalX = space.maxX - cfg.width + 1;
     finalX = Math.max(finalX, space.minX);
 
-    setResourceAmounts((prev) => applyCostDelta(prev, cost, -1));
-    setConstructionJob({
-      id: makeId(),
-      mode: "build",
-      roomType: type,
-      x: finalX,
-      y: slot.y,
-      targetLevel: 1,
-      startedAt: Date.now(),
-      endAt: Date.now() + buildSecondsForLevel(type, 1, buildingTimeReductionFactor) * 1000,
-      costPaid: cost
-    });
-    const resourceId = ROOM_CONFIG[type].resourceId;
-    if (resourceId && !unlockedResourceIds.includes(resourceId)) {
-      setUnlockedResourceIds((prev) => [...prev, resourceId]);
+    setResourceError("");
+    try {
+      const rpc = await client.rpc(
+        session,
+        "economy_start_building",
+        JSON.stringify({
+          buildingId: type,
+          slot: "building_construct_slot"
+        })
+      );
+      const parsed = parseJsonObject((rpc as any)?.payload ?? rpc);
+      const nested = parseJsonObject(parsed?.payload);
+      const source = Object.keys(nested).length > 0 ? nested : parsed;
+      applyServerEconomyGameState(source, {
+        optimisticBuildPlacement: { roomType: type, x: finalX, y: slot.y }
+      });
+      setBuildSlot(null);
+    } catch (err) {
+      if (isUnauthorizedError(err)) {
+        invalidateSession();
+        return;
+      }
+      const details = extractRpcErrorMessage(err);
+      setResourceError(details || l("Construction impossible.", "Unable to start construction."));
+      if (import.meta.env.DEV) {
+        // eslint-disable-next-line no-console
+        console.error("economy start build error", err);
+      }
     }
   };
 
@@ -6962,11 +7065,11 @@ export default function App() {
   const onBuild = (type: RoomType) => {
     if (!buildSlot) return;
     if (!isPopulationBuildingUnlocked(type, populationSnapshot.totalPopulation)) return;
-    startBuildAt(type, buildSlot);
+    void startBuildAt(type, buildSlot);
     setBuildSlot(null);
   };
 
-  const onUpgrade = (room: Room) => {
+  const onUpgrade = async (room: Room) => {
     if (!session) return;
     if (constructionJob) return;
     const cfg = ROOM_CONFIG[room.type];
@@ -6976,40 +7079,62 @@ export default function App() {
     const cost = costForLevel(room.type, targetLevel, buildingCostReductionFactor);
     if (!canAffordCost(resourceAmountsRef.current, cost)) return;
 
-    setResourceAmounts((prev) => applyCostDelta(prev, cost, -1));
-    setConstructionJob({
-      id: makeId(),
-      mode: "upgrade",
-      roomId: room.id,
-      roomType: room.type,
-      targetLevel,
-      startedAt: Date.now(),
-      endAt: Date.now() + buildSecondsForLevel(room.type, targetLevel, buildingTimeReductionFactor) * 1000,
-      costPaid: cost
-    });
-    setActiveRoom(null);
-  };
-
-  const onCancelConstruction = () => {
-    if (!constructionJob) return;
-    const refundable =
-      constructionJob.costPaid && typeof constructionJob.costPaid === "object"
-        ? (constructionJob.costPaid as ResourceCost)
-        : {};
-    setResourceAmounts((prev) => applyCostDelta(prev, refundable, 1));
-
-    if (constructionJob.mode === "build") {
-      const resourceId = ROOM_CONFIG[constructionJob.roomType].resourceId;
-      if (resourceId) {
-        setUnlockedResourceIds((prev) => {
-          const isAlreadyBuilt = rooms.some((room) => room.type === constructionJob.roomType);
-          if (isAlreadyBuilt || resourceId === "carbone" || resourceId === "titane") return prev;
-          return prev.filter((id) => id !== resourceId);
-        });
+    setResourceError("");
+    try {
+      const rpc = await client.rpc(
+        session,
+        "economy_start_building",
+        JSON.stringify({
+          buildingId: room.type,
+          slot: "building_upgrade_slot"
+        })
+      );
+      const parsed = parseJsonObject((rpc as any)?.payload ?? rpc);
+      const nested = parseJsonObject(parsed?.payload);
+      const source = Object.keys(nested).length > 0 ? nested : parsed;
+      applyServerEconomyGameState(source);
+      setActiveRoom(null);
+    } catch (err) {
+      if (isUnauthorizedError(err)) {
+        invalidateSession();
+        return;
+      }
+      const details = extractRpcErrorMessage(err);
+      setResourceError(details || l("Amelioration impossible.", "Unable to start upgrade."));
+      if (import.meta.env.DEV) {
+        // eslint-disable-next-line no-console
+        console.error("economy start upgrade error", err);
       }
     }
+  };
 
-    setConstructionJob(null);
+  const onCancelConstruction = async () => {
+    if (!constructionJob || !session) return;
+    setResourceError("");
+    try {
+      const rpc = await client.rpc(
+        session,
+        "economy_cancel",
+        JSON.stringify({
+          slot: constructionJob.mode === "build" ? "building_construct_slot" : "building_upgrade_slot"
+        })
+      );
+      const parsed = parseJsonObject((rpc as any)?.payload ?? rpc);
+      const nested = parseJsonObject(parsed?.payload);
+      const source = Object.keys(nested).length > 0 ? nested : parsed;
+      applyServerEconomyGameState(source);
+    } catch (err) {
+      if (isUnauthorizedError(err)) {
+        invalidateSession();
+        return;
+      }
+      const details = extractRpcErrorMessage(err);
+      setResourceError(details || l("Annulation impossible.", "Unable to cancel construction."));
+      if (import.meta.env.DEV) {
+        // eslint-disable-next-line no-console
+        console.error("economy cancel build error", err);
+      }
+    }
   };
 
   const resetAll = () => {
@@ -7118,13 +7243,13 @@ export default function App() {
       if (!isPopulationBuildingUnlocked(item.roomType, populationSnapshot.totalPopulation)) return;
       const slot = findAutoBuildSlot(item.roomType);
       if (!slot) return;
-      startBuildAt(item.roomType, slot);
+      void startBuildAt(item.roomType, slot);
       return;
     }
     if (!item.roomId) return;
     const room = rooms.find((r) => r.id === item.roomId);
     if (!room) return;
-    onUpgrade(room);
+    void onUpgrade(room);
   };
 
   const activeMainMissions = useMemo(
@@ -7943,10 +8068,14 @@ export default function App() {
           {renderUnifiedHeader()}
           <RankingScreen
             language={uiLanguage}
+            client={client}
+            session={session}
             loading={rankingLoading}
             error={rankingError}
             playerPoints={playerScorePoints}
             playerRank={playerScoreRank}
+            playerBreakdown={playerScoreBreakdown}
+            playerRanks={playerScoreRanks}
             players={rankingPlayers}
             alliances={rankingAlliances}
             onRefresh={() => void loadRankingState()}
@@ -8817,7 +8946,7 @@ function SectorMapScreen({
   const commandementEscadreLevel = Math.max(0, Math.floor(Number(technologyLevels.commandement_escadre ?? 0)));
   const mapCacheKey = useMemo(() => `hsg_map_cache_v1_${String(currentUserId || "guest")}`, [currentUserId]);
   const dailyHarvestQuestStorageKey = useMemo(() => `hsg_map_daily_harvest_v1_${String(currentUserId || "guest")}`, [currentUserId]);
-  const mapMaxActiveExpeditions = Math.max(1, mapServerMaxActiveExpeditions, 1 + Math.floor(commandementEscadreLevel / 3));
+  const mapMaxActiveExpeditions = Math.max(1, mapServerMaxActiveExpeditions);
   const mapActiveBlockingExpeditions = useMemo(() => {
     const nowSec = Math.max(0, Math.floor(mapNowMs / 1000));
     return mapExpeditions.reduce((count, expedition) => {
@@ -13833,6 +13962,7 @@ function HangarScreen({
                       const produced = Math.max(0, Math.floor(Number(inventory[def.id] ?? 0)));
                       const fuelBase = def.category === "ship" ? hangarUnitFuelBasePer1000(def.id) : 0;
                       const hoverImage = unitImagePath || "/room-images/vaisseau.png";
+                      const productionStatusClass = affordable && maxBuildable > 0 ? "is-ready" : "is-blocked";
                       return (
                         <article key={def.id} className={`hangar-v4-line-item ${def.category}`}>
                           <div className="hangar-v4-line-main">
@@ -13848,36 +13978,39 @@ function HangarScreen({
                               />
                             </div>
                             <div className="hangar-v4-line-copy">
+                              <div className="hangar-v4-line-toprow">
+                                <div className="hangar-v4-line-heading">
+                                  <strong>{unitName(def)}</strong>
+                                  <p>{unitDescription(def)}</p>
+                                </div>
+                                <div className="hangar-v4-line-stockbar">
+                                  <div className="hangar-v4-line-stock-primary">
+                                    <small>{l("En service", "Owned")}</small>
+                                    <b>{produced.toLocaleString()}</b>
+                                  </div>
+                                  <div className="hangar-v4-line-stock-secondary">
+                                    <small>{l("Fabricable", "Buildable")}</small>
+                                    <span>{maxBuildable.toLocaleString()}</span>
+                                  </div>
+                                </div>
+                              </div>
                               <div className="hangar-v4-line-tags">
                                 <span className="hangar-v4-badge">{unitRoleLabel(def)}</span>
                                 <span className="hangar-v4-badge subtle">{familyImportance(family)}</span>
                               </div>
-                              <strong>{unitName(def)}</strong>
-                              <p>{unitDescription(def)}</p>
-                              <div className="hangar-v4-line-stockbar">
-                                <div className="hangar-v4-line-stock-primary">
-                                  <small>{l("En service", "Owned")}</small>
-                                  <b>{produced.toLocaleString()}</b>
-                                </div>
-                                <div className="hangar-v4-line-stock-secondary">
-                                  <small>{l("Fabricable", "Buildable")}</small>
-                                  <span>{maxBuildable.toLocaleString()}</span>
-                                </div>
-                              </div>
                             </div>
                           </div>
                           <div className="hangar-v4-line-body">
-                            <div className="hangar-v4-line-stats">
-                              <span><small>{l("Force", "Force")}</small><b>{def.force.toLocaleString()}</b></span>
-                              <span><small>{l("Endurance", "Endurance")}</small><b>{def.endurance.toLocaleString()}</b></span>
-                              <span><small>{def.category === "ship" ? l("Vitesse", "Speed") : l("Portee", "Range")}</small><b>{def.category === "ship" ? Math.max(0, Number(def.speed ?? 0)).toLocaleString() : String(def.range ?? "-")}</b></span>
-                              <span><small>{def.category === "ship" ? l("Carburant / 1000", "Fuel / 1000") : l("Rechargement", "Reload")}</small><b>{def.category === "ship" ? `${fuelBase.toLocaleString()} ${l("cr", "cr")}` : String(def.reload ?? "-")}</b></span>
-                            </div>
                             <div className="hangar-v4-line-order">
                               <ResourceCostDisplay cost={batchCost} available={authoritativeResources} language={language} compact className="hangar-v4-costs hangar-v4-line-costs" />
-                              <div className="hangar-v4-build-row hangar-v4-build-row-line">
+                              <div className={`hangar-v4-build-row hangar-v4-build-row-line ${productionStatusClass}`}>
                                 <label>
-                                  <span>{l("Quantite", "Quantity")}</span>
+                                  <span>
+                                    {l("Quantite", "Quantity")}{" "}
+                                    <em>
+                                      ({l("Fabricable", "Buildable")}: {maxBuildable.toLocaleString()})
+                                    </em>
+                                  </span>
                                   <input
                                     type="number"
                                     min={1}
@@ -15295,108 +15428,358 @@ function AllianceScreen({
 
 function RankingScreen({
   language,
+  client,
+  session,
   loading,
   error,
   playerPoints,
   playerRank,
+  playerBreakdown,
+  playerRanks,
   players,
   alliances,
   onRefresh
 }: {
   language: UILanguage;
+  client: Client;
+  session: Session | null;
   loading: boolean;
   error: string;
   playerPoints: number;
   playerRank: number;
-  players: any[];
-  alliances: any[];
+  playerBreakdown: RankingPointBreakdown;
+  playerRanks: RankingPointBreakdown;
+  players: RankingBoards;
+  alliances: RankingBoards;
   onRefresh: () => void;
 }) {
   const l = (fr: string, en: string) => (language === "en" ? en : fr);
-  const [tab, setTab] = useState<"players" | "alliances">("players");
+  const [entityTab, setEntityTab] = useState<"players" | "alliances">("players");
+  const [metric, setMetric] = useState<RankingMetric>("total");
+  const [rankingAvatarMap, setRankingAvatarMap] = useState<Record<string, string>>({});
 
-  const normalizeRows = (rows: any[], type: "players" | "alliances") =>
-    rows.map((entry, index) => {
+  const metricMeta = useMemo(
+    () => ({
+      total: {
+        label: l("Global", "Global"),
+        subtitle: l("Puissance combinee", "Combined power"),
+        kicker: l("Score global", "Global score")
+      },
+      economy: {
+        label: l("Batiments", "Buildings"),
+        subtitle: l("Croissance industrielle", "Industrial growth"),
+        kicker: l("Empire bati", "Built empire")
+      },
+      research: {
+        label: l("Technologie", "Technology"),
+        subtitle: l("Progression scientifique", "Scientific progress"),
+        kicker: l("Recherche", "Research")
+      },
+      military: {
+        label: l("Militaire", "Military"),
+        subtitle: l("Flottes et defenses", "Fleets and defenses"),
+        kicker: l("Projection de force", "Power projection")
+      }
+    }),
+    [language]
+  );
+
+  const allPlayerIds = useMemo(() => {
+    const ids = new Set<string>();
+    (Object.keys(players) as RankingMetric[]).forEach((key) => {
+      for (const row of players[key] ?? []) {
+        const ownerId = String(row?.ownerId ?? "").trim();
+        if (ownerId) ids.add(ownerId);
+      }
+    });
+    return Array.from(ids);
+  }, [players]);
+  const allPlayerIdsSignature = useMemo(() => allPlayerIds.join("|"), [allPlayerIds]);
+
+  useEffect(() => {
+    if (!session || allPlayerIds.length <= 0) {
+      setRankingAvatarMap({});
+      return;
+    }
+    let cancelled = false;
+
+    const loadAvatars = async () => {
+      const next: Record<string, string> = {};
+
+      try {
+        const read = await client.readStorageObjects(session, {
+          object_ids: allPlayerIds.map((userId) => ({
+            collection: PROFILE_COMMANDER_COLLECTION,
+            key: PROFILE_COMMANDER_KEY,
+            user_id: userId
+          }))
+        });
+        for (const row of read.objects ?? []) {
+          const userId = String(row.user_id || "").trim();
+          if (!userId) continue;
+          const value = row.value as { commanderId?: string; avatarUrl?: string } | undefined;
+          const commanderId = COMMANDER_IDS.includes(value?.commanderId as CommanderId)
+            ? (value!.commanderId as CommanderId)
+            : DEFAULT_COMMANDER_ID;
+          next[userId] =
+            typeof value?.avatarUrl === "string" && value.avatarUrl.trim()
+              ? value.avatarUrl.trim()
+              : COMMANDER_DEFS[commanderId].image;
+        }
+      } catch {
+        // noop
+      }
+
+      try {
+        const users = await client.getUsers(session, allPlayerIds, undefined, undefined);
+        for (const user of users.users ?? []) {
+          const userId = String(user.id || "").trim();
+          if (!userId || next[userId]) continue;
+          next[userId] = String(user.avatar_url || "").trim() || DEFAULT_PROFILE_AVATAR;
+        }
+      } catch {
+        // noop
+      }
+
+      for (const userId of allPlayerIds) {
+        if (!next[userId]) next[userId] = DEFAULT_PROFILE_AVATAR;
+      }
+
+      if (!cancelled) setRankingAvatarMap(next);
+    };
+
+    void loadAvatars();
+    return () => {
+      cancelled = true;
+    };
+  }, [allPlayerIds, allPlayerIdsSignature, client, session]);
+
+  const boards = entityTab === "players" ? players : alliances;
+  const rows = useMemo(() => {
+    const selectedRows = boards[metric] ?? [];
+    return selectedRows.map((entry, index) => {
       const metadata = parseJsonObject(entry?.metadata);
       const rank = Math.max(1, Math.floor(Number(entry?.rank ?? index + 1)));
-      const score = formatDisplayedScoreLabel(Number(entry?.score ?? 0));
-      const subscore = formatDisplayedScoreLabel(Number(entry?.subscore ?? 0));
-      const ownerId = String(entry?.ownerId ?? "");
-      const allianceId = String(metadata?.allianceId ?? "");
+      const ownerId = String(entry?.ownerId ?? "").trim();
+      const allianceId = String((metadata?.allianceId ?? ownerId) || "").trim();
       const fallbackName = ownerId ? ownerId.slice(0, 10) : `#${rank}`;
       const label =
-        type === "alliances"
+        entityTab === "alliances"
           ? String(metadata?.name || entry?.username || fallbackName)
           : String(entry?.username || metadata?.username || fallbackName);
+      const tag = String(metadata?.tag || "").trim();
+      const activeScore = formatDisplayedScoreLabel(Number(entry?.score ?? 0));
+      const globalScore = formatDisplayedScoreLabel(Number(entry?.subscore ?? metadata?.pointsTotauxAlliance ?? 0));
       const memberCount = Math.max(0, Math.floor(Number(metadata?.members ?? 0)));
-      const tag = String(metadata?.tag || "");
+      const bastionLevel = Math.max(0, Math.floor(Number(metadata?.bastionLevel ?? entry?.subscore ?? 0)));
+      const playerMilitary = formatDisplayedScoreLabel(Number(metadata?.military ?? entry?.subscore ?? 0));
+      const supportLabel =
+        metric === "total"
+          ? entityTab === "players"
+            ? l("Militaire", "Military")
+            : l("Nexus", "Nexus")
+          : l("Global", "Global");
+      const supportValue =
+        metric === "total"
+          ? entityTab === "players"
+            ? playerMilitary
+            : `${l("Niv.", "Lvl")} ${bastionLevel}`
+          : globalScore;
+      const avatarUrl =
+        entityTab === "players"
+          ? rankingAvatarMap[ownerId] || DEFAULT_PROFILE_AVATAR
+          : "";
+      const allianceBadge = tag || label.slice(0, 2).toUpperCase();
+      const metaLine =
+        entityTab === "players"
+          ? `${l("Profil", "Profile")}: ${ownerId.slice(0, 10)}`
+          : `${l("Membres", "Members")}: ${memberCount.toLocaleString()}`;
+
       return {
-        id: type === "alliances"
-          ? String(allianceId || ownerId || `${type}_${rank}`)
-          : String(entry?.ownerId ?? `${type}_${rank}`),
+        id: entityTab === "alliances" ? String(allianceId || `alliance_${rank}`) : String(ownerId || `player_${rank}`),
         rank,
-        score,
-        subscore,
         label,
-        extra: type === "alliances" ? tag : "",
+        tag,
+        activeScore,
+        supportLabel,
+        supportValue,
+        avatarUrl,
+        allianceBadge,
+        metaLine,
         memberCount
       };
     });
+  }, [boards, entityTab, language, metric, rankingAvatarMap]);
 
-  const playerRows = useMemo(() => normalizeRows(players, "players"), [players]);
-  const allianceRows = useMemo(() => normalizeRows(alliances, "alliances"), [alliances]);
-  const rows = tab === "players" ? playerRows : allianceRows;
-  const podium = rows.slice(0, 3);
-  const subscoreLabel = tab === "players" ? l("Militaire", "Military") : l("Bastion", "Bastion");
+  const podium = useMemo(() => {
+    const source = rows.slice(0, 3);
+    return [
+      { row: source[1], position: 2 },
+      { row: source[0], position: 1 },
+      { row: source[2], position: 3 }
+    ].filter((entry) => Boolean(entry.row));
+  }, [rows]);
+
+  const effectivePlayerBreakdown = useMemo(
+    () => ({
+      total: playerBreakdown.total || playerPoints,
+      economy: playerBreakdown.economy,
+      research: playerBreakdown.research,
+      military: playerBreakdown.military
+    }),
+    [playerBreakdown, playerPoints]
+  );
+  const effectivePlayerRanks = useMemo(
+    () => ({
+      total: playerRanks.total || playerRank,
+      economy: playerRanks.economy,
+      research: playerRanks.research,
+      military: playerRanks.military
+    }),
+    [playerRank, playerRanks]
+  );
+
+  const leadingRow = rows[0] ?? null;
+  const summaryCards =
+    entityTab === "players"
+      ? [
+          {
+            label: `${l("Votre", "Your")} ${metricMeta[metric].kicker.toLowerCase()}`,
+            value: formatDisplayedScoreLabel(effectivePlayerBreakdown[metric]),
+            tone: "primary"
+          },
+          {
+            label: `${l("Votre rang", "Your rank")} ${metricMeta[metric].label.toLowerCase()}`,
+            value: effectivePlayerRanks[metric] > 0 ? `#${effectivePlayerRanks[metric]}` : "-",
+            tone: "neutral"
+          },
+          {
+            label: l("Joueurs classes", "Ranked players"),
+            value: rows.length.toLocaleString(),
+            tone: "neutral"
+          },
+          {
+            label: l("Leader du secteur", "Sector leader"),
+            value: leadingRow ? leadingRow.label : "-",
+            note: leadingRow ? leadingRow.activeScore : l("Aucune donnee", "No data"),
+            tone: "accent"
+          }
+        ]
+      : [
+          {
+            label: l("Classement actif", "Active leaderboard"),
+            value: metricMeta[metric].label,
+            note: metricMeta[metric].subtitle,
+            tone: "primary"
+          },
+          {
+            label: l("Alliance #1", "Alliance #1"),
+            value: leadingRow ? leadingRow.label : "-",
+            note: leadingRow?.tag ? `[${leadingRow.tag}]` : undefined,
+            tone: "accent"
+          },
+          {
+            label: l("Score du leader", "Leader score"),
+            value: leadingRow ? leadingRow.activeScore : "-",
+            tone: "neutral"
+          },
+          {
+            label: l("Alliances classees", "Ranked alliances"),
+            value: rows.length.toLocaleString(),
+            tone: "neutral"
+          }
+        ];
+
+  const supportColumnLabel =
+    metric === "total"
+      ? entityTab === "players"
+        ? l("Militaire", "Military")
+        : l("Nexus", "Nexus")
+      : l("Global", "Global");
 
   return (
-    <main className="ranking-shell">
+    <main className="ranking-shell ranking-shell-v2">
       <section className="ranking-hero ranking-hero-v2">
-        <div>
+        <div className="ranking-hero-copy">
+          <small className="ranking-eyebrow">{l("Classement vivant", "Live rankings")}</small>
           <h2>{l("Classement Galactique", "Galactic Ranking")}</h2>
-          <p>{l("Scores serveur, classement live et progression inter-factions.", "Server scores, live ranking and inter-faction progression.")}</p>
+          <p>{l("Scores serveur, avatars commandants et lecture detaillee par puissance globale, batiments, technologie et militaire.", "Server scores, commander avatars and detailed views for global, building, technology and military power.")}</p>
         </div>
-        <button type="button" onClick={onRefresh} disabled={loading} className="ranking-refresh-btn">
-          {loading ? l("Actualisation...", "Refreshing...") : l("Actualiser", "Refresh")}
-        </button>
+        <div className="ranking-hero-actions">
+          <div className="ranking-mode-pill">
+            <strong>{entityTab === "players" ? l("Joueurs", "Players") : l("Alliances", "Alliances")}</strong>
+            <span>{metricMeta[metric].label}</span>
+          </div>
+          <button type="button" onClick={onRefresh} disabled={loading} className="ranking-refresh-btn">
+            {loading ? l("Actualisation...", "Refreshing...") : l("Actualiser", "Refresh")}
+          </button>
+        </div>
+      </section>
+
+      <section className="ranking-control-deck">
+        <div className="ranking-tab-block">
+          <small>{l("Vue", "View")}</small>
+          <div className="ranking-tabs ranking-tabs-entity">
+            <button type="button" className={entityTab === "players" ? "active" : ""} onClick={() => setEntityTab("players")}>
+              {l("Joueurs", "Players")}
+            </button>
+            <button type="button" className={entityTab === "alliances" ? "active" : ""} onClick={() => setEntityTab("alliances")}>
+              {l("Alliances", "Alliances")}
+            </button>
+          </div>
+        </div>
+        <div className="ranking-tab-block">
+          <small>{l("Classements", "Leaderboards")}</small>
+          <div className="ranking-tabs ranking-tabs-metric">
+            {(Object.keys(metricMeta) as RankingMetric[]).map((metricKey) => (
+              <button key={metricKey} type="button" className={metric === metricKey ? "active" : ""} onClick={() => setMetric(metricKey)}>
+                {metricMeta[metricKey].label}
+              </button>
+            ))}
+          </div>
+        </div>
       </section>
 
       <section className="ranking-summary-grid">
-        <article className="ranking-summary-card">
-          <small>{l("Votre score", "Your score")}</small>
-          <strong>{formatDisplayedScoreLabel(playerPoints)}</strong>
-        </article>
-        <article className="ranking-summary-card">
-          <small>{l("Votre rang", "Your rank")}</small>
-          <strong>{playerRank > 0 ? `#${playerRank}` : "-"}</strong>
-        </article>
-        <article className="ranking-summary-card">
-          <small>{tab === "players" ? l("Joueurs classes", "Ranked players") : l("Alliances classees", "Ranked alliances")}</small>
-          <strong>{rows.length.toLocaleString()}</strong>
-        </article>
-      </section>
-
-      <section className="ranking-tabs">
-        <button type="button" className={tab === "players" ? "active" : ""} onClick={() => setTab("players")}>
-          {l("Joueurs", "Players")}
-        </button>
-        <button type="button" className={tab === "alliances" ? "active" : ""} onClick={() => setTab("alliances")}>
-          {l("Alliances", "Alliances")}
-        </button>
+        {summaryCards.map((card, index) => (
+          <article key={`ranking_summary_${index}`} className={`ranking-summary-card tone-${card.tone}`}>
+            <small>{card.label}</small>
+            <strong>{card.value}</strong>
+            {card.note ? <span>{card.note}</span> : null}
+          </article>
+        ))}
       </section>
 
       {error ? <p className="ranking-error">{error}</p> : null}
 
       {podium.length > 0 ? (
-        <section className="ranking-podium">
-          {podium.map((row, idx) => (
-            <article key={`podium_${row.id}`} className={`ranking-podium-card pos-${idx + 1}`}>
-              <small>#{row.rank}</small>
-              <strong>
-                {row.extra ? `[${row.extra}] ` : ""}
-                {row.label}
-              </strong>
-              <span>{row.score} pts</span>
+        <section className="ranking-podium ranking-podium-v2">
+          {podium.map(({ row, position }) => (
+            <article key={`podium_${row?.id}`} className={`ranking-podium-card pos-${position}`}>
+              <div className="ranking-podium-topline">
+                <small>#{row?.rank}</small>
+                <span>{metricMeta[metric].label}</span>
+              </div>
+              <div className="ranking-podium-identity">
+                {entityTab === "players" ? (
+                  <span className="ranking-avatar ranking-avatar-lg">
+                    <img src={row?.avatarUrl || DEFAULT_PROFILE_AVATAR} alt={row?.label || ""} />
+                  </span>
+                ) : (
+                  <span className="ranking-avatar ranking-avatar-lg ranking-avatar-alliance">{row?.allianceBadge}</span>
+                )}
+                <div className="ranking-name-stack">
+                  <strong>
+                    {row?.tag ? `[${row.tag}] ` : ""}
+                    {row?.label}
+                  </strong>
+                  <small>{row?.metaLine}</small>
+                </div>
+              </div>
+              <span>{row?.activeScore} pts</span>
+              <em>
+                {row?.supportLabel}: {row?.supportValue}
+              </em>
             </article>
           ))}
         </section>
@@ -15405,9 +15788,9 @@ function RankingScreen({
       <section className="ranking-table-wrap ranking-table-wrap-v2">
         <div className="ranking-table-head">
           <span>#</span>
-          <span>{tab === "players" ? l("Joueur", "Player") : l("Alliance", "Alliance")}</span>
-          <span>{l("Score", "Score")}</span>
-          <span>{subscoreLabel}</span>
+          <span>{entityTab === "players" ? l("Joueur", "Player") : l("Alliance", "Alliance")}</span>
+          <span>{metricMeta[metric].label}</span>
+          <span>{supportColumnLabel}</span>
         </div>
         {rows.length === 0 ? (
           <p className="ranking-empty">{loading ? l("Chargement...", "Loading...") : l("Aucune donnee.", "No data.")}</p>
@@ -15416,22 +15799,28 @@ function RankingScreen({
             <div key={row.id} className={`ranking-row rank-${Math.min(3, Math.max(1, row.rank))}`}>
               <span className="rank">#{row.rank}</span>
               <span className="label">
-                <strong>
-                  {row.extra ? `[${row.extra}] ` : ""}
-                  {row.label}
-                </strong>
-                {tab === "alliances" ? (
-                  <small>
-                    {l("Membres", "Members")}: {row.memberCount.toLocaleString()}
-                  </small>
-                ) : (
-                  <small>
-                    {l("Profil", "Profile")}: {row.id.slice(0, 10)}
-                  </small>
-                )}
+                <span className="ranking-row-media">
+                  {entityTab === "players" ? (
+                    <span className="ranking-avatar">
+                      <img src={row.avatarUrl || DEFAULT_PROFILE_AVATAR} alt={row.label} />
+                    </span>
+                  ) : (
+                    <span className="ranking-avatar ranking-avatar-alliance">{row.allianceBadge}</span>
+                  )}
+                  <span className="ranking-name-stack">
+                    <strong>
+                      {row.tag ? `[${row.tag}] ` : ""}
+                      {row.label}
+                    </strong>
+                    <small>{row.metaLine}</small>
+                  </span>
+                </span>
               </span>
-              <strong className="score">{row.score}</strong>
-              <span className="subscore">{row.subscore}</span>
+              <strong className="score">{row.activeScore}</strong>
+              <span className="subscore">
+                <small>{row.supportLabel}</small>
+                <strong>{row.supportValue}</strong>
+              </span>
             </div>
           ))
         )}
