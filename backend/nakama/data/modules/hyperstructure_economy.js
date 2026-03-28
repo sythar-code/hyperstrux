@@ -1,4 +1,4 @@
-﻿// Runtime JS for Nakama. Mirrors hyperstructure_economy.ts logic.
+// Runtime JS for Nakama. Mirrors hyperstructure_economy.ts logic.
 
 var ECONOMY_COLLECTION = "hyperstructure";
 var ECONOMY_KEY = "economy_state_v1";
@@ -5302,6 +5302,28 @@ function getProducedResources(state) {
   return out;
 }
 
+function getChestEligibleResources(state) {
+  var produced = getProducedResources(state);
+  if (produced.length > 0) return produced;
+
+  var fallbackIds = ["carbone", "titane"];
+  var fallback = [];
+  for (var i = 0; i < fallbackIds.length; i++) {
+    var resourceId = fallbackIds[i];
+    var def = BUILDING_DEFS[resourceId];
+    if (!def) continue;
+    var base = Math.max(1, Math.floor(Number(def.baseProductionPerSec || 0)));
+    fallback.push({
+      resourceId: resourceId,
+      tier: RESOURCE_TIERS[resourceId] || 10,
+      perSecond: base,
+      perHour: base * 3600,
+      level: Math.max(0, Math.floor(Number(state.buildings[resourceId] && state.buildings[resourceId].level || 0)))
+    });
+  }
+  return fallback;
+}
+
 function averageBuildingLevel(state) {
   var total = 0;
   var count = 0;
@@ -5349,8 +5371,8 @@ function calculateChestRewards(state, chestType, quantity) {
   var q = sanitizePositiveInt(quantity);
   if (q <= 0) throw new Error("Chest quantity must be > 0.");
 
-  var produced = getProducedResources(state);
-  if (produced.length === 0) throw new Error("No produced resources available for chest rewards.");
+  var produced = getChestEligibleResources(state);
+  if (produced.length === 0) throw new Error("No eligible resources available for chest rewards.");
 
   var avgLevel = averageBuildingLevel(state);
   var avgProductionHour = averageProductionPerHour(produced);
@@ -9786,7 +9808,7 @@ function rpcInventoryUseItem(ctx, logger, nk, payload) {
   }
 
   if (itemDef.category === "RESOURCE_CRATE") {
-    var chest = openChest(nk, userId, itemId, quantity, _logger);
+    var chest = openChest(nk, userId, itemId, quantity, logger);
     return JSON.stringify({
       ok: true,
       used: {
@@ -14459,6 +14481,136 @@ function rpcRankingGetState(ctx, logger, nk, payload) {
   });
 }
 
+function rpcPlayerPublicProfile(ctx, logger, nk, payload) {
+  requireUserId(ctx);
+  var body = parsePayload(payload);
+  var targetRaw = String(body.userId || body.username || body.target || "").trim();
+  if (!targetRaw) throw new Error("Missing target.");
+
+  var target = resolveInboxRecipient(nk, targetRaw);
+  var targetUserId = String(target.userId || "").trim();
+  if (!targetUserId || targetUserId === SYSTEM_USER_ID) throw new Error("User not found.");
+
+  var userRows = queryAdminUsers(nk, targetUserId, 5);
+  var userRow = null;
+  for (var i = 0; i < userRows.length; i++) {
+    if (String((userRows[i] && userRows[i].id) || "") === targetUserId) {
+      userRow = userRows[i];
+      break;
+    }
+  }
+  if (!userRow || normalizeAdminDisabledAt(userRow.disable_time)) {
+    throw new Error("User not found.");
+  }
+
+  var targetUsername = String(target.username || userRow.username || userRow.display_name || targetUserId).trim() || targetUserId;
+  var economy = readEconomyStateForRanking(nk, targetUserId, body, logger);
+  var rankingProgress = readRankingProgressState(nk, targetUserId).state || defaultRankingProgressState();
+  var scoringState = buildScoreComputationState(economy, rankingProgress);
+  var liveStats = computeAllianceMemberLiveStats(scoringState, targetUserId, targetUsername);
+  var points = syncPlayerPoints(nk, logger, targetUserId, targetUsername, economy, null);
+
+  var builtModules = 0;
+  var totalBuildingLevels = 0;
+  for (var buildingId in economy.buildings) {
+    if (!Object.prototype.hasOwnProperty.call(economy.buildings, buildingId)) continue;
+    var buildingLevel = sanitizePositiveInt(((economy.buildings[buildingId] || {}).level) || 0);
+    if (buildingLevel <= 0) continue;
+    builtModules += 1;
+    totalBuildingLevels += buildingLevel;
+  }
+
+  var rankRows = {
+    total: safeLeaderboardRecordsList(nk, logger, LEADERBOARD_PLAYER_TOTAL, 1, targetUserId),
+    military: safeLeaderboardRecordsList(nk, logger, LEADERBOARD_PLAYER_MILITARY, 1, targetUserId),
+    economy: safeLeaderboardRecordsList(nk, logger, LEADERBOARD_PLAYER_ECONOMY, 1, targetUserId),
+    research: safeLeaderboardRecordsList(nk, logger, LEADERBOARD_PLAYER_RESEARCH, 1, targetUserId)
+  };
+  var ranks = {
+    total: rankRows.total.ownerRecords && rankRows.total.ownerRecords[0] ? sanitizePositiveInt(rankRows.total.ownerRecords[0].rank || 0) : 0,
+    military: rankRows.military.ownerRecords && rankRows.military.ownerRecords[0] ? sanitizePositiveInt(rankRows.military.ownerRecords[0].rank || 0) : 0,
+    economy: rankRows.economy.ownerRecords && rankRows.economy.ownerRecords[0] ? sanitizePositiveInt(rankRows.economy.ownerRecords[0].rank || 0) : 0,
+    research: rankRows.research.ownerRecords && rankRows.research.ownerRecords[0] ? sanitizePositiveInt(rankRows.research.ownerRecords[0].rank || 0) : 0
+  };
+
+  var commanderRead = readStorageObject(nk, PROFILE_COMMANDER_COLLECTION, PROFILE_COMMANDER_KEY, targetUserId);
+  var commanderState = commanderRead.state && typeof commanderRead.state === "object" ? commanderRead.state : {};
+  var commanderAvatarUrl = String(commanderState.avatarUrl || userRow.avatar_url || "").trim();
+  var commanderId = String(commanderState.commanderId || "").trim();
+
+  var playerProfileRead = readPlayerProfile(nk, targetUserId);
+  var legacyProfileRead = readAllianceProfile(nk, targetUserId);
+  var playerProfile = playerProfileRead.state || defaultPlayerProfile();
+  var legacyProfile = legacyProfileRead.state || defaultAllianceProfile();
+  var allianceId = String(playerProfile.allianceId || legacyProfile.allianceId || "").trim();
+  var alliancePublic = null;
+  if (allianceId) {
+    var alliancePublicRead = readStorageObject(nk, ALLIANCES_PUBLIC_COLLECTION, allianceId, "");
+    var alliancePublicState = alliancePublicRead.state;
+    if (!alliancePublicState) {
+      var allianceRead = readAllianceState(nk, allianceId);
+      if (allianceRead.state) {
+        alliancePublicState = buildAlliancePublicState(
+          allianceRead.state,
+          getAllianceMemberList(allianceRead.state, allianceRead.state.leaderUserId || "", nowTs())
+        );
+      }
+    }
+    if (alliancePublicState) {
+      var allianceStats = alliancePublicState.publicStats && typeof alliancePublicState.publicStats === "object"
+        ? alliancePublicState.publicStats
+        : {};
+      alliancePublic = {
+        id: String(alliancePublicState.id || allianceId),
+        name: String(alliancePublicState.name || allianceId),
+        tag: String(alliancePublicState.tag || ""),
+        memberCount: sanitizePositiveInt(alliancePublicState.memberCount || 0),
+        bastionLevel: sanitizePositiveInt(alliancePublicState.bastionLevel || 0),
+        techLevels: sanitizePositiveInt(alliancePublicState.techLevels || 0),
+        isRecruiting: alliancePublicState.isRecruiting !== false,
+        pointsTotal: sanitizePositiveInt(allianceStats.pointsTotauxAlliance || 0),
+        pointsEconomy: sanitizePositiveInt(allianceStats.pointsEconomiquesAlliance || 0),
+        pointsResearch: sanitizePositiveInt(allianceStats.pointsRechercheAlliance || 0),
+        pointsMilitary: sanitizePositiveInt(allianceStats.pointsMilitairesAlliance || 0)
+      };
+    }
+  }
+
+  var position = mapPlayerToPlanetCoordinates(targetUserId);
+
+  return JSON.stringify({
+    ok: true,
+    player: {
+      userId: targetUserId,
+      username: targetUsername,
+      displayName: String((userRow && userRow.display_name) || ""),
+      avatarUrl: String((userRow && userRow.avatar_url) || ""),
+      createdAt: String((userRow && userRow.create_time) || "")
+    },
+    commander: {
+      commanderId: commanderId,
+      avatarUrl: commanderAvatarUrl
+    },
+    position: {
+      x: sanitizePositiveInt(position.x || 0),
+      y: sanitizePositiveInt(position.y || 0)
+    },
+    scores: points,
+    ranks: ranks,
+    stats: {
+      productionPerHour: Math.max(0, Math.floor(Number(liveStats.productionPerSec || 0) * 3600)),
+      shipCount: sanitizePositiveInt(liveStats.shipCount || 0),
+      defenseCount: sanitizePositiveInt(liveStats.defenseCount || 0),
+      storageCapacity: sanitizePositiveInt(liveStats.storageCapacity || 0),
+      builtModules: builtModules,
+      totalBuildingLevels: totalBuildingLevels,
+      activeConstruction: Boolean(economy.building_construct_slot || economy.building_upgrade_slot),
+      activeResearch: Boolean(rankingProgress && rankingProgress.researchJob)
+    },
+    alliance: alliancePublic
+  });
+}
+
 function InitModule(_ctx, logger, _nk, initializer) {
   safeLeaderboardCreate(_nk, logger, LEADERBOARD_PLAYER_TOTAL);
   safeLeaderboardCreate(_nk, logger, LEADERBOARD_PLAYER_MILITARY);
@@ -14487,6 +14639,7 @@ function InitModule(_ctx, logger, _nk, initializer) {
   initializer.registerRpc("getInventoryMeta", rpcInventoryMeta);
   initializer.registerRpc("useItem", rpcInventoryUseItem);
   initializer.registerRpc("ranking_get_state", rpcRankingGetState);
+  initializer.registerRpc("rpc_player_public_profile", rpcPlayerPublicProfile);
   initializer.registerRpc("ranking_sync_progress", rpcRankingSyncProgress);
   initializer.registerRpc("rpc_market_get_wallet", rpcMarketGetWallet);
   initializer.registerRpc("rpc_market_get_book", rpcMarketGetBook);
@@ -14582,4 +14735,5 @@ if (typeof module !== "undefined" && module.exports) {
     }
   };
 }
+
 

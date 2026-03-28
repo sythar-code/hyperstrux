@@ -2,6 +2,7 @@ import { Client, Session } from "@heroiclabs/nakama-js";
 import * as THREE from "three";
 import AllianceCommandScreen from "./AllianceCommandScreen";
 import PopulationCommandScreen from "./PopulationCommandScreen";
+import PlayerProfileScreen, { type PublicPlayerProfileView } from "./PlayerProfileScreen";
 import ResourceCommandScreen from "./ResourceCommandScreen";
 import TechnologyCommandScreen from "./TechnologyCommandScreen";
 import WikiKnowledgeScreen from "./WikiKnowledgeScreen";
@@ -337,6 +338,7 @@ const SAVE_KEY_USER_PREFIX = "hsg_vault_state_v3";
 const SAVE_KEY_LEGACY_OWNER_KEY = "hsg_vault_state_v2_owner";
 const AUTH_SESSION_KEY = "hsg_nakama_session_v1";
 const UI_SCREEN_KEY = "hsg_ui_screen_v1";
+const PUBLIC_PLAYER_TARGET_KEY = "hsg_public_player_target_v1";
 const PROFILE_EMAIL_DRAFT_KEY = "hsg_profile_email_draft_v1";
 const PROFILE_COMMANDER_COLLECTION = "hyperstructure_profile";
 const PROFILE_COMMANDER_KEY = "commander_state_v1";
@@ -688,7 +690,8 @@ type UIScreen =
   | "inventory"
   | "technology"
   | "wiki"
-  | "inbox";
+  | "inbox"
+  | "player_profile";
 type UILanguage = "fr" | "en";
 
 type RoomConfig = {
@@ -4906,10 +4909,29 @@ export default function App() {
       raw === "inventory" ||
       raw === "technology" ||
       raw === "wiki" ||
-      raw === "inbox"
+      raw === "inbox" ||
+      raw === "player_profile"
       ? raw
       : "home";
   });
+  const [publicPlayerTarget, setPublicPlayerTarget] = useState<{ userId: string; username: string } | null>(() => {
+    const parsed = parseJsonObject(localStorage.getItem(PUBLIC_PLAYER_TARGET_KEY));
+    const userId = String(parsed?.userId || "").trim();
+    if (!userId) return null;
+    return {
+      userId,
+      username: String(parsed?.username || "").trim()
+    };
+  });
+  const [publicPlayerProfile, setPublicPlayerProfile] = useState<PublicPlayerProfileView | null>(null);
+  const [publicPlayerProfileLoading, setPublicPlayerProfileLoading] = useState(false);
+  const [publicPlayerProfileError, setPublicPlayerProfileError] = useState("");
+  const [mapFocusPlayerTarget, setMapFocusPlayerTarget] = useState<{
+    userId: string;
+    username: string;
+    x: number;
+    y: number;
+  } | null>(null);
 
   const [rooms, setRooms] = useState<Room[]>(defaultRooms);
   const [constructionJob, setConstructionJob] = useState<ConstructionJob | null>(null);
@@ -5020,6 +5042,31 @@ export default function App() {
     () => (session?.user_id ? `hsg_map_cache_v1_${String(session.user_id)}` : ""),
     [session?.user_id]
   );
+
+  const openPublicPlayerProfile = useCallback((target: { userId?: string | null; username?: string | null } | null | undefined) => {
+    const userId = String(target?.userId || "").trim();
+    if (!userId) return;
+    setPublicPlayerTarget({
+      userId,
+      username: String(target?.username || "").trim()
+    });
+    setScreen("player_profile");
+  }, []);
+
+  const closePublicPlayerProfile = useCallback(() => {
+    setScreen("ranking");
+  }, []);
+  const openPublicPlayerOnMap = useCallback((target: { userId: string; username: string; x: number; y: number }) => {
+    const userId = String(target?.userId || "").trim();
+    if (!userId) return;
+    setMapFocusPlayerTarget({
+      userId,
+      username: String(target?.username || "").trim() || userId.slice(0, 8),
+      x: Math.max(0, Math.floor(Number(target?.x ?? 0))),
+      y: Math.max(0, Math.floor(Number(target?.y ?? 0)))
+    });
+    setScreen("starmap");
+  }, []);
   useEffect(() => {
     if (!mapWarmCacheKey) {
       setPersistedMapCache(null);
@@ -5581,6 +5628,46 @@ export default function App() {
     }
   };
 
+  const loadPublicPlayerProfile = useCallback(async (silent = false) => {
+    if (!session || !publicPlayerTarget?.userId) {
+      setPublicPlayerProfile(null);
+      setPublicPlayerProfileError("");
+      return;
+    }
+
+    if (!silent) setPublicPlayerProfileLoading(true);
+    setPublicPlayerProfileError("");
+    try {
+      const rpc = await client.rpc(
+        session,
+        "rpc_player_public_profile",
+        JSON.stringify({
+          userId: publicPlayerTarget.userId,
+          username: publicPlayerTarget.username || undefined
+        })
+      );
+      const parsed = parseJsonObject((rpc as any)?.payload ?? rpc);
+      const nested = parseJsonObject(parsed?.payload);
+      const source = Object.keys(nested).length > 0 ? nested : parsed;
+      setPublicPlayerProfile(source as PublicPlayerProfileView);
+    } catch (err) {
+      if (isUnauthorizedError(err)) {
+        invalidateSession();
+        return;
+      }
+      const details = extractRpcErrorMessage(err);
+      const baseMsg = l("Impossible de charger cette fiche joueur.", "Unable to load this player profile.");
+      setPublicPlayerProfile(null);
+      setPublicPlayerProfileError(details ? `${baseMsg} (${details})` : baseMsg);
+      if (import.meta.env.DEV) {
+        // eslint-disable-next-line no-console
+        console.error("public player profile load error", err);
+      }
+    } finally {
+      if (!silent) setPublicPlayerProfileLoading(false);
+    }
+  }, [client, invalidateSession, publicPlayerTarget?.userId, publicPlayerTarget?.username, session, uiLanguage]);
+
   const syncRankingProgress = async (researchPointsOverride?: number) => {
     if (!session) return;
     if (rankingSyncInFlightRef.current) return;
@@ -5937,6 +6024,14 @@ export default function App() {
   }, [screen]);
 
   useEffect(() => {
+    if (publicPlayerTarget?.userId) {
+      localStorage.setItem(PUBLIC_PLAYER_TARGET_KEY, JSON.stringify(publicPlayerTarget));
+    } else {
+      localStorage.removeItem(PUBLIC_PLAYER_TARGET_KEY);
+    }
+  }, [publicPlayerTarget]);
+
+  useEffect(() => {
     localStorage.setItem(UI_LANG_KEY, uiLanguage);
   }, [uiLanguage]);
 
@@ -6218,6 +6313,20 @@ export default function App() {
     return () => clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [screen, session]);
+
+  useEffect(() => {
+    if (screen !== "player_profile") return;
+    if (!publicPlayerTarget?.userId) {
+      setScreen("ranking");
+      return;
+    }
+    if (!session) {
+      setPublicPlayerProfile(null);
+      setPublicPlayerProfileError("");
+      return;
+    }
+    void loadPublicPlayerProfile(false);
+  }, [loadPublicPlayerProfile, publicPlayerTarget?.userId, screen, session]);
 
   useEffect(() => {
     if (!session) {
@@ -7866,6 +7975,8 @@ export default function App() {
         carbonProductionPerSec={Number(resourceRates.carbone ?? 0)}
         initialMapCache={persistedMapCache}
         onPersistMapCache={setPersistedMapCache}
+        focusPlayerTarget={mapFocusPlayerTarget}
+        onFocusPlayerTargetHandled={() => setMapFocusPlayerTarget(null)}
         onGrantCredits={(amount, claimId) => {
           void grantCreditsToServer(amount, claimId);
         }}
@@ -8079,6 +8190,19 @@ export default function App() {
             players={rankingPlayers}
             alliances={rankingAlliances}
             onRefresh={() => void loadRankingState()}
+            onOpenPlayer={openPublicPlayerProfile}
+          />
+        </>
+      ) : screen === "player_profile" ? (
+        <>
+          {renderUnifiedHeader()}
+          <PlayerProfileScreen
+            language={uiLanguage}
+            loading={publicPlayerProfileLoading}
+            error={publicPlayerProfileError}
+            profile={publicPlayerProfile}
+            onBack={closePublicPlayerProfile}
+            onOpenMap={openPublicPlayerOnMap}
           />
         </>
       ) : screen === "inventory" ? (
@@ -8864,6 +8988,8 @@ function SectorMapScreen({
   carbonProductionPerSec,
   initialMapCache,
   onPersistMapCache,
+  focusPlayerTarget,
+  onFocusPlayerTargetHandled,
   onMapStateSync,
   onGrantCredits
 }: {
@@ -8878,6 +9004,8 @@ function SectorMapScreen({
   carbonProductionPerSec: number;
   initialMapCache?: Record<string, any> | null;
   onPersistMapCache?: (payload: Record<string, any> | null) => void;
+  focusPlayerTarget?: { userId: string; username: string; x: number; y: number } | null;
+  onFocusPlayerTargetHandled?: () => void;
   onMapStateSync?: (payload: {
     resources?: Partial<Record<ResourceId, number>>;
     credits?: number;
@@ -9576,6 +9704,27 @@ function SectorMapScreen({
       if (frameB) window.cancelAnimationFrame(frameB);
     };
   }, [currentUserId, focusMyPosition, selfPlanetCoords.x, selfPlanetCoords.y, session]);
+
+  useEffect(() => {
+    if (!active || !focusPlayerTarget) return;
+    const didCenter = centerCameraOnCoords(
+      {
+        x: Math.max(0, Math.floor(Number(focusPlayerTarget.x ?? 0))),
+        y: Math.max(0, Math.floor(Number(focusPlayerTarget.y ?? 0)))
+      },
+      Math.max(zoom, 0.75)
+    );
+    if (!didCenter) return;
+    setFieldPopupId(null);
+    setSelectedEntity(null);
+    setActionMode("none");
+    if (focusPlayerTarget.userId !== String(currentUserId || "").trim()) {
+      setPlanetPopupPlayerId(focusPlayerTarget.userId);
+    } else {
+      setPlanetPopupPlayerId(null);
+    }
+    onFocusPlayerTargetHandled?.();
+  }, [active, centerCameraOnCoords, currentUserId, focusPlayerTarget, onFocusPlayerTargetHandled, zoom]);
 
   const mapNowTs = useMemo(() => {
     if (!mapServerSync) return Math.floor(mapNowMs / 1000);
@@ -15438,7 +15587,8 @@ function RankingScreen({
   playerRanks,
   players,
   alliances,
-  onRefresh
+  onRefresh,
+  onOpenPlayer
 }: {
   language: UILanguage;
   client: Client;
@@ -15452,6 +15602,7 @@ function RankingScreen({
   players: RankingBoards;
   alliances: RankingBoards;
   onRefresh: () => void;
+  onOpenPlayer: (target: { userId: string; username: string }) => void;
 }) {
   const l = (fr: string, en: string) => (language === "en" ? en : fr);
   const [entityTab, setEntityTab] = useState<"players" | "alliances">("players");
@@ -15597,6 +15748,7 @@ function RankingScreen({
 
       return {
         id: entityTab === "alliances" ? String(allianceId || `alliance_${rank}`) : String(ownerId || `player_${rank}`),
+        userId: ownerId,
         rank,
         label,
         tag,
@@ -15762,17 +15914,34 @@ function RankingScreen({
               </div>
               <div className="ranking-podium-identity">
                 {entityTab === "players" ? (
-                  <span className="ranking-avatar ranking-avatar-lg">
-                    <img src={row?.avatarUrl || DEFAULT_PROFILE_AVATAR} alt={row?.label || ""} />
-                  </span>
+                  <button
+                    type="button"
+                    className="ranking-identity-trigger"
+                    onClick={() => row?.userId ? onOpenPlayer({ userId: row.userId, username: row.label }) : undefined}
+                  >
+                    <span className="ranking-avatar ranking-avatar-lg">
+                      <img src={row?.avatarUrl || DEFAULT_PROFILE_AVATAR} alt={row?.label || ""} />
+                    </span>
+                  </button>
                 ) : (
                   <span className="ranking-avatar ranking-avatar-lg ranking-avatar-alliance">{row?.allianceBadge}</span>
                 )}
                 <div className="ranking-name-stack">
-                  <strong>
-                    {row?.tag ? `[${row.tag}] ` : ""}
-                    {row?.label}
-                  </strong>
+                  {entityTab === "players" ? (
+                    <button
+                      type="button"
+                      className="ranking-name-button"
+                      onClick={() => row?.userId ? onOpenPlayer({ userId: row.userId, username: row.label }) : undefined}
+                    >
+                      {row?.tag ? `[${row.tag}] ` : ""}
+                      {row?.label}
+                    </button>
+                  ) : (
+                    <strong>
+                      {row?.tag ? `[${row.tag}] ` : ""}
+                      {row?.label}
+                    </strong>
+                  )}
                   <small>{row?.metaLine}</small>
                 </div>
               </div>
@@ -15801,17 +15970,34 @@ function RankingScreen({
               <span className="label">
                 <span className="ranking-row-media">
                   {entityTab === "players" ? (
-                    <span className="ranking-avatar">
-                      <img src={row.avatarUrl || DEFAULT_PROFILE_AVATAR} alt={row.label} />
-                    </span>
+                    <button
+                      type="button"
+                      className="ranking-identity-trigger"
+                      onClick={() => row.userId ? onOpenPlayer({ userId: row.userId, username: row.label }) : undefined}
+                    >
+                      <span className="ranking-avatar">
+                        <img src={row.avatarUrl || DEFAULT_PROFILE_AVATAR} alt={row.label} />
+                      </span>
+                    </button>
                   ) : (
                     <span className="ranking-avatar ranking-avatar-alliance">{row.allianceBadge}</span>
                   )}
                   <span className="ranking-name-stack">
-                    <strong>
-                      {row.tag ? `[${row.tag}] ` : ""}
-                      {row.label}
-                    </strong>
+                    {entityTab === "players" ? (
+                      <button
+                        type="button"
+                        className="ranking-name-button"
+                        onClick={() => row.userId ? onOpenPlayer({ userId: row.userId, username: row.label }) : undefined}
+                      >
+                        {row.tag ? `[${row.tag}] ` : ""}
+                        {row.label}
+                      </button>
+                    ) : (
+                      <strong>
+                        {row.tag ? `[${row.tag}] ` : ""}
+                        {row.label}
+                      </strong>
+                    )}
                     <small>{row.metaLine}</small>
                   </span>
                 </span>
