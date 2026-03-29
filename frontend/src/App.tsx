@@ -342,6 +342,7 @@ const PUBLIC_PLAYER_TARGET_KEY = "hsg_public_player_target_v1";
 const PROFILE_EMAIL_DRAFT_KEY = "hsg_profile_email_draft_v1";
 const PROFILE_COMMANDER_COLLECTION = "hyperstructure_profile";
 const PROFILE_COMMANDER_KEY = "commander_state_v1";
+const PROFILE_SECURE_VAULT_KEY = "vault_state_v1";
 const UI_LANG_KEY = "hsg_ui_lang_v1";
 const INVENTORY_UI_NOTIFS_KEY = "hsg_inventory_notifs_v1";
 const SCORE_DISPLAY_DIVISOR = 50000;
@@ -1730,6 +1731,18 @@ const findAutoBuildSlotForRooms = (sourceRooms: Room[], type: RoomType): { x: nu
   return null;
 };
 
+const canPlaceRoomWithoutOverlap = (
+  placedRooms: Room[],
+  candidate: Pick<Room, "x" | "y" | "width" | "type">
+): boolean => {
+  const width = ROOM_CONFIG[candidate.type].width;
+  const x = Math.max(0, Math.floor(Number(candidate.x ?? 0)));
+  const y = Math.max(0, Math.floor(Number(candidate.y ?? 0)));
+  if (x + width > GRID_WIDTH) return false;
+
+  return !placedRooms.some((room) => room.y === y && x < room.x + room.width && x + width > room.x);
+};
+
 const areRoomsEqual = (left: Room[], right: Room[]): boolean =>
   left.length === right.length &&
   left.every((room, index) => {
@@ -1773,7 +1786,15 @@ const syncRoomsWithServerBuildings = (
     if (level <= 0) continue;
 
     const existing = baseRooms.find((room) => room.type === type);
-    if (existing) {
+    if (
+      existing &&
+      canPlaceRoomWithoutOverlap(next, {
+        x: existing.x,
+        y: existing.y,
+        width: existing.width,
+        type
+      })
+    ) {
       next.push({ ...existing, width: ROOM_CONFIG[type].width, level });
       continue;
     }
@@ -4946,6 +4967,7 @@ export default function App() {
   const [activeRoom, setActiveRoom] = useState<Room | null>(null);
   const [technologyLevels, setTechnologyLevels] = useState<Record<TechnologyId, number>>(defaultTechnologyLevels);
   const [researchJob, setResearchJob] = useState<ResearchJob | null>(null);
+  const [technologySnapshotUpdatedAt, setTechnologySnapshotUpdatedAt] = useState<number>(0);
 
   const [isPanning, setIsPanning] = useState(false);
   const [lastMouse, setLastMouse] = useState({ x: 0, y: 0 });
@@ -5750,6 +5772,7 @@ export default function App() {
       setDraggedRoom(null);
       setTechnologyLevels(defaultTechnologyLevels());
       setResearchJob(null);
+      setTechnologySnapshotUpdatedAt(0);
       setPopulationState(defaultPopulationState());
       setMainMissionState(defaultMainMissionState());
       setUnlockedResourceIds(BASE_UNLOCKED_RESOURCE_IDS);
@@ -5771,6 +5794,7 @@ export default function App() {
 
       const scopedSaveKey = vaultStorageKeyForUser(userId);
       let localParsed: any = null;
+      let serverParsed: any = null;
 
       try {
         let raw = localStorage.getItem(scopedSaveKey);
@@ -5794,6 +5818,22 @@ export default function App() {
         localParsed = null;
       }
 
+      try {
+        const serverRead = await client.readStorageObjects(session, {
+          object_ids: [{ collection: PROFILE_COMMANDER_COLLECTION, key: PROFILE_SECURE_VAULT_KEY, user_id: userId }]
+        });
+        const stored = serverRead.objects?.[0]?.value;
+        if (stored && typeof stored === "object") {
+          serverParsed = stored;
+        }
+      } catch (err) {
+        if (isUnauthorizedError(err)) {
+          invalidateSession();
+          return;
+        }
+        serverParsed = null;
+      }
+
       const parsed = (localParsed && typeof localParsed === "object" ? localParsed : null) as
         | {
             rooms?: Array<Omit<Room, "type"> & { type: string }>;
@@ -5804,13 +5844,23 @@ export default function App() {
             constructionJob?: ConstructionJob | null;
             technologyLevels?: Partial<Record<TechnologyId, number>>;
             researchJob?: ResearchJob | null;
+            technologyUpdatedAt?: number;
             populationState?: Partial<PopulationState>;
             mainMissionState?: Partial<MainMissionState>;
             updatedAt?: number;
           }
         | null;
 
-      if (!parsed) {
+      const secureParsed = (serverParsed && typeof serverParsed === "object" ? serverParsed : null) as
+        | {
+            technologyLevels?: Partial<Record<TechnologyId, number>>;
+            researchJob?: ResearchJob | null;
+            technologyUpdatedAt?: number;
+            updatedAt?: number;
+          }
+        | null;
+
+      if (!parsed && !secureParsed) {
         if (!canceled) {
           setVaultHydrated(true);
           setVaultHydratedUserId(userId);
@@ -5819,17 +5869,44 @@ export default function App() {
       }
 
       try {
-        if (parsed.technologyLevels && typeof parsed.technologyLevels === "object") {
+        const localTechnologyUpdatedAt =
+          parsed && typeof parsed.technologyLevels === "object"
+            ? Math.max(
+                0,
+                Math.floor(Number(parsed.technologyUpdatedAt ?? parsed.updatedAt ?? 0))
+              )
+            : 0;
+        const serverTechnologyUpdatedAt =
+          secureParsed && typeof secureParsed.technologyLevels === "object"
+            ? Math.max(
+                0,
+                Math.floor(Number(secureParsed.technologyUpdatedAt ?? secureParsed.updatedAt ?? 0))
+              )
+            : 0;
+        const useServerTechnologySnapshot =
+          Boolean(secureParsed && typeof secureParsed.technologyLevels === "object") &&
+          serverTechnologyUpdatedAt >= localTechnologyUpdatedAt;
+        const technologySnapshotSource =
+          useServerTechnologySnapshot
+            ? secureParsed
+            : parsed && typeof parsed.technologyLevels === "object"
+              ? parsed
+              : secureParsed;
+
+        if (technologySnapshotSource?.technologyLevels && typeof technologySnapshotSource.technologyLevels === "object") {
           const restoredLevels = defaultTechnologyLevels();
           for (const def of TECHNOLOGY_DEFS) {
-            const rawLevel = Number(parsed.technologyLevels[def.id] ?? 0);
+            const rawLevel = Number(technologySnapshotSource.technologyLevels[def.id] ?? 0);
             const safe = Math.max(0, Math.floor(Number.isFinite(rawLevel) ? rawLevel : 0));
             restoredLevels[def.id] = def.maxLevel ? Math.min(def.maxLevel, safe) : safe;
           }
           setTechnologyLevels(restoredLevels);
+          setTechnologySnapshotUpdatedAt(
+            useServerTechnologySnapshot ? serverTechnologyUpdatedAt : localTechnologyUpdatedAt
+          );
         }
 
-        if (Array.isArray(parsed.rooms)) {
+        if (Array.isArray(parsed?.rooms)) {
           const sanitizedRooms = parsed.rooms.filter((room) => isRoomType(room.type)).map((room) => ({ ...room, type: room.type as RoomType }));
           if (sanitizedRooms.length > 0) {
             const hasCarbone = sanitizedRooms.some((r) => r.type === "carbone");
@@ -5873,14 +5950,20 @@ export default function App() {
           }
         }
 
-        if (parsed.researchJob && typeof parsed.researchJob === "object" && typeof parsed.researchJob.endAt === "number") {
-          const techId = String(parsed.researchJob.technologyId ?? "") as TechnologyId;
+        const researchSnapshotSource =
+          useServerTechnologySnapshot && secureParsed?.researchJob && typeof secureParsed.researchJob === "object"
+            ? secureParsed
+            : parsed;
+        if (researchSnapshotSource?.researchJob && typeof researchSnapshotSource.researchJob === "object" && typeof researchSnapshotSource.researchJob.endAt === "number") {
+          const techId = String(researchSnapshotSource.researchJob.technologyId ?? "") as TechnologyId;
           if (techId in TECHNOLOGY_BY_ID) {
-            setResearchJob(parsed.researchJob as ResearchJob);
+            setResearchJob(researchSnapshotSource.researchJob as ResearchJob);
           }
+        } else if (useServerTechnologySnapshot) {
+          setResearchJob(null);
         }
 
-        if (parsed.populationState && typeof parsed.populationState === "object") {
+        if (parsed?.populationState && typeof parsed.populationState === "object") {
           const fallback = defaultPopulationState();
           const hasOnboardingProtectionUntil =
             typeof parsed.populationState.onboardingProtectionUntil === "number" &&
@@ -5937,7 +6020,7 @@ export default function App() {
           setPopulationState(nextPopulation);
         }
 
-        if (parsed.mainMissionState && typeof parsed.mainMissionState === "object") {
+        if (parsed?.mainMissionState && typeof parsed.mainMissionState === "object") {
           const fallback = defaultMainMissionState();
           const rawActive = Array.isArray(parsed.mainMissionState.activeMissionIds) ? parsed.mainMissionState.activeMissionIds : [];
           const activeMissionIds = rawActive
@@ -5978,10 +6061,10 @@ export default function App() {
           });
         }
 
-        if (typeof parsed.credits === "number") setCredits(parsed.credits);
-        else if (typeof parsed.caps === "number") setCredits(parsed.caps);
-        if (typeof parsed.zoom === "number") setZoom(parsed.zoom);
-        if (parsed.pan && typeof parsed.pan.x === "number" && typeof parsed.pan.y === "number") setPan(parsed.pan);
+        if (typeof parsed?.credits === "number") setCredits(parsed.credits);
+        else if (typeof parsed?.caps === "number") setCredits(parsed.caps);
+        if (typeof parsed?.zoom === "number") setZoom(parsed.zoom);
+        if (parsed?.pan && typeof parsed.pan.x === "number" && typeof parsed.pan.y === "number") setPan(parsed.pan);
       } catch {
         // ignore malformed vault payload
       } finally {
@@ -6011,13 +6094,14 @@ export default function App() {
       pan,
       constructionJob,
       technologyLevels,
+      technologyUpdatedAt: technologySnapshotUpdatedAt,
       researchJob,
       populationState,
       mainMissionState,
       updatedAt: Date.now()
     };
     localStorage.setItem(scopedSaveKey, JSON.stringify(snapshotPayload));
-  }, [constructionJob, credits, mainMissionState, pan, populationState, researchJob, rooms, session, technologyLevels, vaultHydrated, vaultHydratedUserId, zoom]);
+  }, [constructionJob, credits, mainMissionState, pan, populationState, researchJob, rooms, session, technologyLevels, technologySnapshotUpdatedAt, vaultHydrated, vaultHydratedUserId, zoom]);
 
   useEffect(() => {
     localStorage.setItem(UI_SCREEN_KEY, screen);
@@ -6682,6 +6766,7 @@ export default function App() {
     };
     setTechnologyLevels(nextLevels);
     setResearchJob(null);
+    setTechnologySnapshotUpdatedAt(Date.now());
     void syncRankingProgress(computeResearchInvestmentPoints(nextLevels));
     void loadRankingState(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -7394,6 +7479,7 @@ export default function App() {
     const durationSec = Math.max(1, Math.floor(baseDurationSec * researchTimeFactor));
 
     setResourceAmounts((prev) => applyCostDelta(prev, cost, -1));
+    setTechnologySnapshotUpdatedAt(Date.now());
     setResearchJob({
       id: makeId(),
       technologyId: techId,

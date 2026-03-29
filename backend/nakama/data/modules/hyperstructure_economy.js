@@ -108,6 +108,7 @@ var ALLIANCE_BLOCKED_WORDS = ["admin", "mod", "nakama", "staff", "officiel"];
 var ALLIANCE_INVITE_TTL_SEC = 72 * 60 * 60;
 var PROFILE_COMMANDER_COLLECTION = "hyperstructure_profile";
 var PROFILE_COMMANDER_KEY = "commander_state_v1";
+var PROFILE_SECURE_VAULT_KEY = "vault_state_v1";
 var PROFILE_COMMANDER_AVATAR_MAX_CHARS = 350000;
 var USERNAME_MIN_LENGTH = 3;
 var USERNAME_MAX_LENGTH = 20;
@@ -372,6 +373,38 @@ var BUILDING_DEFS = {
   entrepot: { baseBuildSeconds: 120, maxLevel: 9999 },
   bourse_orbitale: { baseBuildSeconds: 1500, maxLevel: 9999 }
 };
+
+var PLAYER_TECH_DEFS = {
+  optimisation_extractive: { maxLevel: 99, baseCost: { carbone: 10000, titane: 5000 } },
+  compression_minerale: { maxLevel: 99, baseCost: { carbone: 25000, titane: 12000, osmium: 3000 } },
+  raffinement_avance: { maxLevel: 25, baseCost: { carbone: 40000, titane: 20000, osmium: 5000 } },
+  physique_quantique_appliquee: { maxLevel: 20, baseCost: { carbone: 120000, titane: 50000, osmium: 15000, adamantium: 2000 } },
+  automatisation_industrielle: { maxLevel: 15, baseCost: { carbone: 60000, titane: 30000, osmium: 10000 } },
+  optimisation_logistique: { maxLevel: 15, baseCost: { carbone: 80000, titane: 40000, osmium: 15000 } },
+  propulsion_stellaire: { maxLevel: 30, baseCost: { carbone: 30000, titane: 15000, neodyme: 4000 } },
+  moteurs_flux_neodyme: { maxLevel: 20, baseCost: { carbone: 90000, titane: 40000, neodyme: 8000 } },
+  balistique_avancee: { maxLevel: 99, baseCost: { carbone: 50000, titane: 20000, osmium: 6000 } },
+  blindage_composite: { maxLevel: 99, baseCost: { carbone: 70000, titane: 30000, adamantium: 10000 } },
+  ciblage_predictif: { maxLevel: 20, baseCost: { carbone: 120000, titane: 60000, chronium: 5000 } },
+  renforcement_orbital: { maxLevel: 30, baseCost: { carbone: 85000, titane: 35000, osmium: 8000 } },
+  architecture_defensive: { maxLevel: 10, baseCost: { carbone: 60000, titane: 30000, osmium: 8000 } },
+  amplification_photonique: { maxLevel: 30, baseCost: { carbone: 95000, titane: 38000, osmium: 9000 } },
+  stabilisation_plasma: { maxLevel: 20, baseCost: { carbone: 100000, titane: 40000, aetherium: 8000 } },
+  balistique_orbitale: { maxLevel: 20, baseCost: { carbone: 90000, titane: 45000, osmium: 12000, neodyme: 800 } },
+  controle_electromagnetique: { maxLevel: 15, baseCost: { carbone: 80000, titane: 35000, osmium: 5000, neodyme: 1000 } },
+  generateur_aegis: { maxLevel: 20, baseCost: { carbone: 150000, titane: 70000, adamantium: 15000, aetherium: 4000 } },
+  doctrine_escarmouche: { maxLevel: 10, baseCost: { carbone: 20000, titane: 10000 } },
+  doctrine_interception: { maxLevel: 10, baseCost: { carbone: 50000, titane: 25000, osmium: 6000 } },
+  doctrine_domination: { maxLevel: 10, baseCost: { carbone: 120000, titane: 60000, osmium: 15000, adamantium: 2000 } },
+  architecture_capitale: { maxLevel: 5, baseCost: { carbone: 300000, titane: 150000, osmium: 40000, singulite: 5000 } },
+  maitrise_energie_quantique: { maxLevel: 20, baseCost: { carbone: 110000, titane: 50000, isotope7: 8000 } },
+  stabilisation_singulite: { maxLevel: 10, baseCost: { carbone: 220000, titane: 100000, osmium: 25000, singulite: 3000 } },
+  commandement_escadre: { maxLevel: 30, baseCost: { carbone: 160000, titane: 80000, osmium: 20000, neodyme: 4000 } },
+  analyse_tactique: { maxLevel: 30, baseCost: { carbone: 180000, titane: 90000, osmium: 25000, chronium: 5000 } },
+  ingenierie_modulaire: { maxLevel: 30, baseCost: { carbone: 220000, titane: 110000, osmium: 30000, adamantium: 7000 } }
+};
+
+var PLAYER_TECH_IDS = Object.keys(PLAYER_TECH_DEFS);
 
 var BASE_BUILDING_RESOURCE_COSTS = {
   carbone: { carbone: 400 },
@@ -5848,6 +5881,93 @@ function mergeRankingProgressState(base, patch) {
     )
   );
   return merged;
+}
+
+function defaultSecureVaultState() {
+  return {
+    technologyLevels: {},
+    technologyUpdatedAt: 0,
+    updatedAt: 0
+  };
+}
+
+function sanitizeTechnologyLevels(raw) {
+  var source = raw && typeof raw === "object" ? raw : {};
+  var out = {};
+  for (var i = 0; i < PLAYER_TECH_IDS.length; i++) {
+    var technologyId = PLAYER_TECH_IDS[i];
+    var def = PLAYER_TECH_DEFS[technologyId];
+    var nextLevel = sanitizePositiveInt(Number(source[technologyId] || 0));
+    var maxLevel = Math.max(1, sanitizePositiveInt(Number(def && def.maxLevel || 99)));
+    out[technologyId] = Math.min(maxLevel, nextLevel);
+  }
+  return out;
+}
+
+function normalizeSecureVaultState(raw) {
+  var source = raw && typeof raw === "object" ? raw : {};
+  var next = defaultSecureVaultState();
+  next.technologyLevels = sanitizeTechnologyLevels(source.technologyLevels);
+  next.technologyUpdatedAt = Math.max(
+    0,
+    sanitizePositiveInt(Number(source.technologyUpdatedAt || 0)),
+    sanitizePositiveInt(Number(source.updatedAt || 0))
+  );
+  next.updatedAt = next.technologyUpdatedAt;
+  if (source.researchJob && typeof source.researchJob === "object") {
+    next.researchJob = source.researchJob;
+  }
+  return next;
+}
+
+function readSecureVaultState(nk, userId) {
+  var read = readStorageObject(nk, PROFILE_COMMANDER_COLLECTION, PROFILE_SECURE_VAULT_KEY, userId);
+  if (!read.state || typeof read.state !== "object") {
+    return { state: defaultSecureVaultState(), version: read.version || "" };
+  }
+  return { state: normalizeSecureVaultState(read.state), version: read.version || "" };
+}
+
+function writeSecureVaultState(nk, userId, state, expectedVersion) {
+  var req = {
+    collection: PROFILE_COMMANDER_COLLECTION,
+    key: PROFILE_SECURE_VAULT_KEY,
+    userId: userId,
+    permissionRead: 1,
+    permissionWrite: 0,
+    value: state
+  };
+  if (expectedVersion) req.version = expectedVersion;
+  var write = nk.storageWrite([req]);
+  return (write[0] && write[0].version) || "";
+}
+
+function cumulativeTechResourceCost(baseAmount, level) {
+  var lvl = Math.max(0, Math.floor(Number(level || 0)));
+  var safeBaseAmount = Math.max(0, Number(baseAmount || 0));
+  if (lvl <= 0 || safeBaseAmount <= 0) return 0;
+  if (Math.abs(TECH_COST_MULTIPLIER - 1) < 1e-9) return safeBaseAmount * lvl;
+  return safeBaseAmount * ((Math.pow(TECH_COST_MULTIPLIER, lvl) - 1) / (TECH_COST_MULTIPLIER - 1));
+}
+
+function computeResearchPointsFromTechnologyLevels(levels) {
+  var safeLevels = sanitizeTechnologyLevels(levels);
+  var total = 0;
+  for (var i = 0; i < PLAYER_TECH_IDS.length; i++) {
+    var technologyId = PLAYER_TECH_IDS[i];
+    var def = PLAYER_TECH_DEFS[technologyId];
+    var level = Math.max(0, Math.floor(Number(safeLevels[technologyId] || 0)));
+    if (!def || level <= 0) continue;
+    var baseCost = def.baseCost && typeof def.baseCost === "object" ? def.baseCost : {};
+    var resourceIds = Object.keys(baseCost);
+    for (var j = 0; j < resourceIds.length; j++) {
+      var resourceId = resourceIds[j];
+      var weight = Number(RESOURCE_POINT_WEIGHTS[resourceId] || 0);
+      if (weight <= 0) continue;
+      total += cumulativeTechResourceCost(baseCost[resourceId], level) * weight;
+    }
+  }
+  return Math.max(0, Math.floor(total));
 }
 
 function readRankingProgressState(nk, userId) {
@@ -12385,6 +12505,8 @@ function rpcAdminUserGet(ctx, _logger, nk, payload) {
   var economyRead = readEconomyState(nk, targetUserId);
   var inventoryRead = readInventoryState(nk, targetUserId);
   var profileRead = readPlayerProfile(nk, targetUserId);
+  var secureVaultRead = readSecureVaultState(nk, targetUserId);
+  var rankingProgressRead = readRankingProgressState(nk, targetUserId);
   var roleRead = readAdminRoleIndex(nk);
   var inventoryItems = serializeInventoryItems(inventoryRead.state);
   return JSON.stringify({
@@ -12411,7 +12533,268 @@ function rpcAdminUserGet(ctx, _logger, nk, payload) {
       }, 0),
       mapDropNotifications: sanitizePositiveInt(inventoryRead.state.mapDropNotifications || 0)
     },
+    technology: {
+      levels: secureVaultRead.state.technologyLevels || sanitizeTechnologyLevels({}),
+      technologyUpdatedAt: Math.max(
+        0,
+        sanitizePositiveInt(Number(secureVaultRead.state.technologyUpdatedAt || 0)),
+        sanitizePositiveInt(Number(secureVaultRead.state.updatedAt || 0))
+      ),
+      researchPoints: Math.max(
+        0,
+        sanitizePositiveInt(Number((rankingProgressRead.state && rankingProgressRead.state.researchPoints) || 0))
+      )
+    },
     profile: profileRead.state || defaultPlayerProfile()
+  });
+}
+
+function sanitizeAdminBuildingRepairLevels(raw) {
+  var source = raw && typeof raw === "object" ? raw : {};
+  var out = {};
+  var keys = Object.keys(source);
+  for (var i = 0; i < keys.length; i++) {
+    var buildingId = String(keys[i] || "").trim();
+    if (!buildingId || ECONOMY_BUILDING_IDS.indexOf(buildingId) === -1) continue;
+    var def = BUILDING_DEFS[buildingId];
+    if (!def) continue;
+    var nextLevel = sanitizePositiveInt(Number(source[buildingId] || 0));
+    if ((buildingId === "carbone" || buildingId === "titane" || buildingId === "entrepot") && nextLevel <= 0) {
+      nextLevel = 1;
+    }
+    var maxLevel = Math.max(1, sanitizePositiveInt(Number(def.maxLevel || 9999)));
+    out[buildingId] = Math.min(maxLevel, nextLevel);
+  }
+  return out;
+}
+
+function rpcAdminUserRepairBuildings(ctx, logger, nk, payload) {
+  var roleEntry = assertAdmin(ctx, nk);
+  if (!roleEntry || roleEntry.role !== ADMIN_ROLE_SUPERADMIN) {
+    throw new Error("Superadmin role required.");
+  }
+
+  var actorUserId = requireUserId(ctx);
+  var actorUsername = String(ctx.username || actorUserId);
+  var body = parsePayload(payload);
+  var reason = String(body.reason || "").trim();
+  if (reason.length < 3) throw new Error("Reason is required.");
+
+  var targetRaw = String(body.userId || body.username || body.target || "").trim();
+  if (!targetRaw) throw new Error("Missing target.");
+  var target = resolveInboxRecipient(nk, targetRaw);
+  var targetUserId = target.userId;
+  if (targetUserId === SYSTEM_USER_ID) {
+    throw new Error("Reserved system user cannot be repaired.");
+  }
+
+  var rows = queryAdminUsers(nk, targetUserId, 5);
+  var userRow = null;
+  for (var i = 0; i < rows.length; i++) {
+    if (String((rows[i] && rows[i].id) || "") === targetUserId) {
+      userRow = rows[i];
+      break;
+    }
+  }
+  if (!userRow) {
+    throw new Error("User not found.");
+  }
+
+  var repairLevels = sanitizeAdminBuildingRepairLevels(body.buildings);
+  var repairIds = Object.keys(repairLevels);
+  if (repairIds.length <= 0) throw new Error("No valid buildings provided.");
+
+  var targetUsername = String((userRow && userRow.username) || target.username || targetUserId);
+  var tx = withStateTransaction(nk, targetUserId, function(state, _serverNowTs) {
+    var blockedSlots = [];
+    var slots = ["building_construct_slot", "building_upgrade_slot"];
+    for (var slotIndex = 0; slotIndex < slots.length; slotIndex++) {
+      var slotId = slots[slotIndex];
+      var entry = state[slotId];
+      var queuedBuildingId = String((entry && entry.buildingId) || "").trim();
+      if (queuedBuildingId && repairIds.indexOf(queuedBuildingId) !== -1) {
+        blockedSlots.push(slotId + ":" + queuedBuildingId);
+      }
+    }
+    if (blockedSlots.length > 0) {
+      throw new Error("Cancel active construction or upgrade first: " + blockedSlots.join(", "));
+    }
+
+    var beforeLevels = {};
+    var afterLevels = {};
+    var changedIds = [];
+    for (var repairIndex = 0; repairIndex < repairIds.length; repairIndex++) {
+      var buildingId = repairIds[repairIndex];
+      var currentLevel = sanitizePositiveInt(Number(state.buildings[buildingId] && state.buildings[buildingId].level || 0));
+      var nextLevel = sanitizePositiveInt(Number(repairLevels[buildingId] || 0));
+      beforeLevels[buildingId] = currentLevel;
+      afterLevels[buildingId] = nextLevel;
+      if (currentLevel !== nextLevel) {
+        state.buildings[buildingId].level = nextLevel;
+        changedIds.push(buildingId);
+      }
+    }
+
+    return {
+      beforeLevels: beforeLevels,
+      afterLevels: afterLevels,
+      changedIds: changedIds
+    };
+  });
+
+  var points = syncPlayerPoints(nk, logger, targetUserId, targetUsername, tx.state || null, null);
+  appendAdminAudit(
+    nk,
+    actorUserId,
+    actorUsername,
+    "admin_user_repair_buildings",
+    {
+      userId: targetUserId,
+      username: targetUsername
+    },
+    {
+      changedIds: tx.result.changedIds,
+      beforeLevels: tx.result.beforeLevels,
+      afterLevels: tx.result.afterLevels,
+      totalScore: sanitizePositiveInt(points && points.total || 0)
+    },
+    reason
+  );
+
+  return JSON.stringify({
+    ok: true,
+    userId: targetUserId,
+    username: targetUsername,
+    updatedCount: tx.result.changedIds.length,
+    changedIds: tx.result.changedIds,
+    levels: tx.result.afterLevels,
+    points: points || {}
+  });
+}
+
+function sanitizeAdminTechnologyRepairLevels(raw) {
+  var source = raw && typeof raw === "object" ? raw : {};
+  var out = {};
+  var keys = Object.keys(source);
+  for (var i = 0; i < keys.length; i++) {
+    var technologyId = String(keys[i] || "").trim();
+    if (!technologyId || PLAYER_TECH_IDS.indexOf(technologyId) === -1) continue;
+    var def = PLAYER_TECH_DEFS[technologyId];
+    if (!def) continue;
+    var nextLevel = sanitizePositiveInt(Number(source[technologyId] || 0));
+    var maxLevel = Math.max(1, sanitizePositiveInt(Number(def.maxLevel || 99)));
+    out[technologyId] = Math.min(maxLevel, nextLevel);
+  }
+  return out;
+}
+
+function rpcAdminUserRepairTechnology(ctx, logger, nk, payload) {
+  var roleEntry = assertAdmin(ctx, nk);
+  if (!roleEntry || roleEntry.role !== ADMIN_ROLE_SUPERADMIN) {
+    throw new Error("Superadmin role required.");
+  }
+
+  var actorUserId = requireUserId(ctx);
+  var actorUsername = String(ctx.username || actorUserId);
+  var body = parsePayload(payload);
+  var reason = String(body.reason || "").trim();
+  if (reason.length < 3) throw new Error("Reason is required.");
+
+  var targetRaw = String(body.userId || body.username || body.target || "").trim();
+  if (!targetRaw) throw new Error("Missing target.");
+  var target = resolveInboxRecipient(nk, targetRaw);
+  var targetUserId = target.userId;
+  if (targetUserId === SYSTEM_USER_ID) {
+    throw new Error("Reserved system user cannot be repaired.");
+  }
+
+  var rows = queryAdminUsers(nk, targetUserId, 5);
+  var userRow = null;
+  for (var i = 0; i < rows.length; i++) {
+    if (String((rows[i] && rows[i].id) || "") === targetUserId) {
+      userRow = rows[i];
+      break;
+    }
+  }
+  if (!userRow) {
+    throw new Error("User not found.");
+  }
+
+  var repairLevels = sanitizeAdminTechnologyRepairLevels(body.technologyLevels || body.technologies);
+  var repairIds = Object.keys(repairLevels);
+  if (repairIds.length <= 0) throw new Error("No valid technologies provided.");
+
+  var targetUsername = String((userRow && userRow.username) || target.username || targetUserId);
+  var secureVaultRead = readSecureVaultState(nk, targetUserId);
+  var safeVault = secureVaultRead.state && typeof secureVaultRead.state === "object"
+    ? JSON.parse(JSON.stringify(secureVaultRead.state))
+    : defaultSecureVaultState();
+  var currentLevels = sanitizeTechnologyLevels(safeVault.technologyLevels);
+  var beforeLevels = {};
+  var afterLevels = {};
+  var changedIds = [];
+
+  if (
+    safeVault.researchJob &&
+    typeof safeVault.researchJob === "object" &&
+    repairIds.indexOf(String(safeVault.researchJob.technologyId || "").trim()) !== -1
+  ) {
+    throw new Error("Clear or finish the active research snapshot for this technology before repairing it.");
+  }
+
+  for (var repairIndex = 0; repairIndex < repairIds.length; repairIndex++) {
+    var technologyId = repairIds[repairIndex];
+    var currentLevel = sanitizePositiveInt(Number(currentLevels[technologyId] || 0));
+    var nextLevel = sanitizePositiveInt(Number(repairLevels[technologyId] || 0));
+    beforeLevels[technologyId] = currentLevel;
+    afterLevels[technologyId] = nextLevel;
+    currentLevels[technologyId] = nextLevel;
+    if (currentLevel !== nextLevel) changedIds.push(technologyId);
+  }
+
+  safeVault.technologyLevels = currentLevels;
+  safeVault.technologyUpdatedAt = Date.now();
+  safeVault.updatedAt = safeVault.technologyUpdatedAt;
+  writeSecureVaultState(nk, targetUserId, safeVault, secureVaultRead.version || "");
+
+  var rankingProgressRead = readRankingProgressState(nk, targetUserId);
+  var rankingProgress = rankingProgressRead.state || defaultRankingProgressState();
+  rankingProgress.researchPoints = computeResearchPointsFromTechnologyLevels(currentLevels);
+  rankingProgress.updatedAt = nowTs();
+  writeRankingProgressState(nk, targetUserId, rankingProgress, rankingProgressRead.version || "");
+
+  var economyRead = readEconomyState(nk, targetUserId);
+  var economy = applyOfflineProduction(economyRead.state, nowTs());
+  var points = syncPlayerPoints(nk, logger, targetUserId, targetUsername, economy, rankingProgress);
+
+  appendAdminAudit(
+    nk,
+    actorUserId,
+    actorUsername,
+    "admin_user_repair_technology",
+    {
+      userId: targetUserId,
+      username: targetUsername
+    },
+    {
+      changedIds: changedIds,
+      beforeLevels: beforeLevels,
+      afterLevels: afterLevels,
+      researchPoints: sanitizePositiveInt(rankingProgress.researchPoints || 0),
+      totalScore: sanitizePositiveInt(points && points.total || 0)
+    },
+    reason
+  );
+
+  return JSON.stringify({
+    ok: true,
+    userId: targetUserId,
+    username: targetUsername,
+    updatedCount: changedIds.length,
+    changedIds: changedIds,
+    levels: currentLevels,
+    researchPoints: sanitizePositiveInt(rankingProgress.researchPoints || 0),
+    points: points || {}
   });
 }
 
@@ -14181,6 +14564,53 @@ function safeLeaderboardRecordsList(nk, logger, leaderboardId, limit, ownerId) {
   }
 }
 
+function patchLeaderboardSnapshotForOwner(snapshot, ownerId, username, score, subscore, metadata) {
+  var safeOwnerId = String(ownerId || "").trim();
+  if (!snapshot || !safeOwnerId) return snapshot;
+  var safeUsername = String(username || safeOwnerId);
+  var safeScore = sanitizePositiveInt(score || 0);
+  var safeSubscore = sanitizePositiveInt(subscore || 0);
+  var safeMetadata = metadata && typeof metadata === "object" ? metadata : {};
+
+  var applyToRow = function(row) {
+    if (!row || String(row.ownerId || "") !== safeOwnerId) return false;
+    row.ownerId = safeOwnerId;
+    row.username = safeUsername;
+    row.score = safeScore;
+    row.subscore = safeSubscore;
+    row.metadata = safeMetadata;
+    return true;
+  };
+
+  var records = snapshot.records && Array.isArray(snapshot.records) ? snapshot.records : [];
+  for (var i = 0; i < records.length; i++) {
+    if (applyToRow(records[i])) break;
+  }
+
+  var ownerRecords = snapshot.ownerRecords && Array.isArray(snapshot.ownerRecords) ? snapshot.ownerRecords : [];
+  if (ownerRecords.length === 0) {
+    snapshot.ownerRecords = [{
+      ownerId: safeOwnerId,
+      username: safeUsername,
+      score: safeScore,
+      subscore: safeSubscore,
+      rank: 0,
+      metadata: safeMetadata
+    }];
+  } else {
+    for (var j = 0; j < ownerRecords.length; j++) {
+      if (applyToRow(ownerRecords[j])) return snapshot;
+    }
+    ownerRecords[0].ownerId = safeOwnerId;
+    ownerRecords[0].username = safeUsername;
+    ownerRecords[0].score = safeScore;
+    ownerRecords[0].subscore = safeSubscore;
+    ownerRecords[0].metadata = safeMetadata;
+  }
+
+  return snapshot;
+}
+
 function seedAllianceLeaderboardFromStorage(nk, logger, maxRows) {
   var seedLimit = Math.max(1, Math.min(200, sanitizePositiveInt(maxRows || 50)));
   var cursor = "";
@@ -14414,6 +14844,10 @@ function rpcRankingGetState(ctx, logger, nk, payload) {
     economyRows = safeLeaderboardRecordsList(nk, logger, LEADERBOARD_PLAYER_ECONOMY, limit, userId);
     researchRows = safeLeaderboardRecordsList(nk, logger, LEADERBOARD_PLAYER_RESEARCH, limit, userId);
   }
+  totalRows = patchLeaderboardSnapshotForOwner(totalRows, userId, username, playerPoints.total, playerPoints.military, playerPoints);
+  militaryRows = patchLeaderboardSnapshotForOwner(militaryRows, userId, username, playerPoints.military, playerPoints.total, playerPoints);
+  economyRows = patchLeaderboardSnapshotForOwner(economyRows, userId, username, playerPoints.economy, playerPoints.total, playerPoints);
+  researchRows = patchLeaderboardSnapshotForOwner(researchRows, userId, username, playerPoints.research, playerPoints.total, playerPoints);
   var allianceRows = safeLeaderboardRecordsList(nk, logger, LEADERBOARD_ALLIANCE_TOTAL, limit, null);
   var allianceMilitaryRows = safeLeaderboardRecordsList(nk, logger, LEADERBOARD_ALLIANCE_MILITARY, limit, null);
   var allianceEconomyRows = safeLeaderboardRecordsList(nk, logger, LEADERBOARD_ALLIANCE_ECONOMY, limit, null);
@@ -14440,8 +14874,6 @@ function rpcRankingGetState(ctx, logger, nk, payload) {
     for (var i = 0; i < totalRows.records.length; i++) {
       var row = totalRows.records[i];
       if (String(row.ownerId || "") !== userId) continue;
-      row.score = playerPoints.total;
-      row.subscore = playerPoints.military;
       if (!playerRank) playerRank = sanitizePositiveInt(row.rank || 0);
       break;
     }
@@ -14526,6 +14958,10 @@ function rpcPlayerPublicProfile(ctx, logger, nk, payload) {
     economy: safeLeaderboardRecordsList(nk, logger, LEADERBOARD_PLAYER_ECONOMY, 1, targetUserId),
     research: safeLeaderboardRecordsList(nk, logger, LEADERBOARD_PLAYER_RESEARCH, 1, targetUserId)
   };
+  rankRows.total = patchLeaderboardSnapshotForOwner(rankRows.total, targetUserId, targetUsername, points.total, points.military, points);
+  rankRows.military = patchLeaderboardSnapshotForOwner(rankRows.military, targetUserId, targetUsername, points.military, points.total, points);
+  rankRows.economy = patchLeaderboardSnapshotForOwner(rankRows.economy, targetUserId, targetUsername, points.economy, points.total, points);
+  rankRows.research = patchLeaderboardSnapshotForOwner(rankRows.research, targetUserId, targetUsername, points.research, points.total, points);
   var ranks = {
     total: rankRows.total.ownerRecords && rankRows.total.ownerRecords[0] ? sanitizePositiveInt(rankRows.total.ownerRecords[0].rank || 0) : 0,
     military: rankRows.military.ownerRecords && rankRows.military.ownerRecords[0] ? sanitizePositiveInt(rankRows.military.ownerRecords[0].rank || 0) : 0,
@@ -14689,6 +15125,8 @@ function InitModule(_ctx, logger, _nk, initializer) {
   initializer.registerRpc("admin_audit_list", rpcAdminAuditList);
   initializer.registerRpc("admin_users_search", rpcAdminUsersSearch);
   initializer.registerRpc("admin_user_get", rpcAdminUserGet);
+  initializer.registerRpc("admin_user_repair_buildings", rpcAdminUserRepairBuildings);
+  initializer.registerRpc("admin_user_repair_technology", rpcAdminUserRepairTechnology);
   initializer.registerRpc("admin_user_delete", rpcAdminUserDelete);
   initializer.registerRpc("admin_map_overview", rpcAdminMapOverview);
   initializer.registerRpc("admin_map_maintenance", rpcAdminMapMaintenance);

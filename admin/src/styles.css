@@ -404,6 +404,43 @@ select:focus {
   width: 100%;
 }
 
+.building-repair-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.technology-repair-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.building-repair-input {
+  gap: 8px;
+}
+
+.technology-repair-input {
+  gap: 8px;
+}
+
+.building-repair-input small,
+.technology-repair-input small,
+.building-repair-reason span {
+  color: #8fb3cf;
+  font-size: 0.82rem;
+}
+
+.building-repair-reason {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.building-repair-actions {
+  margin-top: 0;
+}
+
 .gift-item-row {
   display: grid;
   grid-template-columns: 1fr 120px 120px;
@@ -443,6 +480,14 @@ select:focus {
   .edit-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+
+  .building-repair-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .technology-repair-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 720px) {
@@ -463,6 +508,7 @@ select:focus {
   .detail-grid,
   .resource-grid,
   .compact-grid,
+  .technology-repair-grid,
   .edit-grid,
   .gift-item-row,
   .dual-language-grid,

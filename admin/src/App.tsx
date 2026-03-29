@@ -60,6 +60,11 @@ type AdminUserDetails = {
     totalUnits: number;
     mapDropNotifications: number;
   };
+  technology: {
+    levels: Record<string, number>;
+    technologyUpdatedAt: number;
+    researchPoints: number;
+  };
   profile: Record<string, unknown>;
 };
 
@@ -70,6 +75,37 @@ type AdminUserDeleteResponse = {
   disabled: boolean;
   allianceRemoved: boolean;
   allianceDisbanded: boolean;
+};
+
+type AdminUserRepairBuildingsResponse = {
+  ok: boolean;
+  userId: string;
+  username: string;
+  updatedCount: number;
+  changedIds: string[];
+  levels: Record<string, number>;
+  points: {
+    total?: number;
+    economy?: number;
+    research?: number;
+    military?: number;
+  };
+};
+
+type AdminUserRepairTechnologyResponse = {
+  ok: boolean;
+  userId: string;
+  username: string;
+  updatedCount: number;
+  changedIds: string[];
+  levels: Record<string, number>;
+  researchPoints: number;
+  points: {
+    total?: number;
+    economy?: number;
+    research?: number;
+    military?: number;
+  };
 };
 
 type AdminAuditEntry = {
@@ -177,6 +213,47 @@ const RESOURCE_LABELS: Record<(typeof RESOURCE_IDS)[number], string> = {
   isotope7: "Isotope-7",
   singulite: "Singulite"
 };
+
+const REPAIRABLE_BUILDINGS = [
+  { id: "quartiers_residentiels", label: "Quartiers residentiels", max: 99 },
+  { id: "cantine_hydroponique", label: "Cantine hydroponique", max: 99 },
+  { id: "centre_medical", label: "Centre medical", max: 80 },
+  { id: "parc_orbital", label: "Parc orbital", max: 80 },
+  { id: "academie_technique", label: "Academie technique", max: 60 },
+  { id: "universite_orbitale", label: "Universite orbitale", max: 60 },
+  { id: "entrepot", label: "Entrepot", max: 9999 },
+  { id: "bourse_orbitale", label: "Bourse orbitale", max: 9999 }
+] as const;
+
+const REPAIRABLE_TECHNOLOGIES = [
+  { id: "optimisation_extractive", label: "Optimisation Extractive", max: 99 },
+  { id: "compression_minerale", label: "Compression Minerale", max: 99 },
+  { id: "raffinement_avance", label: "Raffinement Avance", max: 25 },
+  { id: "physique_quantique_appliquee", label: "Physique Quantique Appliquee", max: 20 },
+  { id: "automatisation_industrielle", label: "Automatisation Industrielle", max: 15 },
+  { id: "optimisation_logistique", label: "Optimisation Logistique", max: 15 },
+  { id: "propulsion_stellaire", label: "Propulsion Stellaire", max: 30 },
+  { id: "moteurs_flux_neodyme", label: "Moteurs a Flux Neodyme", max: 20 },
+  { id: "balistique_avancee", label: "Balistique Avancee", max: 99 },
+  { id: "blindage_composite", label: "Blindage Composite", max: 99 },
+  { id: "ciblage_predictif", label: "Ciblage Predictif", max: 20 },
+  { id: "renforcement_orbital", label: "Renforcement Orbital", max: 30 },
+  { id: "architecture_defensive", label: "Architecture Defensive", max: 10 },
+  { id: "amplification_photonique", label: "Amplification Photonique", max: 30 },
+  { id: "stabilisation_plasma", label: "Stabilisation Plasma", max: 20 },
+  { id: "balistique_orbitale", label: "Balistique Orbitale", max: 20 },
+  { id: "controle_electromagnetique", label: "Controle Electromagnetique", max: 15 },
+  { id: "generateur_aegis", label: "Generateur Aegis", max: 20 },
+  { id: "doctrine_escarmouche", label: "Doctrine d'Escarmouche", max: 10 },
+  { id: "doctrine_interception", label: "Doctrine d'Interception", max: 10 },
+  { id: "doctrine_domination", label: "Doctrine de Domination", max: 10 },
+  { id: "architecture_capitale", label: "Architecture Capitale", max: 5 },
+  { id: "maitrise_energie_quantique", label: "Maitrise de l'Energie Quantique", max: 20 },
+  { id: "stabilisation_singulite", label: "Stabilisation de Singulite", max: 10 },
+  { id: "commandement_escadre", label: "Commandement d'Escadre", max: 30 },
+  { id: "analyse_tactique", label: "Analyse Tactique", max: 30 },
+  { id: "ingenierie_modulaire", label: "Ingenierie Modulaire", max: 30 }
+] as const;
 
 const ITEM_OPTIONS = [
   { id: "TIME_RIFT_60", label: "Faille Temporelle 1 min" },
@@ -320,6 +397,16 @@ export default function App() {
   const [userDeleteLoading, setUserDeleteLoading] = useState(false);
   const [userDeleteError, setUserDeleteError] = useState("");
   const [userDeleteMessage, setUserDeleteMessage] = useState("");
+  const [buildingRepairDraft, setBuildingRepairDraft] = useState<Record<string, string>>({});
+  const [buildingRepairReason, setBuildingRepairReason] = useState("Correction niveaux batiments legacy");
+  const [buildingRepairLoading, setBuildingRepairLoading] = useState(false);
+  const [buildingRepairError, setBuildingRepairError] = useState("");
+  const [buildingRepairMessage, setBuildingRepairMessage] = useState("");
+  const [technologyRepairDraft, setTechnologyRepairDraft] = useState<Record<string, string>>({});
+  const [technologyRepairReason, setTechnologyRepairReason] = useState("Correction niveaux technologies legacy");
+  const [technologyRepairLoading, setTechnologyRepairLoading] = useState(false);
+  const [technologyRepairError, setTechnologyRepairError] = useState("");
+  const [technologyRepairMessage, setTechnologyRepairMessage] = useState("");
 
   const [systemForm, setSystemForm] = useState({
     titleFr: "",
@@ -514,6 +601,40 @@ export default function App() {
     setUserDeleteMessage("");
   }, [selectedUserId]);
 
+  useEffect(() => {
+    if (!selectedUser) {
+      setBuildingRepairDraft({});
+      setBuildingRepairReason("Correction niveaux batiments legacy");
+      setBuildingRepairError("");
+      setBuildingRepairMessage("");
+      setTechnologyRepairDraft({});
+      setTechnologyRepairReason("Correction niveaux technologies legacy");
+      setTechnologyRepairError("");
+      setTechnologyRepairMessage("");
+      return;
+    }
+    const nextDraft = Object.fromEntries(
+      REPAIRABLE_BUILDINGS.map(({ id }) => [
+        id,
+        String(Math.max(0, Number(selectedUser.economy.buildings[id]?.level || 0)))
+      ])
+    );
+    setBuildingRepairDraft(nextDraft);
+    setBuildingRepairReason("Correction niveaux batiments legacy");
+    setBuildingRepairError("");
+    setBuildingRepairMessage("");
+    const nextTechnologyDraft = Object.fromEntries(
+      REPAIRABLE_TECHNOLOGIES.map(({ id }) => [
+        id,
+        String(Math.max(0, Number(selectedUser.technology.levels[id] || 0)))
+      ])
+    );
+    setTechnologyRepairDraft(nextTechnologyDraft);
+    setTechnologyRepairReason("Correction niveaux technologies legacy");
+    setTechnologyRepairError("");
+    setTechnologyRepairMessage("");
+  }, [selectedUser]);
+
   const onLogin = async (event: FormEvent) => {
     event.preventDefault();
     setAuthLoading(true);
@@ -597,6 +718,114 @@ export default function App() {
       setUserDeleteLoading(false);
     }
   }, [callRpc, loadSelectedUserDetails, loadUsers, refreshOperationalData, selectedUser]);
+
+  const repairSelectedUserBuildings = useCallback(async () => {
+    if (!selectedUser) return;
+    const trimmedReason = buildingRepairReason.trim();
+    if (trimmedReason.length < 3) {
+      setBuildingRepairError("La raison admin est obligatoire (minimum 3 caracteres).");
+      setBuildingRepairMessage("");
+      return;
+    }
+
+    const buildings: Record<string, number> = {};
+    let changedCount = 0;
+    for (const { id } of REPAIRABLE_BUILDINGS) {
+      const parsed = Math.max(0, Math.floor(Number(buildingRepairDraft[id] || 0)));
+      const currentLevel = Math.max(0, Math.floor(Number(selectedUser.economy.buildings[id]?.level || 0)));
+      buildings[id] = Number.isFinite(parsed) ? parsed : 0;
+      if (buildings[id] !== currentLevel) changedCount += 1;
+    }
+
+    if (changedCount <= 0) {
+      setBuildingRepairError("");
+      setBuildingRepairMessage("Aucun changement detecte sur les niveaux saisis.");
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Appliquer ${changedCount} correction(s) de niveau pour ${selectedUser.user.username} ?\n\nCette action ecrit directement les niveaux serveur Nakama et sera auditee.`
+    );
+    if (!confirmed) return;
+
+    setBuildingRepairLoading(true);
+    setBuildingRepairError("");
+    setBuildingRepairMessage("");
+    try {
+      const result = await callRpc<AdminUserRepairBuildingsResponse>("admin_user_repair_buildings", {
+        userId: selectedUser.user.userId,
+        reason: trimmedReason,
+        buildings
+      });
+      await Promise.all([
+        loadSelectedUserDetails(result.userId),
+        refreshOperationalData()
+      ]);
+      setBuildingRepairMessage(
+        result.updatedCount > 0
+          ? `${result.updatedCount} niveau(x) serveur mis a jour pour ${result.username}.`
+          : `Aucun niveau serveur n'a change pour ${result.username}.`
+      );
+    } catch (err) {
+      setBuildingRepairError(extractErrorMessage(err));
+    } finally {
+      setBuildingRepairLoading(false);
+    }
+  }, [buildingRepairDraft, buildingRepairReason, callRpc, loadSelectedUserDetails, refreshOperationalData, selectedUser]);
+
+  const repairSelectedUserTechnology = useCallback(async () => {
+    if (!selectedUser) return;
+    const trimmedReason = technologyRepairReason.trim();
+    if (trimmedReason.length < 3) {
+      setTechnologyRepairError("La raison admin est obligatoire (minimum 3 caracteres).");
+      setTechnologyRepairMessage("");
+      return;
+    }
+
+    const technologyLevels: Record<string, number> = {};
+    let changedCount = 0;
+    for (const { id } of REPAIRABLE_TECHNOLOGIES) {
+      const parsed = Math.max(0, Math.floor(Number(technologyRepairDraft[id] || 0)));
+      const currentLevel = Math.max(0, Math.floor(Number(selectedUser.technology.levels[id] || 0)));
+      technologyLevels[id] = Number.isFinite(parsed) ? parsed : 0;
+      if (technologyLevels[id] !== currentLevel) changedCount += 1;
+    }
+
+    if (changedCount <= 0) {
+      setTechnologyRepairError("");
+      setTechnologyRepairMessage("Aucun changement detecte sur les niveaux techno saisis.");
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Appliquer ${changedCount} correction(s) de techno pour ${selectedUser.user.username} ?\n\nCette action ecrit un snapshot techno prive cote serveur et sera auditée.`
+    );
+    if (!confirmed) return;
+
+    setTechnologyRepairLoading(true);
+    setTechnologyRepairError("");
+    setTechnologyRepairMessage("");
+    try {
+      const result = await callRpc<AdminUserRepairTechnologyResponse>("admin_user_repair_technology", {
+        userId: selectedUser.user.userId,
+        reason: trimmedReason,
+        technologyLevels
+      });
+      await Promise.all([
+        loadSelectedUserDetails(result.userId),
+        refreshOperationalData()
+      ]);
+      setTechnologyRepairMessage(
+        result.updatedCount > 0
+          ? `${result.updatedCount} niveau(x) techno serveur mis a jour pour ${result.username}.`
+          : `Aucun niveau techno serveur n'a change pour ${result.username}.`
+      );
+    } catch (err) {
+      setTechnologyRepairError(extractErrorMessage(err));
+    } finally {
+      setTechnologyRepairLoading(false);
+    }
+  }, [callRpc, loadSelectedUserDetails, refreshOperationalData, selectedUser, technologyRepairDraft, technologyRepairReason]);
 
   const submitUserSearch = (event?: FormEvent) => {
     event?.preventDefault();
@@ -706,7 +935,7 @@ export default function App() {
     setGiftItems((current) => current.filter((_, rowIndex) => rowIndex !== index));
   };
 
-  const selectedUserBuildingCount = Object.keys(selectedUser?.economy.buildings || {}).length;
+  const selectedUserBuildingCount = Object.values(selectedUser?.economy.buildings || {}).filter((row) => Number(row?.level || 0) > 0).length;
 
   if (authChecking) {
     return (
@@ -1056,6 +1285,117 @@ export default function App() {
                           <strong>{selectedUser.economy.credits.toLocaleString("fr-FR")}</strong>
                         </div>
                       </div>
+                    </section>
+                    <section className="detail-card">
+                      <div className="subsection-head">
+                        <div>
+                          <h3>Reparation batiments legacy</h3>
+                          <small>Niveaux serveur Nakama pour les comptes a corriger.</small>
+                        </div>
+                        <span className="role-pill">Superadmin</span>
+                      </div>
+                      <div className="building-repair-grid">
+                        {REPAIRABLE_BUILDINGS.map((building) => (
+                          <label key={building.id} className="resource-input building-repair-input">
+                            <span>{building.label}</span>
+                            <small>Niveau actuel: {formatCount(Number(selectedUser.economy.buildings[building.id]?.level || 0))}</small>
+                            <input
+                              type="number"
+                              min={0}
+                              max={building.max}
+                              step={1}
+                              value={buildingRepairDraft[building.id] ?? "0"}
+                              onChange={(event) => {
+                                const nextValue = event.target.value;
+                                setBuildingRepairDraft((current) => ({
+                                  ...current,
+                                  [building.id]: nextValue
+                                }));
+                              }}
+                            />
+                          </label>
+                        ))}
+                      </div>
+                      <label className="building-repair-reason">
+                        <span>Raison admin</span>
+                        <input
+                          value={buildingRepairReason}
+                          onChange={(event) => setBuildingRepairReason(event.target.value)}
+                          placeholder="Ex: Reparation compte legacy apres migration"
+                        />
+                      </label>
+                      <div className="detail-actions building-repair-actions">
+                        <button
+                          type="button"
+                          className="primary-btn"
+                          onClick={() => void repairSelectedUserBuildings()}
+                          disabled={buildingRepairLoading}
+                        >
+                          {buildingRepairLoading ? <LoaderCircle size={14} className="spin" /> : <Wrench size={14} />}
+                          Reparer les niveaux serveur
+                        </button>
+                      </div>
+                      <p className="inline-note">Utilise cette action pour corriger les comptes legacy quand les niveaux serveur Nakama ne correspondent plus a la progression attendue.</p>
+                      {buildingRepairError ? <div className="form-error">{buildingRepairError}</div> : null}
+                      {buildingRepairMessage ? <div className="form-success">{buildingRepairMessage}</div> : null}
+                    </section>
+                    <section className="detail-card">
+                      <div className="subsection-head">
+                        <div>
+                          <h3>Reparation technologies</h3>
+                          <small>Snapshot techno prive cote serveur, prioritaire quand il est plus recent.</small>
+                        </div>
+                        <span className="role-pill">Superadmin</span>
+                      </div>
+                      <div className="detail-grid compact-grid">
+                        <div><span>Points recherche</span><strong>{formatCount(selectedUser.technology.researchPoints)}</strong></div>
+                        <div><span>Technos ouvertes</span><strong>{formatCount(REPAIRABLE_TECHNOLOGIES.filter((tech) => Number(selectedUser.technology.levels[tech.id] || 0) > 0).length)}</strong></div>
+                        <div><span>Snapshot serveur</span><strong>{selectedUser.technology.technologyUpdatedAt ? formatTimestamp(Math.floor(selectedUser.technology.technologyUpdatedAt / 1000)) : "Aucun"}</strong></div>
+                      </div>
+                      <div className="technology-repair-grid">
+                        {REPAIRABLE_TECHNOLOGIES.map((technology) => (
+                          <label key={technology.id} className="resource-input technology-repair-input">
+                            <span>{technology.label}</span>
+                            <small>Niveau actuel: {formatCount(Number(selectedUser.technology.levels[technology.id] || 0))}</small>
+                            <input
+                              type="number"
+                              min={0}
+                              max={technology.max}
+                              step={1}
+                              value={technologyRepairDraft[technology.id] ?? "0"}
+                              onChange={(event) => {
+                                const nextValue = event.target.value;
+                                setTechnologyRepairDraft((current) => ({
+                                  ...current,
+                                  [technology.id]: nextValue
+                                }));
+                              }}
+                            />
+                          </label>
+                        ))}
+                      </div>
+                      <label className="building-repair-reason">
+                        <span>Raison admin</span>
+                        <input
+                          value={technologyRepairReason}
+                          onChange={(event) => setTechnologyRepairReason(event.target.value)}
+                          placeholder="Ex: Reparation compte legacy apres perte de progression techno"
+                        />
+                      </label>
+                      <div className="detail-actions building-repair-actions">
+                        <button
+                          type="button"
+                          className="primary-btn"
+                          onClick={() => void repairSelectedUserTechnology()}
+                          disabled={technologyRepairLoading}
+                        >
+                          {technologyRepairLoading ? <LoaderCircle size={14} className="spin" /> : <Wrench size={14} />}
+                          Reparer les technologies serveur
+                        </button>
+                      </div>
+                      <p className="inline-note">Ce correctif met a jour le snapshot techno prive et recalcule les points de recherche. Il n'ouvre aucun droit d'ecriture client supplementaire.</p>
+                      {technologyRepairError ? <div className="form-error">{technologyRepairError}</div> : null}
+                      {technologyRepairMessage ? <div className="form-success">{technologyRepairMessage}</div> : null}
                     </section>
                     <section className="detail-card">
                       <div className="subsection-head">
